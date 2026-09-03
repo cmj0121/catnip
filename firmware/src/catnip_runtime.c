@@ -71,6 +71,46 @@ static void install_print(catnip_rt *rt)
 }
 
 /* Finish setup once rt->L is populated (or NULL on failure). */
+/* Restrict the global environment for the trusted model (#11): drop the
+ * surfaces that reach the host filesystem, spawn processes, or load native
+ * code, and expose the `catnip` namespace as the injection point apps and
+ * later namespaces (ui/service/...) bind onto. Safe stdlib (string, table,
+ * math, ...) is kept. */
+static void harden_env(catnip_rt *rt)
+{
+    lua_State *L = rt->L;
+
+    /* Whole libraries / globals that are unsafe or filesystem/native-code. */
+    static const char *const nuke[] = {"io",       "package", "require",
+                                       "dofile",   "loadfile", "debug", NULL};
+    for (int i = 0; nuke[i]; i++) {
+        lua_pushnil(L);
+        lua_setglobal(L, nuke[i]);
+    }
+
+    /* Keep os time helpers, drop the dangerous members. */
+    lua_getglobal(L, "os");
+    if (lua_istable(L, -1)) {
+        static const char *const os_nuke[] = {"execute", "exit",   "remove",
+                                              "rename",  "tmpname", "getenv",
+                                              "setlocale", NULL};
+        for (int i = 0; os_nuke[i]; i++) {
+            lua_pushnil(L);
+            lua_setfield(L, -2, os_nuke[i]);
+        }
+    }
+    lua_pop(L, 1); /* os */
+
+    /* The catnip namespace: where apps hang catnip.view/on_open and where the
+     * ui/service/... tables get bound. Empty stub for now. */
+    lua_newtable(L);
+    lua_pushstring(L, "0.1");
+    lua_setfield(L, -2, "version");
+    lua_pushstring(L, "1.0");
+    lua_setfield(L, -2, "api");
+    lua_setglobal(L, "catnip");
+}
+
 static catnip_rt *rt_finish(catnip_rt *rt)
 {
     if (!rt) return NULL;
@@ -80,6 +120,7 @@ static catnip_rt *rt_finish(catnip_rt *rt)
     }
     luaL_openlibs(rt->L);
     install_print(rt);
+    harden_env(rt);
     return rt;
 }
 
