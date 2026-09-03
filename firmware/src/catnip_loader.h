@@ -21,6 +21,7 @@ extern "C" {
 typedef struct {
     char id[64];
     char name[64];
+    char icon[64]; /* icon filename from the manifest (for the launcher) */
     char dir[256]; /* full path to the app folder */
     int compatible; /* 1 if its manifest parsed and the API is satisfiable */
 } catnip_app_entry;

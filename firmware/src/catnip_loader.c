@@ -71,6 +71,7 @@ int catnip_loader_discover(const char *apps_root, catnip_app_entry *out, int max
             if (catnip_manifest_parse(json, &m, NULL, 0) == 0) {
                 snprintf(entry->id, sizeof(entry->id), "%s", m.id);
                 snprintf(entry->name, sizeof(entry->name), "%s", m.name);
+                snprintf(entry->icon, sizeof(entry->icon), "%s", m.icon);
                 entry->compatible = catnip_manifest_compatible(&m);
             } else {
                 snprintf(entry->name, sizeof(entry->name), "%s", "(invalid manifest)");
