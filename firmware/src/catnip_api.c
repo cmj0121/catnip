@@ -2,8 +2,10 @@
  * share the hal pointer as an upvalue and call through it. */
 #include "catnip_api.h"
 
+#include <dirent.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "lauxlib.h"
 #include "lua.h"
@@ -161,7 +163,8 @@ static int fs_path(lua_State *L, const catnip_hal *h, const char *name,
                    char *out, size_t cap)
 {
     if (!h || !h->fs_base) return luaL_error(L, "fs not available");
-    if (strchr(name, '/') || strstr(name, "..")) return luaL_error(L, "bad path");
+    /* Allow subdirectories, but never escape the base with "..". */
+    if (strstr(name, "..")) return luaL_error(L, "bad path");
     snprintf(out, cap, "%s/%s", h->fs_base, name);
     return 0;
 }
@@ -213,6 +216,67 @@ static int l_fs_exists(lua_State *L)
     return 1;
 }
 
+/* fs.list([path]) -> array of { name, is_dir, size }, or nil if not a dir. */
+static int l_fs_list(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+    const char *sub = luaL_optstring(L, 1, "");
+    if (!h || !h->fs_base) return luaL_error(L, "fs not available");
+    if (strstr(sub, "..")) return luaL_error(L, "bad path");
+
+    char dir[512];
+    if (sub[0])
+        snprintf(dir, sizeof(dir), "%s/%s", h->fs_base, sub);
+    else
+        snprintf(dir, sizeof(dir), "%s", h->fs_base);
+
+    DIR *d = opendir(dir);
+    if (!d) { lua_pushnil(L); return 1; }
+
+    lua_newtable(L);
+    int i = 0;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        if (e->d_name[0] == '.') continue;
+        char full[1024];
+        snprintf(full, sizeof(full), "%s/%s", dir, e->d_name);
+        struct stat st;
+        int is_dir = 0;
+        long size = 0;
+        if (stat(full, &st) == 0) {
+            is_dir = S_ISDIR(st.st_mode) ? 1 : 0;
+            size = (long)st.st_size;
+        }
+        lua_newtable(L);
+        lua_pushstring(L, e->d_name);
+        lua_setfield(L, -2, "name");
+        lua_pushboolean(L, is_dir);
+        lua_setfield(L, -2, "is_dir");
+        lua_pushinteger(L, size);
+        lua_setfield(L, -2, "size");
+        lua_rawseti(L, -2, ++i);
+    }
+    closedir(d);
+    return 1;
+}
+
+/* fs.stat(name) -> { size, is_dir }, or nil if it does not exist. */
+static int l_fs_stat(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+    const char *name = luaL_checkstring(L, 1);
+    char path[512];
+    fs_path(L, h, name, path, sizeof(path));
+    struct stat st;
+    if (stat(path, &st) != 0) { lua_pushnil(L); return 1; }
+    lua_newtable(L);
+    lua_pushinteger(L, (lua_Integer)st.st_size);
+    lua_setfield(L, -2, "size");
+    lua_pushboolean(L, S_ISDIR(st.st_mode) ? 1 : 0);
+    lua_setfield(L, -2, "is_dir");
+    return 1;
+}
+
 /* Register `funcs` into a new global table `name`, sharing the hal upvalue, and
  * mirror it under catnip.<name>. */
 static void install(lua_State *L, const catnip_hal *hal, const char *name,
@@ -261,8 +325,9 @@ int catnip_api_open(catnip_rt *rt, const catnip_hal *hal)
         {"wifi_status", l_wifi_status}, {"wifi_ssid", l_wifi_ssid},
         {"http_get", l_http_get},       {NULL, NULL}};
     static const luaL_Reg fs_funcs[] = {
-        {"read", l_fs_read}, {"write", l_fs_write},
-        {"exists", l_fs_exists}, {NULL, NULL}};
+        {"read", l_fs_read},   {"write", l_fs_write},
+        {"exists", l_fs_exists}, {"list", l_fs_list},
+        {"stat", l_fs_stat},   {NULL, NULL}};
 
     install(L, hal, "device", device_funcs);
     install(L, hal, "sensor", sensor_funcs);
