@@ -8,6 +8,7 @@ CC      ?= cc
 CSTD    ?= -std=c99
 WARN    ?= -Wall
 OPT     ?= -O2 -g
+PIO_ENV ?= meowkit
 LUADIR  := lib/lua
 SRCDIR  := src
 BUILD   := .build/native
@@ -27,11 +28,19 @@ RT_SRC  := $(wildcard $(SRCDIR)/*.c)
 TEST_SRC := $(wildcard test/native/*.c)
 TESTS   := $(patsubst test/native/%.c,$(BUILD)/%,$(TEST_SRC))
 
-.PHONY: test clean
-test: $(TESTS)
+.PHONY: all build test device clean
+all: build
+
+build: $(TESTS)        # compile the runtime + host tests (no run)
+	@echo "== firmware host build ok =="
+
+test: build            # compile, then run the host tests
 	@echo "== running native tests =="
 	@for t in $(TESTS); do echo "-- $$t"; "$$t" || exit 1; done
 	@echo "== all native tests passed =="
+
+device:                # build the on-device firmware image (needs PlatformIO)
+	pio run -e $(PIO_ENV)
 
 $(BUILD)/%: test/native/%.c $(LUA_SRC) $(RT_SRC) | $(BUILD)
 	$(CC) $(CSTD) $(WARN) $(OPT) $(PLAT_DEFS) $(INC) $^ -lm $(PLAT_LIBS) -o $@
