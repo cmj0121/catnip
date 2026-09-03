@@ -1,6 +1,6 @@
 /*
  * hal_meowkit.cpp - STATUS: scaffold, UNTESTED (needs PlatformIO + hardware).
- * Issue #35: fill catnip_hal with real MeowKit drivers so device.*/sensor.*/
+ * Issue #35: fill catnip_hal with real MeowKit drivers so device.*, sensor.*,
  * gpio.* do something. Wire the returned HAL into main.cpp in place of the
  * current no-op.
  */
