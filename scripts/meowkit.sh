@@ -5,6 +5,8 @@
 # Subcommands (added across issues #12/#13/#14):
 #   flash        put the MeowKit into flash/download status; first-time setup (#12)
 #   probe        just verify esptool can talk to the device (#12)
+#   backup       read the full flash to a file and verify it (#13)
+#   install      backup-first: back up stock, then build & flash Catnip (#13)
 #
 # Safety model (see the "Install" story): the ESP32-S3 ROM download mode is
 # always reachable over USB, so a flash can always be redone. Never burn eFuses
@@ -19,6 +21,10 @@ set -euo pipefail
 
 CHIP="${CHIP:-esp32s3}"
 BAUD="${BAUD:-921600}"
+FLASH_SIZE_BYTES=16777216 # 16 MB
+BACKUP_DIR="${BACKUP_DIR:-backup}"
+FIRMWARE_DIR="${FIRMWARE_DIR:-firmware}"
+PIO_ENV="${PIO_ENV:-meowkit}"
 
 log()  { printf '[meowkit] %s\n' "$*"; }
 die()  { printf '[meowkit] error: %s\n' "$*" >&2; exit 1; }
@@ -99,8 +105,77 @@ cmd_flash() {
 	log "ready. Next: 'make install' to install Catnip (it backs up stock first)."
 }
 
+# Portable file size in bytes (BSD stat on macOS, GNU stat on Linux).
+file_size() {
+	if stat -f%z "$1" >/dev/null 2>&1; then
+		stat -f%z "$1"
+	else
+		stat -c%s "$1"
+	fi
+}
+
+resolve_pio() {
+	if [ -n "${PIO:-}" ]; then
+		# shellcheck disable=SC2206
+		PIO_CMD=($PIO)
+	elif command -v pio >/dev/null 2>&1; then
+		PIO_CMD=(pio)
+	elif command -v platformio >/dev/null 2>&1; then
+		PIO_CMD=(platformio)
+	elif python3 -c 'import platformio' >/dev/null 2>&1; then
+		PIO_CMD=(python3 -m platformio)
+	else
+		die "PlatformIO not found. Install it: pip install platformio (https://platformio.org)"
+	fi
+}
+
+cmd_backup() {
+	resolve_esptool
+	detect_port
+	mkdir -p "$BACKUP_DIR"
+	local out="${BACKUP:-$BACKUP_DIR/meowkit-stock-$(date +%Y%m%d-%H%M%S).bin}"
+	log "backing up the full 16 MB flash to $out (reads the whole chip) ..."
+	if ! "${ESPTOOL_CMD[@]}" --chip "$CHIP" --port "$PORT" --baud "$BAUD" \
+		read_flash 0x0 "$FLASH_SIZE_BYTES" "$out"; then
+		download_mode_help
+		die "backup read failed - refusing to go further"
+	fi
+	local sz
+	sz="$(file_size "$out")"
+	[ "$sz" = "$FLASH_SIZE_BYTES" ] ||
+		die "backup is $sz bytes, expected $FLASH_SIZE_BYTES; NOT trusting it"
+	printf '%s\n' "$out" >"$BACKUP_DIR/.latest"
+	log "backup verified ($sz bytes) and recorded as latest."
+}
+
+cmd_install() {
+	# L1 safety: never write Catnip without a verified stock backup in hand.
+	local latest="$BACKUP_DIR/.latest"
+	local have_backup=0
+	if [ -f "$latest" ]; then
+		local bfile
+		bfile="$(cat "$latest")"
+		[ -n "$bfile" ] && [ -s "$bfile" ] && have_backup=1
+	fi
+	if [ "$have_backup" = 1 ]; then
+		log "existing stock backup found ($(cat "$latest")); keeping stock image."
+	else
+		cmd_backup
+	fi
+
+	resolve_pio
+	detect_port
+	log "building and flashing Catnip via PlatformIO (env: $PIO_ENV) ..."
+	if ! "${PIO_CMD[@]}" run -d "$FIRMWARE_DIR" -e "$PIO_ENV" \
+		-t upload --upload-port "$PORT"; then
+		download_mode_help
+		die "flash failed - the device is still recoverable via 'make uninstall'"
+	fi
+	log "Catnip installed. To revert to stock: make uninstall"
+}
+
 usage() {
-	sed -n '2,20p' "$0"
+	sed -n '2,22p' "$0"
 	exit "${1:-0}"
 }
 
@@ -111,8 +186,10 @@ main() {
 	case "$cmd" in
 		flash) cmd_flash "$@" ;;
 		probe) cmd_probe "$@" ;;
+		backup) cmd_backup "$@" ;;
+		install) cmd_install "$@" ;;
 		-h|--help|help) usage 0 ;;
-		*) die "unknown subcommand: $cmd (try: flash, probe)" ;;
+		*) die "unknown subcommand: $cmd (try: flash, probe, backup, install)" ;;
 	esac
 }
 
