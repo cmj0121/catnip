@@ -9,7 +9,7 @@ CSTD    ?= -std=c99
 WARN    ?= -Wall
 OPT     ?= -O2 -g
 PIO_ENV ?= meowkit
-LUADIR  := lib/lua
+# lib sources are discovered under lib/*
 SRCDIR  := src
 BUILD   := .build/native
 
@@ -22,8 +22,9 @@ else
   PLAT_LIBS := -ldl
 endif
 
-INC     := -I$(LUADIR) -I$(SRCDIR)
-LUA_SRC := $(wildcard $(LUADIR)/*.c)
+LIBDIRS := $(wildcard lib/*)
+INC     := $(addprefix -I,$(LIBDIRS)) -I$(SRCDIR)
+LIB_SRC := $(wildcard lib/*/*.c)
 RT_SRC  := $(wildcard $(SRCDIR)/*.c)
 TEST_SRC := $(wildcard test/native/*.c)
 TESTS   := $(patsubst test/native/%.c,$(BUILD)/%,$(TEST_SRC))
@@ -42,7 +43,7 @@ test: build            # compile, then run the host tests
 device:                # build the on-device firmware image (needs PlatformIO)
 	pio run -e $(PIO_ENV)
 
-$(BUILD)/%: test/native/%.c $(LUA_SRC) $(RT_SRC) | $(BUILD)
+$(BUILD)/%: test/native/%.c $(LIB_SRC) $(RT_SRC) | $(BUILD)
 	$(CC) $(CSTD) $(WARN) $(OPT) $(PLAT_DEFS) $(INC) $^ -lm $(PLAT_LIBS) -o $@
 
 $(BUILD):
