@@ -1,9 +1,10 @@
 /*
  * main.cpp - Catnip firmware entry for the MeowKit (ESP32-S3).
  *
- * Issue #7 scope: bring the Lua runtime up on the device and prove it runs a
- * script, with output on the serial log. The cooperative scheduler that drives
- * scripts from loop() arrives in issue #9; for now loop() is idle.
+ * Boots the Lua runtime and hands control to the catnip shell, which lists and
+ * runs Lua apps from the SD card. Mounting the SD card and rendering the menu /
+ * status bar on the LVGL display is bsp/device work; here the shell is driven
+ * headless so the wiring is in place.
  *
  * This file only compiles under the Arduino/ESP32 toolchain (PlatformIO). The
  * host test build (`make test`) compiles src/*.c and never this file.
@@ -11,11 +12,15 @@
 #include <Arduino.h>
 
 #include "catnip_runtime.h"
-#include "catnip_sched.h"
-#include "catnip_ui.h"
+#include "catnip_shell.h"
+
+/* Where apps live once the SD card is mounted (bsp work). */
+#ifndef CATNIP_APPS_ROOT
+#define CATNIP_APPS_ROOT "/sd/catnip/apps"
+#endif
 
 static catnip_rt *g_rt;
-static catnip_sched *g_sched;
+static catnip_shell *g_shell;
 
 static void serial_log(void *ud, const char *msg, size_t len)
 {
@@ -33,8 +38,8 @@ static unsigned long host_now(void *ud)
 static void host_pump(void *ud)
 {
     (void)ud;
-    /* Issues #2/#5 replace this with lv_timer_handler() so the UI stays live
-     * while a script waits. Until LVGL is wired in, just yield to the RTOS. */
+    /* The UI renderer replaces this with lv_timer_handler() so the display
+     * stays live while a script waits. Until LVGL is wired in, yield. */
     delay(1);
 }
 
@@ -50,28 +55,17 @@ void setup()
         return;
     }
     catnip_rt_set_log(g_rt, serial_log, nullptr);
-    catnip_ui_open(g_rt); /* make ui.* available to apps (#2) */
-    catnip_rt_dostring(g_rt, "print('meow from MeowKit')", "=boot");
 
-    size_t in_use = 0, peak = 0;
-    if (catnip_rt_mem(g_rt, &in_use, &peak)) {
-        Serial.printf("[catnip] Lua heap: %u B in use, %u B peak (PSRAM)\n",
-                      (unsigned)in_use, (unsigned)peak);
+    g_shell = catnip_shell_new(g_rt, CATNIP_APPS_ROOT, host_now, host_pump, nullptr);
+    if (!g_shell) {
+        Serial.println("[catnip] FATAL: shell init failed");
+        return;
     }
-
-    /* Drive a demo app cooperatively: it sleeps between ticks without blocking. */
-    g_sched = catnip_sched_new(g_rt, host_now, host_pump, nullptr);
-    catnip_sched_start(g_sched,
-                       "local n = 0\n"
-                       "while true do\n"
-                       "  n = n + 1\n"
-                       "  print('tick ' .. n)\n"
-                       "  sys.sleep(1000)\n"
-                       "end\n",
-                       "=demo");
+    Serial.printf("[catnip] shell ready, %d app(s) found under %s\n",
+                  catnip_shell_count(g_shell), CATNIP_APPS_ROOT);
 }
 
 void loop()
 {
-    if (g_sched) catnip_sched_step(g_sched);
+    if (g_shell) catnip_shell_step(g_shell);
 }
