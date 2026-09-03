@@ -1,0 +1,10 @@
+{
+  "id": "filebrowser",
+  "name": "File Browser",
+  "version": "0.1.0",
+  "author": "cmj",
+  "catnip_api": "1.0",
+  "entry": "main.lua",
+  "icon": "icon.png",
+  "permissions": ["fs.read", "fs.delete", "fs.reset"]
+}
