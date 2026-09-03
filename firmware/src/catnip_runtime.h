@@ -53,6 +53,11 @@ int catnip_rt_dofile(catnip_rt *rt, const char *path);
 /* The underlying lua_State, for issues #8/#9 that build on it. */
 struct lua_State *catnip_rt_lua(catnip_rt *rt);
 
+/* Report the error object on top of `L` (which may be a coroutine of this
+ * runtime) through the log, with a traceback. Pops the error. Used by the
+ * scheduler when an app coroutine faults. */
+void catnip_rt_report_error(catnip_rt *rt, struct lua_State *L);
+
 void catnip_rt_free(catnip_rt *rt);
 
 #ifdef __cplusplus

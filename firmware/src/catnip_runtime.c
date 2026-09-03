@@ -128,6 +128,18 @@ void catnip_rt_set_log(catnip_rt *rt, catnip_log_fn fn, void *ud)
 
 lua_State *catnip_rt_lua(catnip_rt *rt) { return rt ? rt->L : NULL; }
 
+void catnip_rt_report_error(catnip_rt *rt, lua_State *L)
+{
+    if (!rt || !L) return;
+    const char *msg = lua_tostring(L, -1);
+    if (msg == NULL) msg = "(non-string error)";
+    luaL_traceback(L, L, msg, 1); /* pushes the traceback string */
+    size_t len;
+    const char *tb = lua_tolstring(L, -1, &len);
+    emit(rt, tb, len);
+    lua_pop(L, 2); /* traceback + original error */
+}
+
 /* A traceback message handler so runtime errors carry a stack, not just text. */
 static int msgh(lua_State *L)
 {
