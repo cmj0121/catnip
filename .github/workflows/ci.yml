@@ -20,3 +20,20 @@ jobs:
 
       - name: Lint the flash tooling
         run: shellcheck scripts/*.sh
+
+  device-build:
+    name: device build (compile-only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build the firmware for the MeowKit (ESP32-S3)
+        run: pio run -e meowkit -d firmware
