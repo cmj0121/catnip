@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    name: build & test (host)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the framework (host)
+        run: make build
+
+      - name: Run the test suite (host)
+        run: make test
+
+      - name: Lint the flash tooling
+        run: shellcheck scripts/*.sh
