@@ -4,7 +4,9 @@ repos:
     hooks:
       - id: check-yaml
       - id: end-of-file-fixer
+        exclude: '^firmware/lib/lua/.*\.(c|h|hpp)$'
       - id: trailing-whitespace
+        exclude: '^firmware/lib/lua/.*\.(c|h|hpp)$'
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.30.0
     hooks:
