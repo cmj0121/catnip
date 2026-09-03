@@ -73,7 +73,8 @@ int main(void)
     if (!mkdtemp(root)) { printf("FAIL - mkdtemp\n"); return 1; }
 
     make_app(root, "hello",
-             "{\"id\":\"hello\",\"name\":\"Hello\",\"catnip_api\":\"1.0\"}",
+             "{\"id\":\"hello\",\"name\":\"Hello\",\"catnip_api\":\"1.0\","
+             "\"icon\":\"icon.png\"}",
              "LOADED = 'hello ran'\n");
     make_app(root, "future",
              "{\"id\":\"future\",\"name\":\"Future\",\"catnip_api\":\"2.0\"}",
@@ -87,6 +88,7 @@ int main(void)
     const catnip_app_entry *hello = find(apps, n, "hello");
     const catnip_app_entry *future = find(apps, n, "future");
     CHECK(hello && hello->compatible == 1, "compatible app is marked compatible");
+    CHECK(hello && strcmp(hello->icon, "icon.png") == 0, "manifest icon is carried into the entry");
     CHECK(future && future->compatible == 0, "future-API app is marked incompatible");
 
     /* open + run the compatible app */
