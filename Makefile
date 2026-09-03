@@ -1,6 +1,6 @@
 SUBDIR :=
 
-.PHONY: all clean test run build upgrade help flash backup install $(SUBDIR)
+.PHONY: all clean test run build upgrade help flash backup install uninstall $(SUBDIR)
 
 all: $(SUBDIR) 		# default action
 	@[ -f .git/hooks/pre-commit ] || pre-commit install --install-hooks
@@ -23,6 +23,9 @@ backup:				# back up the MeowKit's full flash (do this before installing)
 
 install:			# back up stock, then build & flash Catnip onto the MeowKit
 	@scripts/meowkit.sh install
+
+uninstall:			# restore the MeowKit to stock (from your backup, or official)
+	@scripts/meowkit.sh uninstall
 
 upgrade:			# upgrade all the necessary packages
 	pre-commit autoupdate

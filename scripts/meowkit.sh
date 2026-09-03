@@ -7,6 +7,8 @@
 #   probe        just verify esptool can talk to the device (#12)
 #   backup       read the full flash to a file and verify it (#13)
 #   install      backup-first: back up stock, then build & flash Catnip (#13)
+#   uninstall    restore stock: re-flash your backup, or official stock (#14)
+#   restore-stock  download & flash the official MeowKit firmware (#14)
 #
 # Safety model (see the "Install" story): the ESP32-S3 ROM download mode is
 # always reachable over USB, so a flash can always be redone. Never burn eFuses
@@ -25,6 +27,8 @@ FLASH_SIZE_BYTES=16777216 # 16 MB
 BACKUP_DIR="${BACKUP_DIR:-backup}"
 FIRMWARE_DIR="${FIRMWARE_DIR:-firmware}"
 PIO_ENV="${PIO_ENV:-meowkit}"
+# Upstream MeowKit stock firmware bins (single-app 16 MB layout).
+STOCK_BASE="${STOCK_BASE:-https://raw.githubusercontent.com/mingolucky/meowkit-s3-firmware/main/1.firmware/MeowKit}"
 
 log()  { printf '[meowkit] %s\n' "$*"; }
 die()  { printf '[meowkit] error: %s\n' "$*" >&2; exit 1; }
@@ -174,8 +178,53 @@ cmd_install() {
 	log "Catnip installed. To revert to stock: make uninstall"
 }
 
+cmd_restore_stock() {
+	resolve_esptool
+	detect_port
+	command -v curl >/dev/null 2>&1 || die "curl not found (needed to fetch stock firmware)"
+	local tmp
+	tmp="$(mktemp -d)"
+	# shellcheck disable=SC2064
+	trap "rm -rf '$tmp'" RETURN
+	log "downloading official stock firmware from $STOCK_BASE ..."
+	local f
+	for f in bootloader.bin partitions.bin firmware.bin; do
+		curl -fsSL "$STOCK_BASE/$f" -o "$tmp/$f" || die "download failed: $f"
+	done
+	log "flashing stock firmware (bootloader + partitions + app) ..."
+	if ! "${ESPTOOL_CMD[@]}" --chip "$CHIP" --port "$PORT" --baud "$BAUD" \
+		write_flash --flash_size 16MB \
+		0x0 "$tmp/bootloader.bin" \
+		0x8000 "$tmp/partitions.bin" \
+		0x10000 "$tmp/firmware.bin"; then
+		download_mode_help
+		die "stock flash failed"
+	fi
+	log "official stock firmware restored."
+}
+
+cmd_uninstall() {
+	local latest="$BACKUP_DIR/.latest"
+	local bfile=""
+	[ -f "$latest" ] && bfile="$(cat "$latest")"
+	if [ -n "$bfile" ] && [ -s "$bfile" ]; then
+		resolve_esptool
+		detect_port
+		log "restoring the MeowKit from your backup: $bfile"
+		if ! "${ESPTOOL_CMD[@]}" --chip "$CHIP" --port "$PORT" --baud "$BAUD" \
+			write_flash --flash_size 16MB 0x0 "$bfile"; then
+			download_mode_help
+			die "restore from backup failed"
+		fi
+		log "restored from backup - Catnip removed, stock is back."
+	else
+		log "no local backup found; restoring official stock firmware instead."
+		cmd_restore_stock
+	fi
+}
+
 usage() {
-	sed -n '2,22p' "$0"
+	sed -n '2,24p' "$0"
 	exit "${1:-0}"
 }
 
@@ -188,8 +237,10 @@ main() {
 		probe) cmd_probe "$@" ;;
 		backup) cmd_backup "$@" ;;
 		install) cmd_install "$@" ;;
+		uninstall) cmd_uninstall "$@" ;;
+		restore-stock) cmd_restore_stock "$@" ;;
 		-h|--help|help) usage 0 ;;
-		*) die "unknown subcommand: $cmd (try: flash, probe, backup, install)" ;;
+		*) die "unknown subcommand: $cmd (try: flash, probe, backup, install, uninstall, restore-stock)" ;;
 	esac
 }
 
