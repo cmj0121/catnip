@@ -1,1 +1,5 @@
 *.sw[po]
+
+# firmware build artifacts
+firmware/.build/
+.pio/
