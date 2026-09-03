@@ -7,6 +7,19 @@
 #include "lauxlib.h"
 #include "lua.h"
 
+/* Watchdog: a script that never yields (e.g. `while true do end`) would keep
+ * lua_resume from returning and freeze the whole device. A count hook fires
+ * every CATNIP_WD_INSTR_PER_HOOK VM instructions; if a single resume burns more
+ * than CATNIP_WD_MAX_HOOKS_PER_SLICE of them without yielding, the script is
+ * aborted with an error instead of hanging. The counter is reset each resume,
+ * so a well-behaved app that yields via sys.sleep is never affected. */
+#ifndef CATNIP_WD_INSTR_PER_HOOK
+#define CATNIP_WD_INSTR_PER_HOOK 1000
+#endif
+#ifndef CATNIP_WD_MAX_HOOKS_PER_SLICE
+#define CATNIP_WD_MAX_HOOKS_PER_SLICE 500 /* ~500k instructions per resume */
+#endif
+
 struct catnip_sched {
     catnip_rt *rt;
     lua_State *co;   /* the app coroutine (NULL until start) */
@@ -14,10 +27,23 @@ struct catnip_sched {
     int state;       /* last CATNIP_* state */
     unsigned long wake; /* millis at which to resume, when sleeping */
     int started;     /* has the coroutine been resumed at least once */
+    unsigned long wd_count; /* watchdog: hook fires in the current resume */
     catnip_now_fn now;
     catnip_pump_fn pump;
     void *ud;
 };
+
+/* Runs every CATNIP_WD_INSTR_PER_HOOK instructions on the app coroutine. The
+ * scheduler pointer is stashed in the coroutine's extra space. */
+static void wd_hook(lua_State *L, lua_Debug *ar)
+{
+    (void)ar;
+    catnip_sched *s = *(catnip_sched **)lua_getextraspace(L);
+    if (!s) return;
+    if (++s->wd_count > CATNIP_WD_MAX_HOOKS_PER_SLICE) {
+        luaL_error(L, "catnip: script ran too long without yielding and was stopped");
+    }
+}
 
 static unsigned long sched_now(catnip_sched *s)
 {
@@ -94,6 +120,10 @@ int catnip_sched_start(catnip_sched *s, const char *code, const char *chunkname)
     /* pin the thread so it is not collected while it runs */
     s->co_ref = luaL_ref(L, LUA_REGISTRYINDEX);
 
+    /* arm the watchdog on the coroutine (reachable from wd_hook) */
+    *(catnip_sched **)lua_getextraspace(s->co) = s;
+    lua_sethook(s->co, wd_hook, LUA_MASKCOUNT, CATNIP_WD_INSTR_PER_HOOK);
+
     int ld = luaL_loadbuffer(s->co, code, strlen(code),
                              chunkname ? chunkname : "=app");
     if (ld != LUA_OK) {
@@ -114,6 +144,7 @@ static int resume_app(catnip_sched *s)
 {
     lua_State *L = catnip_rt_lua(s->rt);
     int nres = 0;
+    s->wd_count = 0; /* fresh watchdog budget for this resume */
     int r = lua_resume(s->co, L, 0, &nres);
     s->started = 1;
 
