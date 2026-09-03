@@ -27,13 +27,19 @@ void setup()
     delay(200);
     Serial.println("[catnip] booting Lua runtime");
 
-    g_rt = catnip_rt_new();
+    g_rt = catnip_rt_new_tracked(); /* Lua heap lives in PSRAM (#8) */
     if (!g_rt) {
         Serial.println("[catnip] FATAL: runtime allocation failed");
         return;
     }
     catnip_rt_set_log(g_rt, serial_log, nullptr);
     catnip_rt_dostring(g_rt, "print('meow from MeowKit')", "=boot");
+
+    size_t in_use = 0, peak = 0;
+    if (catnip_rt_mem(g_rt, &in_use, &peak)) {
+        Serial.printf("[catnip] Lua heap: %u B in use, %u B peak (PSRAM)\n",
+                      (unsigned)in_use, (unsigned)peak);
+    }
 }
 
 void loop()
