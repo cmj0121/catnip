@@ -216,6 +216,30 @@ static int l_fs_exists(lua_State *L)
     return 1;
 }
 
+/* fs.delete(name) -> true if the file was removed. */
+static int l_fs_delete(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+    const char *name = luaL_checkstring(L, 1);
+    char path[512];
+    fs_path(L, h, name, path, sizeof(path));
+    lua_pushboolean(L, remove(path) == 0);
+    return 1;
+}
+
+/* fs.reset() -> true if the SD card was reformatted (destructive). */
+static int l_fs_reset(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+    if (!h || !h->sd_reset) {
+        lua_pushboolean(L, 0);
+        lua_pushstring(L, "sd reset not available");
+        return 2;
+    }
+    lua_pushboolean(L, h->sd_reset(h->ud) == 0);
+    return 1;
+}
+
 /* fs.list([path]) -> array of { name, is_dir, size }, or nil if not a dir. */
 static int l_fs_list(lua_State *L)
 {
@@ -325,9 +349,10 @@ int catnip_api_open(catnip_rt *rt, const catnip_hal *hal)
         {"wifi_status", l_wifi_status}, {"wifi_ssid", l_wifi_ssid},
         {"http_get", l_http_get},       {NULL, NULL}};
     static const luaL_Reg fs_funcs[] = {
-        {"read", l_fs_read},   {"write", l_fs_write},
+        {"read", l_fs_read},     {"write", l_fs_write},
         {"exists", l_fs_exists}, {"list", l_fs_list},
-        {"stat", l_fs_stat},   {NULL, NULL}};
+        {"stat", l_fs_stat},     {"delete", l_fs_delete},
+        {"reset", l_fs_reset},   {NULL, NULL}};
 
     install(L, hal, "device", device_funcs);
     install(L, hal, "sensor", sensor_funcs);

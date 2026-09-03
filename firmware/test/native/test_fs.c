@@ -28,6 +28,9 @@ static void write_file(const char *path, const char *content)
     if (f) { fputs(content, f); fclose(f); }
 }
 
+static int g_reset_calls;
+static int m_sd_reset(void *ud) { (void)ud; g_reset_calls++; return 0; }
+
 static const char *SCRIPT =
     "local ok, err = pcall(function()\n"
     "  local items = fs.list()\n"
@@ -44,6 +47,9 @@ static const char *SCRIPT =
     "  assert(st and st.size == 5 and st.is_dir == false, 'stat a file')\n"
     "  assert(fs.stat('nope') == nil, 'stat missing is nil')\n"
     "  assert(pcall(function() fs.list('..') end) == false, 'list guards ..')\n"
+    "  assert(fs.delete('a.txt') == true, 'delete removes a file')\n"
+    "  assert(fs.exists('a.txt') == false, 'file is gone after delete')\n"
+    "  assert(fs.reset() == true, 'reset reports success')\n"
     "end)\n"
     "RESULT = ok and 'ok' or ('FAIL: ' .. tostring(err))\n";
 
@@ -62,6 +68,7 @@ int main(void)
     catnip_hal hal;
     memset(&hal, 0, sizeof(hal));
     hal.fs_base = base;
+    hal.sd_reset = m_sd_reset;
 
     catnip_rt *rt = catnip_rt_new_tracked();
     catnip_ui_open(rt);
@@ -74,6 +81,7 @@ int main(void)
     const char *result = lua_tostring(L, -1);
     CHECK(result && strcmp(result, "ok") == 0, result ? result : "(no result)");
     lua_pop(L, 1);
+    CHECK(g_reset_calls == 1, "fs.reset reached the HAL");
 
     catnip_rt_free(rt);
     printf("%s (%d failures)\n", failures ? "FAILED" : "PASSED", failures);

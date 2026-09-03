@@ -42,8 +42,11 @@ typedef struct {
     /* HTTP GET: write body into buf (cap incl. NUL); return length or -1. */
     int (*http_get)(void *ud, const char *url, char *buf, size_t cap);
 
-    /* fs.* base directory (flat, app-scoped). NULL disables fs. */
+    /* fs.* base directory. NULL disables fs. */
     const char *fs_base;
+    /* Reformat / reinitialize the SD card (destructive). Returns 0 on success.
+     * NULL means fs.reset() reports "not available". */
+    int (*sd_reset)(void *ud);
 } catnip_hal;
 
 #ifdef __cplusplus
