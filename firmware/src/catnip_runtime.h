@@ -32,6 +32,14 @@ catnip_rt *catnip_rt_new(void);
 /* Same, but with a custom allocator (see catnip_alloc_fn). */
 catnip_rt *catnip_rt_new_alloc(catnip_alloc_fn alloc, void *alloc_ud);
 
+/* Like catnip_rt_new, but with a built-in PSRAM/accounting allocator (#8).
+ * Query its usage with catnip_rt_mem. */
+catnip_rt *catnip_rt_new_tracked(void);
+
+/* If the runtime was created tracked, fills *in_use and *peak (bytes) and
+ * returns 1; otherwise returns 0. Either out pointer may be NULL. */
+int catnip_rt_mem(catnip_rt *rt, size_t *in_use, size_t *peak);
+
 /* Route print()/errors to `fn`. Until set, output goes to stdout. */
 void catnip_rt_set_log(catnip_rt *rt, catnip_log_fn fn, void *ud);
 

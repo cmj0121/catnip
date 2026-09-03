@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "catnip_alloc.h"
 #include "lauxlib.h"
 #include "lua.h"
 #include "lualib.h"
@@ -19,6 +20,8 @@ struct catnip_rt {
     lua_State *L;
     catnip_log_fn log;
     void *log_ud;
+    catnip_alloc acct; /* used only when `tracked` */
+    int tracked;
 };
 
 /* Where the print closure finds its runtime: a light-userdata upvalue. */
@@ -67,30 +70,53 @@ static void install_print(catnip_rt *rt)
     lua_setglobal(L, "print");
 }
 
-static catnip_rt *rt_create(lua_State *L)
+/* Finish setup once rt->L is populated (or NULL on failure). */
+static catnip_rt *rt_finish(catnip_rt *rt)
 {
-    if (!L) return NULL;
-    catnip_rt *rt = (catnip_rt *)calloc(1, sizeof(*rt));
-    if (!rt) {
-        lua_close(L);
+    if (!rt) return NULL;
+    if (!rt->L) {
+        free(rt);
         return NULL;
     }
-    rt->L = L;
-    luaL_openlibs(L);
+    luaL_openlibs(rt->L);
     install_print(rt);
     return rt;
 }
 
 catnip_rt *catnip_rt_new(void)
 {
-    return rt_create(luaL_newstate());
+    catnip_rt *rt = (catnip_rt *)calloc(1, sizeof(*rt));
+    if (!rt) return NULL;
+    rt->L = luaL_newstate();
+    return rt_finish(rt);
 }
 
 catnip_rt *catnip_rt_new_alloc(catnip_alloc_fn alloc, void *alloc_ud)
 {
     if (!alloc) return catnip_rt_new();
+    catnip_rt *rt = (catnip_rt *)calloc(1, sizeof(*rt));
+    if (!rt) return NULL;
     /* lua_Alloc has the same shape as catnip_alloc_fn. */
-    return rt_create(lua_newstate((lua_Alloc)alloc, alloc_ud));
+    rt->L = lua_newstate((lua_Alloc)alloc, alloc_ud);
+    return rt_finish(rt);
+}
+
+catnip_rt *catnip_rt_new_tracked(void)
+{
+    catnip_rt *rt = (catnip_rt *)calloc(1, sizeof(*rt));
+    if (!rt) return NULL;
+    catnip_alloc_init(&rt->acct);
+    rt->tracked = 1;
+    rt->L = lua_newstate(catnip_alloc_cb, &rt->acct);
+    return rt_finish(rt);
+}
+
+int catnip_rt_mem(catnip_rt *rt, size_t *in_use, size_t *peak)
+{
+    if (!rt || !rt->tracked) return 0;
+    if (in_use) *in_use = rt->acct.in_use;
+    if (peak) *peak = rt->acct.peak;
+    return 1;
 }
 
 void catnip_rt_set_log(catnip_rt *rt, catnip_log_fn fn, void *ud)
