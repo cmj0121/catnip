@@ -1,1 +1,8 @@
 *.sw[po]
+
+# firmware build artifacts
+firmware/.build/
+.pio/
+
+# on-device flash backups (large, machine-specific)
+backup/
