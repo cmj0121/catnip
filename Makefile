@@ -8,12 +8,15 @@ all: $(SUBDIR) 		# default action
 
 clean: $(SUBDIR)	# clean-up environment
 	@find . -name '*.sw[po]' -delete
+	@$(MAKE) -C firmware clean
 
-test:				# run test
+test:				# run the firmware host tests
+	@$(MAKE) -C firmware test
 
 run:				# run in the local environment
 
-build:				# build the binary/library
+build:				# build the firmware (host compile)
+	@$(MAKE) -C firmware build
 
 flash:				# put the MeowKit into flash/download status (first-time setup)
 	@scripts/meowkit.sh flash
