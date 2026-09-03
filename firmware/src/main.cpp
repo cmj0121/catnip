@@ -11,6 +11,7 @@
  */
 #include <Arduino.h>
 
+#include "catnip_api.h"
 #include "catnip_runtime.h"
 #include "catnip_shell.h"
 
@@ -21,6 +22,9 @@
 
 static catnip_rt *g_rt;
 static catnip_shell *g_shell;
+
+/* No-op HAL for now; the BSP fills these with real drivers (device work). */
+static catnip_hal g_hal;
 
 static void serial_log(void *ud, const char *msg, size_t len)
 {
@@ -55,6 +59,7 @@ void setup()
         return;
     }
     catnip_rt_set_log(g_rt, serial_log, nullptr);
+    catnip_api_open(g_rt, &g_hal); /* device/sensor/gpio/service/fs namespaces (#3) */
 
     g_shell = catnip_shell_new(g_rt, CATNIP_APPS_ROOT, host_now, host_pump, nullptr);
     if (!g_shell) {
