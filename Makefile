@@ -1,6 +1,6 @@
 SUBDIR :=
 
-.PHONY: all clean test run build upgrade help $(SUBDIR)
+.PHONY: all clean test run build upgrade help flash $(SUBDIR)
 
 all: $(SUBDIR) 		# default action
 	@[ -f .git/hooks/pre-commit ] || pre-commit install --install-hooks
@@ -14,6 +14,9 @@ test:				# run test
 run:				# run in the local environment
 
 build:				# build the binary/library
+
+flash:				# put the MeowKit into flash/download status (first-time setup)
+	@scripts/meowkit.sh flash
 
 upgrade:			# upgrade all the necessary packages
 	pre-commit autoupdate
