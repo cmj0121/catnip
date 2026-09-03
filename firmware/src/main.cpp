@@ -12,6 +12,7 @@
 
 #include "catnip_runtime.h"
 #include "catnip_sched.h"
+#include "catnip_ui.h"
 
 static catnip_rt *g_rt;
 static catnip_sched *g_sched;
@@ -49,6 +50,7 @@ void setup()
         return;
     }
     catnip_rt_set_log(g_rt, serial_log, nullptr);
+    catnip_ui_open(g_rt); /* make ui.* available to apps (#2) */
     catnip_rt_dostring(g_rt, "print('meow from MeowKit')", "=boot");
 
     size_t in_use = 0, peak = 0;
