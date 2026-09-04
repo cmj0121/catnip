@@ -21,6 +21,7 @@
 #include "device/ioexp.h"
 #include "device/led.h"
 #include "device/pmu.h"
+#include "device/sd_mount.h"
 #include "device/power.h"
 #include "generated/anim_f01_rgb565.h"
 #include "generated/anim_f02_rgb565.h"
@@ -193,6 +194,10 @@ void setup()
     } else {
         Serial.println("[catnip] display init FAILED");
     }
+
+    /* After the splash, deliberately: the card is the slowest thing in the
+     * boot and nothing on screen should wait for it. */
+    catnip_sd_mount();
 
     g_rt = catnip_rt_new_tracked(); /* Lua heap lives in PSRAM (#8) */
     if (!g_rt) {
