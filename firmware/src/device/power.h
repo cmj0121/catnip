@@ -8,15 +8,14 @@
 #ifndef CATNIP_POWER_H
 #define CATNIP_POWER_H
 
+#include <stdbool.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /* Latch the power rail on. Safe to call more than once. */
 void catnip_power_hold(void);
-
-/* True while the power button is held down. */
-bool catnip_power_button_down(void);
 
 #ifdef __cplusplus
 }

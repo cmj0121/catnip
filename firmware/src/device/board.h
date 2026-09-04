@@ -14,6 +14,13 @@
 #define CATNIP_PIN_PWR_HOLD 11
 #define CATNIP_PIN_PWR_ON   10
 
+/* PWR_ON above is the vendor's name for GPIO10, but on this board the power
+ * button does not reach the MCU at all: GPIO10 reads high whether or not the
+ * button is down (so do GPIO5 and GPIO4, the published buttons A and B).
+ * Pressing it sets the AXP173's power-key interrupt instead, which is how
+ * catnip_pmu_power_key_pressed() sees it. Measured by logging all three pins
+ * and the PMIC's interrupt registers while the buttons were pressed. */
+
 /* ST7789 panel, SPI. Chip-select and reset are not MCU pins - they sit on the
  * I/O expander below - and MISO is not connected, so the panel is write-only. */
 #define CATNIP_PIN_LCD_MOSI 40

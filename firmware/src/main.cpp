@@ -71,15 +71,60 @@ static const uint16_t *const g_anim_frames[] = {
 static const size_t g_anim_count = sizeof(g_anim_frames) / sizeof(g_anim_frames[0]);
 static const unsigned long ANIM_FRAME_MS = 400;
 
+static size_t g_frame = 0;
+
+static void draw_current_frame(void)
+{
+    if (g_animating) catnip_display_blit(g_anim_frames[g_frame]);
+}
+
 static void animate(void)
 {
     static unsigned long last = 0;
-    static size_t frame = 0;
     unsigned long now = millis();
     if (!g_animating || now - last < ANIM_FRAME_MS) return;
     last = now;
-    frame = (frame + 1) % g_anim_count;
-    catnip_display_blit(g_anim_frames[frame]);
+    g_frame = (g_frame + 1) % g_anim_count;
+    catnip_display_blit(g_anim_frames[g_frame]);
+}
+
+/* A short press of the power button turns the screen off and on again. The
+ * status LED keeps breathing either way, because a dark screen with nothing
+ * else lit is indistinguishable from a device that has crashed or switched
+ * itself off.
+ *
+ * The PMIC does the debouncing: it latches one interrupt per press, and
+ * reading it clears the latch (see pmu.h). Holding the button is the
+ * hardware's own business and is left alone. */
+static bool g_screen_on = true;
+
+static void draw_current_frame(void);
+
+static void set_screen(bool on)
+{
+    unsigned long t0 = millis();
+    /* Remember whether the animation was running rather than assuming it was:
+     * once the shell owns the screen (#33) it is not, and switching the screen
+     * off and on again must not put the mascot back over the shell's work. */
+    static bool was_animating = true;
+    if (on) {
+        g_animating = was_animating;
+    } else {
+        was_animating = g_animating;
+        g_animating = false;
+    }
+    g_screen_on = on;
+    /* Draw before lighting the panel, not after: the frame that was on screen
+     * when it went dark is stale by now, and raising the backlight over it
+     * shows the old frame first and the new one a moment later. */
+    if (on) draw_current_frame();
+    catnip_display_backlight(on ? 255 : 0);
+    Serial.printf("[catnip] screen %s (%lu ms)\n", on ? "on" : "off", millis() - t0);
+}
+
+static void poll_power_button(void)
+{
+    if (catnip_pmu_power_key_pressed()) set_screen(!g_screen_on);
 }
 
 /* Raise the backlight gradually - an abrupt jump to full reads as a flash. */
@@ -108,6 +153,7 @@ void setup()
         delay(10);
     }
     Serial.println("[catnip] boot");
+
 
     /* A sign of life that does not depend on the screen or on anything having
      * attached to the serial port. It comes up after Serial deliberately: when
@@ -154,7 +200,11 @@ void setup()
 
 void loop()
 {
+    /* Either side of the frame draw: a full-screen blit takes long enough that
+     * a press landing during one would otherwise wait for it to finish. */
+    poll_power_button();
     animate();
+    poll_power_button();
     catnip_led_breathe();
     if (g_shell) catnip_shell_step(g_shell);
 }

@@ -8,10 +8,8 @@ void catnip_power_hold(void)
 {
     pinMode(CATNIP_PIN_PWR_HOLD, OUTPUT);
     digitalWrite(CATNIP_PIN_PWR_HOLD, HIGH);
-    pinMode(CATNIP_PIN_PWR_ON, INPUT);
-}
-
-bool catnip_power_button_down(void)
-{
-    return digitalRead(CATNIP_PIN_PWR_ON) == HIGH;
+    /* GPIO10 is the vendor's PWR_ON. Nothing reads it - the button reaches the
+     * PMIC, not the MCU (see board.h) - but leave it pulled up rather than
+     * floating. */
+    pinMode(CATNIP_PIN_PWR_ON, INPUT_PULLUP);
 }
