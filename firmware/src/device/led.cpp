@@ -9,6 +9,17 @@ namespace {
 const float TWO_PI_F = 6.28318531f;
 const unsigned long PERIOD_MS = 2600; /* a calm breath, not a blink */
 
+/* Peak brightness, out of 255. This is the one thing on the device that stays
+ * lit whenever the board has power, sitting in peripheral vision for as long
+ * as it is on, so it wants to read as a heartbeat rather than a warning.
+ *
+ * The value was found by looking at the hardware, not by arithmetic: full
+ * output glared, a quarter still pulled the eye, a tenth was close, and this
+ * is where it stopped being noticeable and started being reassuring. A WS2812
+ * is far brighter at a given duty than the LED anyone reaching for this
+ * constant will be picturing. */
+const uint8_t PEAK = 8;
+
 /* Catnip green is #BEE700, but that cannot be used literally here. On screen
  * its red channel reads as part of a lime, surrounded by other colours; on a
  * bare emitter with nothing to compare against, R190 G231 simply looks yellow.
@@ -43,6 +54,6 @@ void catnip_led_breathe(void)
     float wave = (1.0f - cosf(t * TWO_PI_F)) * 0.5f; /* 0 -> 1 -> 0 */
     /* Squaring holds it longer at the dim end, which is what makes it read as
      * breathing rather than as a triangle-wave fade. */
-    uint8_t level = (uint8_t)(wave * wave * 255.0f);
+    uint8_t level = (uint8_t)(wave * wave * (float)PEAK);
     if (level != g_level) catnip_led_level(level);
 }
