@@ -13,3 +13,12 @@ void catnip_power_hold(void)
      * floating. */
     pinMode(CATNIP_PIN_PWR_ON, INPUT_PULLUP);
 }
+
+void catnip_power_off(void)
+{
+    /* Dropping PWR_HOLD cuts the rail the board is running from. Nothing after
+     * this is guaranteed to execute, so anything that had to happen first must
+     * already have happened. */
+    digitalWrite(CATNIP_PIN_PWR_HOLD, LOW);
+    delay(200);
+}

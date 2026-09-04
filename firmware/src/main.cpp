@@ -122,8 +122,22 @@ static void set_screen(bool on)
     Serial.printf("[catnip] screen %s (%lu ms)\n", on ? "on" : "off", millis() - t0);
 }
 
+/* Switch off in the order the user can see: the screen goes first, so the
+ * device reads as shutting down rather than as having hung, and the LED goes
+ * dark just before the rail does. */
+static void power_off(void)
+{
+    Serial.println("[catnip] powering off");
+    Serial.flush();
+    g_animating = false;
+    catnip_display_backlight(0);
+    catnip_led_level(0);
+    catnip_power_off();
+}
+
 static void poll_power_button(void)
 {
+    if (catnip_pmu_power_key_held()) power_off();
     if (catnip_pmu_power_key_pressed()) set_screen(!g_screen_on);
 }
 

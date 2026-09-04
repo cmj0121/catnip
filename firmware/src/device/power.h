@@ -17,6 +17,11 @@ extern "C" {
 /* Latch the power rail on. Safe to call more than once. */
 void catnip_power_hold(void);
 
+/* Release the latch: the board loses its own supply and switches off. Does not
+ * return while the device is on battery. On USB the chip may keep running, so
+ * callers must treat whatever follows as unreachable rather than as recovery. */
+void catnip_power_off(void);
+
 #ifdef __cplusplus
 }
 #endif
