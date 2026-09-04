@@ -9,6 +9,8 @@
 #   install      backup-first: back up stock, then build & flash Catnip (#13)
 #   uninstall    restore stock: re-flash your backup, or official stock (#14)
 #   restore-stock  download & flash the official MeowKit firmware (#14)
+#   deploy       build with PlatformIO and flash Catnip, then watch it boot
+#   monitor      watch the serial log (the fastest way to see a boot succeed)
 #
 # Safety model (see the "Install" story): the ESP32-S3 ROM download mode is
 # always reachable over USB, so a flash can always be redone. Never burn eFuses
@@ -49,6 +51,30 @@ resolve_esptool() {
 	fi
 }
 
+# Reset strategies, in the order worth trying. The MeowKit exposes the
+# ESP32-S3's native USB-Serial-JTAG, where the classic DTR/RTS dance reaches
+# nothing - `usb-reset` is the one that actually pokes the ROM there. Trying
+# both costs a few seconds and saves reaching for the buttons.
+ESP_RESETS="default-reset usb-reset"
+
+# Run esptool, retrying with each reset strategy until one connects.
+esp_run() {
+	local r
+	for r in $ESP_RESETS; do
+		log "connecting (--before $r) ..."
+		# --after no-reset: leave the chip in download mode. Resetting out of
+		# it between steps would drop us back into the firmware, and the next
+		# step (flashing right after a backup) would have nothing to talk to.
+		if "${ESPTOOL_CMD[@]}" --chip "$CHIP" --port "$PORT" --baud "$BAUD" \
+			--before "$r" --after no-reset "$@"; then
+			return 0
+		fi
+	done
+	# Every strategy failed. Say so plainly: reporting success here would let
+	# callers act on a connection that does not exist.
+	return 1
+}
+
 # Auto-detect the serial port unless PORT is set.
 detect_port() {
 	if [ -n "${PORT:-}" ]; then
@@ -67,19 +93,39 @@ detect_port() {
 	done
 	case "${#found[@]}" in
 		1) PORT="${found[0]}"; log "auto-detected PORT=$PORT" ;;
-		0) die "no serial device found. Connect the MeowKit and enter download mode (hold BOOT, tap RESET), then set PORT=..." ;;
+		0) die "no serial device found. Power the MeowKit on (hold power 1-2s) - the USB port only appears while it is running - or set PORT=..." ;;
 		*) die "multiple serial devices found (${found[*]}). Set PORT=... to choose one" ;;
 	esac
 }
 
 download_mode_help() {
 	cat <<'EOF'
-If esptool cannot connect, put the MeowKit into ROM download mode by hand:
-  1. Hold the BOOT button.
-  2. Tap RESET (keep holding BOOT).
-  3. Release BOOT.
-Then re-run the command. This mode is always available and is the ultimate
-recovery path - the device cannot be permanently bricked by flashing.
+If esptool cannot connect, put the MeowKit into ROM download mode by hand.
+Two properties of this board make the usual recipe fail:
+
+  * There is no RESET button on the case - RESET is only a pin on the GPIO
+    expansion header - so you cannot tap reset while holding BOOT.
+  * It has a battery, so unplugging USB does not cut power. The chip keeps
+    running and never sees a power-up with BOOT held.
+
+Use the power button to get a real cold start:
+
+  1. Hold power 3-4s until the screen goes dark. The device is now off.
+  2. Hold BOOT.
+  3. With BOOT still held, press power 1-2s to switch it back on.
+  4. Keep holding BOOT for another second or two, then release.
+
+A screen that stays dark is the sign it worked: in download mode the ROM runs
+instead of the firmware, so nothing is drawn. The port name can change when
+the ROM takes over USB, so re-check it before retrying:
+
+  ls /dev/cu.usbmodem*        (macOS)      ls /dev/ttyACM*  (Linux)
+
+If that still fails, Espressif's browser flasher is the vendor's own route and
+drives the reset itself: https://espressif.github.io/esp-launchpad/
+
+Download mode is always reachable, which is what makes this recoverable: the
+device cannot be permanently bricked by flashing.
 EOF
 }
 
@@ -87,7 +133,7 @@ cmd_probe() {
 	resolve_esptool
 	detect_port
 	log "probing $CHIP on $PORT ..."
-	if ! "${ESPTOOL_CMD[@]}" --chip "$CHIP" --port "$PORT" flash_id; then
+	if ! esp_run flash-id; then
 		echo
 		download_mode_help
 		die "could not talk to the device on $PORT"
@@ -139,8 +185,7 @@ cmd_backup() {
 	mkdir -p "$BACKUP_DIR"
 	local out="${BACKUP:-$BACKUP_DIR/meowkit-stock-$(date +%Y%m%d-%H%M%S).bin}"
 	log "backing up the full 16 MB flash to $out (reads the whole chip) ..."
-	if ! "${ESPTOOL_CMD[@]}" --chip "$CHIP" --port "$PORT" --baud "$BAUD" \
-		read_flash 0x0 "$FLASH_SIZE_BYTES" "$out"; then
+	if ! esp_run read-flash 0x0 "$FLASH_SIZE_BYTES" "$out"; then
 		download_mode_help
 		die "backup read failed - refusing to go further"
 	fi
@@ -175,6 +220,34 @@ cmd_install() {
 		download_mode_help
 		die "flash failed - the device is still recoverable via 'make uninstall'"
 	fi
+	# Actually start it, and check that it started. esptool's RTS reset is a
+	# no-op on this board's native USB-Serial/JTAG: it prints "Hard resetting"
+	# and the chip stays in the ROM bootloader, so a flash that "succeeded"
+	# leaves a device that never runs what was just written. The watchdog reset
+	# is the one that lands - but not always on the first attempt, because the
+	# flasher stub is still winding down. So verify rather than announce: if the
+	# bootloader still answers, the app is not running.
+	log "starting the new firmware ..."
+	local started=0
+	for _ in 1 2 3; do
+		sleep 1
+		"${ESPTOOL_CMD[@]}" --chip "$CHIP" --port "$PORT" \
+			--before no-reset --after watchdog-reset chip-id >/dev/null 2>&1 || true
+		sleep 2
+		# A bootloader that answers means the reset did not take.
+		if ! "${ESPTOOL_CMD[@]}" --chip "$CHIP" --port "$PORT" \
+			--before no-reset --after no-reset chip-id >/dev/null 2>&1; then
+			started=1
+			break
+		fi
+	done
+	if [ "$started" = 1 ]; then
+		log "running."
+	else
+		log "flashed, but it is still sitting in the bootloader."
+		log "  power-cycle by hand: hold power 3-4s, then press it for 1-2s."
+	fi
+
 	log "Catnip installed. To revert to stock: make uninstall"
 }
 
@@ -223,8 +296,28 @@ cmd_uninstall() {
 	fi
 }
 
+# Watch the boot log. After a deploy this is the difference between "it
+# flashed" and "it actually came up".
+cmd_monitor() {
+	detect_port
+	log "watching $PORT at 115200 (ctrl-] or ctrl-c to stop)"
+	if command -v pio >/dev/null 2>&1; then
+		pio device monitor -p "$PORT" -b 115200
+	else
+		die "no monitor available; install PlatformIO, or use: screen $PORT 115200"
+	fi
+}
+
+# Build and flash in one step, then show the boot log so the result is visible
+# rather than assumed. Backs up stock first, exactly like install.
+cmd_deploy() {
+	cmd_install
+	log "flashed; watching the boot log so you can see it come up."
+	cmd_monitor
+}
+
 usage() {
-	sed -n '2,24p' "$0"
+	sed -n '2,23p' "$0"
 	exit "${1:-0}"
 }
 
@@ -239,8 +332,10 @@ main() {
 		install) cmd_install "$@" ;;
 		uninstall) cmd_uninstall "$@" ;;
 		restore-stock) cmd_restore_stock "$@" ;;
+		deploy) cmd_deploy "$@" ;;
+		monitor) cmd_monitor "$@" ;;
 		-h|--help|help) usage 0 ;;
-		*) die "unknown subcommand: $cmd (try: flash, probe, backup, install, uninstall, restore-stock)" ;;
+		*) die "unknown subcommand: $cmd (try: flash, probe, backup, install, uninstall, restore-stock, deploy, monitor)" ;;
 	esac
 }
 

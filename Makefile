@@ -1,6 +1,6 @@
 SUBDIR :=
 
-.PHONY: all clean test run build upgrade help flash backup install uninstall $(SUBDIR)
+.PHONY: all clean test run build ci upgrade help flash backup install uninstall deploy $(SUBDIR)
 
 all: $(SUBDIR) 		# default action
 	@[ -f .git/hooks/pre-commit ] || pre-commit install --install-hooks
@@ -18,14 +18,23 @@ run:				# run in the local environment
 build:				# build the firmware (host compile)
 	@$(MAKE) -C firmware build
 
+ci:					# run every check CI runs, before touching the device
+	@$(MAKE) -C firmware build
+	@$(MAKE) -C firmware test
+	@shellcheck scripts/*.sh
+	@pio run -d firmware -e meowkit
+
 flash:				# put the MeowKit into flash/download status (first-time setup)
 	@scripts/meowkit.sh flash
 
 backup:				# back up the MeowKit's full flash (do this before installing)
 	@scripts/meowkit.sh backup
 
-install:			# back up stock, then build & flash Catnip onto the MeowKit
+install: ci			# check first, then back up stock and flash Catnip
 	@scripts/meowkit.sh install
+
+deploy: ci			# check, flash, then watch it boot
+	@scripts/meowkit.sh deploy
 
 uninstall:			# restore the MeowKit to stock (from your backup, or official)
 	@scripts/meowkit.sh uninstall
