@@ -1,0 +1,2 @@
+# Raw framebuffer blobs: never diff or normalise them as text.
+*.rgb565 binary

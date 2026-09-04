@@ -22,6 +22,8 @@
 #include "device/led.h"
 #include "device/pmu.h"
 #include "device/power.h"
+#include "generated/anim_f01_rgb565.h"
+#include "generated/anim_f02_rgb565.h"
 #include "generated/splash_rgb565.h"
 
 /* Where apps live once the SD card is mounted (#32). */
@@ -54,6 +56,30 @@ static void host_pump(void *ud)
     /* The renderer replaces this with lv_timer_handler() so the display stays
      * live while a script waits (#30). Until then, just yield. */
     delay(1);
+}
+
+/* The idle animation (#40): the frames of catnip_idle_320x240.gif in the
+ * order the GIF plays them, but slower - the GIF's 170 ms per frame reads as
+ * twitchy on the panel, 400 ms reads as breathing. Frame 0 is the splash, so
+ * the first frame is already on screen when the animation starts. It keeps
+ * running until the shell takes the screen (#33), which is when g_animating
+ * gets cleared; until then it is the only sign the device has not frozen. */
+static bool g_animating = true;
+static const uint16_t *const g_anim_frames[] = {
+    catnip_splash, catnip_anim_f01, catnip_anim_f02, catnip_anim_f01,
+};
+static const size_t g_anim_count = sizeof(g_anim_frames) / sizeof(g_anim_frames[0]);
+static const unsigned long ANIM_FRAME_MS = 400;
+
+static void animate(void)
+{
+    static unsigned long last = 0;
+    static size_t frame = 0;
+    unsigned long now = millis();
+    if (!g_animating || now - last < ANIM_FRAME_MS) return;
+    last = now;
+    frame = (frame + 1) % g_anim_count;
+    catnip_display_blit(g_anim_frames[frame]);
 }
 
 /* Raise the backlight gradually - an abrupt jump to full reads as a flash. */
@@ -128,6 +154,7 @@ void setup()
 
 void loop()
 {
+    animate();
     catnip_led_breathe();
     if (g_shell) catnip_shell_step(g_shell);
 }

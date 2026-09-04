@@ -1,9 +1,11 @@
 """Turn binary assets into C arrays at build time (PlatformIO pre-script).
 
-The splash has to be in flash, not on the SD card: it is drawn before the card
-is mounted and before any image decoder exists. Rather than commit a ~600 KB
-generated header, the blob is converted here on the way into a build, so the
-repository keeps the artwork and the build keeps the array.
+The splash and the idle-animation frames have to be in flash, not on the SD
+card: they are drawn before the card is mounted and before any image decoder
+exists. Rather than commit ~600 KB of generated header per frame, each blob
+(made by tools/png_to_rgb565.py and committed next to the artwork) is converted
+here on the way into a build, so the repository keeps the artwork and the build
+keeps the arrays.
 """
 import os
 import struct
@@ -51,16 +53,26 @@ def emit_rgb565(src, out, symbol):
         f.write("\n};\n\n#endif\n")
 
 
+# (asset blob, generated header, C symbol). The splash doubles as frame 0 of
+# the idle animation; the GIF plays 0, 1, 2, 1.
+BLOBS = [
+    ("catnip_splash_320x240.rgb565", "splash_rgb565.h", "catnip_splash"),
+    ("catnip_anim_f01_320x240.rgb565", "anim_f01_rgb565.h", "catnip_anim_f01"),
+    ("catnip_anim_f02_320x240.rgb565", "anim_f02_rgb565.h", "catnip_anim_f02"),
+]
+
+
 def build():
     os.makedirs(OUT_DIR, exist_ok=True)
-    src = os.path.join(ASSETS, "catnip_splash_320x240.rgb565")
-    out = os.path.join(OUT_DIR, "splash_rgb565.h")
-    if not os.path.exists(src):
-        raise SystemExit("missing asset: %s" % src)
-    if os.path.exists(out) and os.path.getmtime(out) >= os.path.getmtime(src):
-        return  # up to date
-    emit_rgb565(src, out, "catnip_splash")
-    print("gen_assets: wrote %s" % os.path.relpath(out, REPO))
+    for blob, header, symbol in BLOBS:
+        src = os.path.join(ASSETS, blob)
+        out = os.path.join(OUT_DIR, header)
+        if not os.path.exists(src):
+            raise SystemExit("missing asset: %s" % src)
+        if os.path.exists(out) and os.path.getmtime(out) >= os.path.getmtime(src):
+            continue  # up to date
+        emit_rgb565(src, out, symbol)
+        print("gen_assets: wrote %s" % os.path.relpath(out, REPO))
 
 
 build()
