@@ -11,8 +11,10 @@
  * host test build (`make test`) compiles src/*.c and never this file.
  */
 #include <Arduino.h>
+#include <SD_MMC.h>
 
 #include "catnip_api.h"
+#include "catnip_config.h"
 #include "catnip_runtime.h"
 #include "catnip_shell.h"
 #include "device/board.h"
@@ -70,23 +72,42 @@ static const uint16_t *const g_anim_frames[] = {
     catnip_splash, catnip_anim_f01, catnip_anim_f02, catnip_anim_f01,
 };
 static const size_t g_anim_count = sizeof(g_anim_frames) / sizeof(g_anim_frames[0]);
-static const unsigned long ANIM_FRAME_MS = 400;
+static unsigned long g_frame_ms = 400;
+
+/* Frames from the card, when the owner supplied any: zero means the built-in
+ * mascot above. The two are played by the same loop, so the only difference
+ * between a stock device and a customised one is where the pixels came from. */
+static int g_sd_frames = 0;
+
+static size_t frame_count(void)
+{
+    return g_sd_frames ? (size_t)g_sd_frames : g_anim_count;
+}
+
+static void show_frame(size_t i)
+{
+    if (g_sd_frames) {
+        catnip_display_show_frame((int)i);
+    } else {
+        catnip_display_blit(g_anim_frames[i]);
+    }
+}
 
 static size_t g_frame = 0;
 
 static void draw_current_frame(void)
 {
-    if (g_animating) catnip_display_blit(g_anim_frames[g_frame]);
+    if (g_animating) show_frame(g_frame);
 }
 
 static void animate(void)
 {
     static unsigned long last = 0;
     unsigned long now = millis();
-    if (!g_animating || now - last < ANIM_FRAME_MS) return;
+    if (!g_animating || now - last < g_frame_ms) return;
     last = now;
-    g_frame = (g_frame + 1) % g_anim_count;
-    catnip_display_blit(g_anim_frames[g_frame]);
+    g_frame = (g_frame + 1) % frame_count();
+    show_frame(g_frame);
 }
 
 /* A short press of the power button turns the screen off and on again. The
@@ -140,6 +161,49 @@ static void poll_power_button(void)
 {
     if (catnip_pmu_power_key_held()) power_off();
     if (catnip_pmu_power_key_pressed()) set_screen(!g_screen_on);
+}
+
+/* Read the owner's settings off the card and act on them. Everything here is
+ * optional: no file, an unreadable file or a file full of typos all leave the
+ * built-in behaviour in place, and say so in the log rather than on screen. */
+#ifndef CATNIP_CONFIG_PATH
+#define CATNIP_CONFIG_PATH "/sd/catnip/config.json"
+#endif
+
+static void apply_config(void)
+{
+    catnip_config cfg;
+    catnip_config_defaults(&cfg);
+
+    File f = SD_MMC.open(CATNIP_CONFIG_PATH);
+    if (!f || f.isDirectory()) {
+        Serial.println("[catnip] config: none on the card, using the built-in settings");
+    } else {
+        size_t len = f.size();
+        char *text = (char *)malloc(len + 1);
+        if (text && f.readBytes(text, len) == len) {
+            text[len] = '\0';
+            if (catnip_config_parse(&cfg, text, len)) {
+                Serial.println("[catnip] config: read from " CATNIP_CONFIG_PATH);
+            } else {
+                Serial.println("[catnip] config: not valid JSON, using the built-in settings");
+            }
+        } else {
+            Serial.println("[catnip] config: could not be read, using the built-in settings");
+        }
+        free(text);
+        f.close();
+    }
+
+    catnip_led_configure(cfg.led_brightness, cfg.led_breaths_per_second);
+    g_frame_ms = cfg.boot_frame_ms;
+    if (cfg.boot_frames_dir[0]) {
+        g_sd_frames = catnip_display_load_frames(cfg.boot_frames_dir);
+        if (g_sd_frames) {
+            g_frame = 0;
+            show_frame(0);
+        }
+    }
 }
 
 /* Raise the backlight gradually - an abrupt jump to full reads as a flash. */
@@ -197,7 +261,7 @@ void setup()
 
     /* After the splash, deliberately: the card is the slowest thing in the
      * boot and nothing on screen should wait for it. */
-    catnip_sd_mount();
+    if (catnip_sd_mount()) apply_config();
 
     g_rt = catnip_rt_new_tracked(); /* Lua heap lives in PSRAM (#8) */
     if (!g_rt) {
