@@ -9,7 +9,6 @@
 #   install      backup-first: back up stock, then build & flash Catnip (#13)
 #   uninstall    restore stock: re-flash your backup, or official stock (#14)
 #   restore-stock  download & flash the official MeowKit firmware (#14)
-#   deploy       build with PlatformIO and flash Catnip, then watch it boot
 #   monitor      watch the serial log (the fastest way to see a boot succeed)
 #
 # Safety model (see the "Install" story): the ESP32-S3 ROM download mode is
@@ -296,24 +295,50 @@ cmd_uninstall() {
 	fi
 }
 
-# Watch the boot log. After a deploy this is the difference between "it
-# flashed" and "it actually came up".
+# Watch the serial log. After a flash this is the difference between "it was
+# written" and "it is running".
 cmd_monitor() {
 	detect_port
-	log "watching $PORT at 115200 (ctrl-] or ctrl-c to stop)"
-	if command -v pio >/dev/null 2>&1; then
-		pio device monitor -p "$PORT" -b 115200
-	else
-		die "no monitor available; install PlatformIO, or use: screen $PORT 115200"
-	fi
-}
-
-# Build and flash in one step, then show the boot log so the result is visible
-# rather than assumed. Backs up stock first, exactly like install.
-cmd_deploy() {
-	cmd_install
-	log "flashed; watching the boot log so you can see it come up."
-	cmd_monitor
+	log "watching $PORT (ctrl-c to stop)"
+	# pio's monitor wants a terminal and fails when there is not one, so read
+	# the port directly. Reconnect on the way through: the port disappears and
+	# comes back whenever the device resets, and dropping out at that moment
+	# loses exactly the boot log worth watching for.
+	local py
+	for py in python3 /opt/homebrew/Cellar/esptool/*/libexec/bin/python; do
+		[ -x "$(command -v "$py" 2>/dev/null || echo "$py")" ] || continue
+		"$py" - "$PORT" <<-'PY' && return 0
+			import sys, time, glob
+			try:
+			    import serial
+			except ImportError:
+			    sys.exit(9)
+			want = sys.argv[1]
+			while True:
+			    ports = [want] if glob.glob(want) else sorted(glob.glob('/dev/cu.usbmodem*'))
+			    if not ports:
+			        time.sleep(0.3); continue
+			    try:
+			        s = serial.Serial(ports[0], 115200, timeout=0.3)
+			    except Exception:
+			        time.sleep(0.3); continue
+			    try:
+			        while True:
+			            d = s.read(512)
+			            if d:
+			                sys.stdout.write(d.decode("utf-8", "replace"))
+			                sys.stdout.flush()
+			    except KeyboardInterrupt:
+			        return
+			    except Exception:
+			        pass
+			    finally:
+			        try: s.close()
+			        except Exception: pass
+			    time.sleep(0.2)
+		PY
+	done
+	die "no python with pyserial found; try: pio device monitor -p $PORT -b 115200"
 }
 
 usage() {
@@ -332,10 +357,9 @@ main() {
 		install) cmd_install "$@" ;;
 		uninstall) cmd_uninstall "$@" ;;
 		restore-stock) cmd_restore_stock "$@" ;;
-		deploy) cmd_deploy "$@" ;;
 		monitor) cmd_monitor "$@" ;;
 		-h|--help|help) usage 0 ;;
-		*) die "unknown subcommand: $cmd (try: flash, probe, backup, install, uninstall, restore-stock, deploy, monitor)" ;;
+		*) die "unknown subcommand: $cmd (try: flash, probe, backup, install, uninstall, restore-stock, monitor)" ;;
 	esac
 }
 
