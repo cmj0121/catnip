@@ -4,12 +4,12 @@ The Catnip runtime for the MeowKit (ESP32-S3).
 
 ## Layout
 
-| Path | What |
-| --- | --- |
-| `lib/lua/` | Vendored Lua 5.4 (C core + stdlib) |
-| `src/` | Catnip runtime (embeds Lua, runs scripts) |
-| `test/native/` | Host tests, run with `make test` |
-| `platformio.ini` | On-device build (ESP32-S3) |
+| Path             | What                                      |
+| ---------------- | ----------------------------------------- |
+| `lib/lua/`       | Vendored Lua 5.4 (C core + stdlib)        |
+| `src/`           | Catnip runtime (embeds Lua, runs scripts) |
+| `test/native/`   | Host tests, run with `make test`          |
+| `platformio.ini` | On-device build (ESP32-S3)                |
 
 ## Host tests
 

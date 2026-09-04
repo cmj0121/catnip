@@ -20,7 +20,12 @@ repos:
         types_or: [c, c++]
         # Vendored upstream code keeps upstream's formatting; reformatting it
         # would bury the diff of the next update in noise.
-        exclude: '^firmware/lib/'
+        exclude: "^firmware/lib/"
+  - repo: https://github.com/rbubley/mirrors-prettier
+    rev: v3.9.6
+    hooks:
+      - id: prettier
+        exclude: "^firmware/lib/"
   - repo: https://github.com/igorshubovych/markdownlint-cli
     rev: v0.45.0
     hooks:

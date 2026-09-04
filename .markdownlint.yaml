@@ -1,6 +1,10 @@
+# Prose still has to fit, but table rows are Prettier's business now: it pads
+# every cell to the width of its column, which reads better in the source and
+# routinely runs past any line limit. Two tools with opinions about the same
+# line is how a formatter ends up fighting a linter forever.
 MD013:
   line_length: 128
-  tables: true
+  tables: false
 
 MD033:
-  allowed_elements: ['img']
+  allowed_elements: ["img"]

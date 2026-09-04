@@ -126,17 +126,17 @@ it made of the file in the serial log.
 
 ```json
 {
-  "led":  { "brightness": 8, "breaths_per_second": 0.4 },
+  "led": { "brightness": 8, "breaths_per_second": 0.4 },
   "boot": { "frames": "/sd/catnip/boot", "frame_ms": 400 }
 }
 ```
 
-| Setting | Means | Default |
-| --- | --- | --- |
-| `led.brightness` | Peak of the LED's breath, 0-255. A WS2812 is brighter than people expect, hence the low default. | `8` |
-| `led.breaths_per_second` | How often it breathes. `0.4` is one breath every two and a half seconds. | `0.4` |
-| `boot.frames` | Frames to play, in filename order. `.jpg`, `.png` and `.qoi` work. Omit for the built-in mascot. | built-in |
-| `boot.frame_ms` | How long each frame is shown. | `400` |
+| Setting                  | Means                                                                                            | Default  |
+| ------------------------ | ------------------------------------------------------------------------------------------------ | -------- |
+| `led.brightness`         | Peak of the LED's breath, 0-255. A WS2812 is brighter than people expect, hence the low default. | `8`      |
+| `led.breaths_per_second` | How often it breathes. `0.4` is one breath every two and a half seconds.                         | `0.4`    |
+| `boot.frames`            | Frames to play, in filename order. `.jpg`, `.png` and `.qoi` work. Omit for the built-in mascot. | built-in |
+| `boot.frame_ms`          | How long each frame is shown.                                                                    | `400`    |
 
 Frames are 320x240 and are decoded once at boot into PSRAM, so playing them
 costs nothing afterwards; sixteen of them is the limit. A value outside its
@@ -145,10 +145,10 @@ line rather than the whole file.
 
 ## Buttons
 
-| Press | Does |
-| --- | --- |
+| Press        | Does                                                                                                      |
+| ------------ | --------------------------------------------------------------------------------------------------------- |
 | Power, short | Turns the screen off and on. The LED keeps breathing, so a dark screen is still visibly a running device. |
-| Power, held | Switches the device off. |
+| Power, held  | Switches the device off.                                                                                  |
 
 ## Status
 
