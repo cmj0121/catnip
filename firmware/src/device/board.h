@@ -33,6 +33,12 @@
 #define CATNIP_LCD_RGB_ORDER  false
 #define CATNIP_LCD_SPI_HZ     80000000
 #define CATNIP_LCD_BL_PWM_HZ  44100
+/* The backlight enable is active-low: driving IO42 low lights the panel and
+ * a 100% PWM duty switches it off. Found by cycling the pin by hand and
+ * watching the screen; the published source says invert = false, and with
+ * that setting "brightness 0" at boot is full on and "brightness 255" is off,
+ * which is how a working panel looked dead. */
+#define CATNIP_LCD_BL_INVERT  true
 
 /* Screen size as oriented for the user. */
 #define CATNIP_SCREEN_W 320

@@ -56,7 +56,7 @@ public:
         {
             auto cfg = light_.config();
             cfg.pin_bl = CATNIP_PIN_LCD_BL;
-            cfg.invert = false;
+            cfg.invert = CATNIP_LCD_BL_INVERT;
             cfg.freq   = CATNIP_LCD_BL_PWM_HZ;
             cfg.pwm_channel = 7;
             light_.config(cfg);
