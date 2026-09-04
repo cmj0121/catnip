@@ -31,13 +31,13 @@ bool catnip_sd_mount(void)
 
     const char *type = "unknown";
     switch (SD_MMC.cardType()) {
-    case CARD_MMC:  type = "MMC"; break;
-    case CARD_SD:   type = "SD"; break;
+    case CARD_MMC: type = "MMC"; break;
+    case CARD_SD: type = "SD"; break;
     case CARD_SDHC: type = "SDHC"; break;
     default: break;
     }
-    Serial.printf("[catnip] sd: %s card, %llu MB, mounted at /sd\n",
-                  type, SD_MMC.cardSize() / (1024ULL * 1024ULL));
+    Serial.printf("[catnip] sd: %s card, %llu MB, mounted at /sd\n", type,
+                  SD_MMC.cardSize() / (1024ULL * 1024ULL));
     g_mounted = true;
     return true;
 }

@@ -13,8 +13,8 @@
 #define DEFAULT_LED_BREATHS_PER_SEC 0.4f
 #define DEFAULT_BOOT_FRAME_MS       400
 
-#define MIN_BREATHS_PER_SEC 0.05f  /* one breath every 20 s */
-#define MAX_BREATHS_PER_SEC 10.0f  /* faster than this is a flicker, not a breath */
+#define MIN_BREATHS_PER_SEC 0.05f /* one breath every 20 s */
+#define MAX_BREATHS_PER_SEC 10.0f /* faster than this is a flicker, not a breath */
 #define MIN_FRAME_MS        20
 #define MAX_FRAME_MS        10000
 
@@ -35,15 +35,14 @@ static double clamp(double v, double lo, double hi)
 
 /* Read one number from `parent`, clamped. Leaves `*out` alone if the field is
  * absent or is not a number. */
-static void read_number(const cJSON *parent, const char *name,
-                        double lo, double hi, double *out)
+static void read_number(const cJSON *parent, const char *name, double lo, double hi,
+                        double *out)
 {
     const cJSON *item = cJSON_GetObjectItemCaseSensitive(parent, name);
     if (cJSON_IsNumber(item)) *out = clamp(item->valuedouble, lo, hi);
 }
 
-static void read_path(const cJSON *parent, const char *name,
-                      char *out, size_t out_size)
+static void read_path(const cJSON *parent, const char *name, char *out, size_t out_size)
 {
     const cJSON *item = cJSON_GetObjectItemCaseSensitive(parent, name);
     if (!cJSON_IsString(item) || !item->valuestring) return;
@@ -65,7 +64,8 @@ bool catnip_config_parse(catnip_config *cfg, const char *json, size_t len)
         double brightness = cfg->led_brightness;
         double breaths = cfg->led_breaths_per_second;
         read_number(led, "brightness", 0, 255, &brightness);
-        read_number(led, "breaths_per_second", MIN_BREATHS_PER_SEC, MAX_BREATHS_PER_SEC, &breaths);
+        read_number(led, "breaths_per_second", MIN_BREATHS_PER_SEC, MAX_BREATHS_PER_SEC,
+                    &breaths);
         cfg->led_brightness = (uint8_t)brightness;
         cfg->led_breaths_per_second = (float)breaths;
     }

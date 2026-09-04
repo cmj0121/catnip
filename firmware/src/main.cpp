@@ -69,7 +69,10 @@ static void host_pump(void *ud)
  * gets cleared; until then it is the only sign the device has not frozen. */
 static bool g_animating = true;
 static const uint16_t *const g_anim_frames[] = {
-    catnip_splash, catnip_anim_f01, catnip_anim_f02, catnip_anim_f01,
+    catnip_splash,
+    catnip_anim_f01,
+    catnip_anim_f02,
+    catnip_anim_f01,
 };
 static const size_t g_anim_count = sizeof(g_anim_frames) / sizeof(g_anim_frames[0]);
 static unsigned long g_frame_ms = 400;
@@ -186,10 +189,12 @@ static void apply_config(void)
             if (catnip_config_parse(&cfg, text, len)) {
                 Serial.println("[catnip] config: read from " CATNIP_CONFIG_PATH);
             } else {
-                Serial.println("[catnip] config: not valid JSON, using the built-in settings");
+                Serial.println(
+                    "[catnip] config: not valid JSON, using the built-in settings");
             }
         } else {
-            Serial.println("[catnip] config: could not be read, using the built-in settings");
+            Serial.println(
+                "[catnip] config: could not be read, using the built-in settings");
         }
         free(text);
         f.close();
@@ -232,7 +237,6 @@ void setup()
         delay(10);
     }
     Serial.println("[catnip] boot");
-
 
     /* A sign of life that does not depend on the screen or on anything having
      * attached to the serial port. It comes up after Serial deliberately: when

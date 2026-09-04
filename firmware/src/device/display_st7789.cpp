@@ -25,39 +25,40 @@
 namespace {
 
 class Panel : public lgfx::LGFX_Device {
-public:
+  public:
     Panel()
     {
         {
             auto cfg = bus_.config();
-            cfg.spi_host   = SPI2_HOST;
-            cfg.spi_mode   = 0;
+            cfg.spi_host = SPI2_HOST;
+            cfg.spi_mode = 0;
             cfg.freq_write = CATNIP_LCD_SPI_HZ;
-            cfg.freq_read  = 16000000;
-            cfg.spi_3wire  = false;  /* the panel has a real D/C pin; 9-bit mode would garble it */
-            cfg.use_lock   = true;
+            cfg.freq_read = 16000000;
+            cfg.spi_3wire =
+                false; /* the panel has a real D/C pin; 9-bit mode would garble it */
+            cfg.use_lock = true;
             cfg.dma_channel = SPI_DMA_CH_AUTO;
             cfg.pin_sclk = CATNIP_PIN_LCD_SCLK;
             cfg.pin_mosi = CATNIP_PIN_LCD_MOSI;
             cfg.pin_miso = CATNIP_PIN_LCD_MISO;
-            cfg.pin_dc   = CATNIP_PIN_LCD_DC;
+            cfg.pin_dc = CATNIP_PIN_LCD_DC;
             bus_.config(cfg);
             panel_.setBus(&bus_);
         }
         {
             auto cfg = panel_.config();
-            cfg.pin_cs   = CATNIP_PIN_LCD_CS;
-            cfg.pin_rst  = CATNIP_PIN_LCD_RST;
+            cfg.pin_cs = CATNIP_PIN_LCD_CS;
+            cfg.pin_rst = CATNIP_PIN_LCD_RST;
             cfg.pin_busy = -1;
-            cfg.panel_width  = CATNIP_LCD_PANEL_W;
+            cfg.panel_width = CATNIP_LCD_PANEL_W;
             cfg.panel_height = CATNIP_LCD_PANEL_H;
             cfg.offset_x = 0;
             cfg.offset_y = 0;
             /* The die is mounted sideways; this presents it as 320x240. */
             cfg.offset_rotation = CATNIP_LCD_ROTATION;
-            cfg.readable   = false;   /* write-only: MISO is not connected */
-            cfg.invert     = CATNIP_LCD_INVERT;
-            cfg.rgb_order  = CATNIP_LCD_RGB_ORDER;
+            cfg.readable = false; /* write-only: MISO is not connected */
+            cfg.invert = CATNIP_LCD_INVERT;
+            cfg.rgb_order = CATNIP_LCD_RGB_ORDER;
             cfg.dlen_16bit = false;
             cfg.bus_shared = false;
             panel_.config(cfg);
@@ -66,7 +67,7 @@ public:
             auto cfg = light_.config();
             cfg.pin_bl = CATNIP_PIN_LCD_BL;
             cfg.invert = CATNIP_LCD_BL_INVERT;
-            cfg.freq   = CATNIP_LCD_BL_PWM_HZ;
+            cfg.freq = CATNIP_LCD_BL_PWM_HZ;
             cfg.pwm_channel = 7;
             light_.config(cfg);
             panel_.setLight(&light_);
@@ -74,20 +75,20 @@ public:
         setPanel(&panel_);
     }
 
-private:
+  private:
     lgfx::Panel_ST7789 panel_;
-    lgfx::Bus_SPI      bus_;
-    lgfx::Light_PWM    light_;
+    lgfx::Bus_SPI bus_;
+    lgfx::Light_PWM light_;
 };
 
 Panel g_panel;
-bool  g_up = false;
+bool g_up = false;
 
 /* Boot animation frames, decoded into PSRAM. The cap is a memory budget: each
  * frame is a full 320x240 at 16 bits, so 150 KB, and sixteen of them is 2.4 MB
  * of the 8 MB PSRAM. A directory with more than this in it plays the first
  * sixteen rather than failing. */
-const int  MAX_FRAMES = 16;
+const int MAX_FRAMES = 16;
 /* Not NAME_MAX: that is a system macro, and naming a constant after it here
  * expands into nonsense at the point of use. */
 const size_t FRAME_NAME_MAX = 64;
@@ -108,8 +109,10 @@ bool decode_into(lgfx::LGFX_Sprite *sprite, const char *path)
 {
     const char *dot = strrchr(path, '.');
     if (!dot) return false;
-    if (!strcasecmp(dot, ".png")) return sprite->drawPngFile((fs::FS &)SD_MMC, path, 0, 0);
-    if (!strcasecmp(dot, ".qoi")) return sprite->drawQoiFile((fs::FS &)SD_MMC, path, 0, 0);
+    if (!strcasecmp(dot, ".png"))
+        return sprite->drawPngFile((fs::FS &)SD_MMC, path, 0, 0);
+    if (!strcasecmp(dot, ".qoi"))
+        return sprite->drawQoiFile((fs::FS &)SD_MMC, path, 0, 0);
     return sprite->drawJpgFile((fs::FS &)SD_MMC, path, 0, 0);
 }
 

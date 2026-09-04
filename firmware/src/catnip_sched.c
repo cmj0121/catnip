@@ -22,11 +22,11 @@
 
 struct catnip_sched {
     catnip_rt *rt;
-    lua_State *co;   /* the app coroutine (NULL until start) */
-    int co_ref;      /* registry ref pinning `co` against GC */
-    int state;       /* last CATNIP_* state */
-    unsigned long wake; /* millis at which to resume, when sleeping */
-    int started;     /* has the coroutine been resumed at least once */
+    lua_State *co;          /* the app coroutine (NULL until start) */
+    int co_ref;             /* registry ref pinning `co` against GC */
+    int state;              /* last CATNIP_* state */
+    unsigned long wake;     /* millis at which to resume, when sleeping */
+    int started;            /* has the coroutine been resumed at least once */
     unsigned long wd_count; /* watchdog: hook fires in the current resume */
     catnip_now_fn now;
     catnip_pump_fn pump;
@@ -84,8 +84,8 @@ static void install_sys(catnip_sched *s)
     lua_setglobal(L, "sys");
 }
 
-catnip_sched *catnip_sched_new(catnip_rt *rt, catnip_now_fn now,
-                               catnip_pump_fn pump, void *ud)
+catnip_sched *catnip_sched_new(catnip_rt *rt, catnip_now_fn now, catnip_pump_fn pump,
+                               void *ud)
 {
     if (!rt) return NULL;
     catnip_sched *s = (catnip_sched *)calloc(1, sizeof(*s));
@@ -124,8 +124,7 @@ int catnip_sched_start(catnip_sched *s, const char *code, const char *chunkname)
     *(catnip_sched **)lua_getextraspace(s->co) = s;
     lua_sethook(s->co, wd_hook, LUA_MASKCOUNT, CATNIP_WD_INSTR_PER_HOOK);
 
-    int ld = luaL_loadbuffer(s->co, code, strlen(code),
-                             chunkname ? chunkname : "=app");
+    int ld = luaL_loadbuffer(s->co, code, strlen(code), chunkname ? chunkname : "=app");
     if (ld != LUA_OK) {
         /* surface the load error through the runtime, then discard */
         lua_xmove(s->co, L, 1); /* move error to L (unused) */
@@ -169,8 +168,7 @@ static int resume_app(catnip_sched *s)
 int catnip_sched_step(catnip_sched *s)
 {
     if (!s) return CATNIP_IDLE;
-    if (s->state == CATNIP_DONE || s->state == CATNIP_ERROR ||
-        s->state == CATNIP_IDLE)
+    if (s->state == CATNIP_DONE || s->state == CATNIP_ERROR || s->state == CATNIP_IDLE)
         return s->state;
 
     /* Sleeping and not yet due: pump the host and wait. */

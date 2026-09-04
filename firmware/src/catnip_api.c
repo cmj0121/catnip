@@ -159,8 +159,8 @@ static int l_http_get(lua_State *L)
 
 /* ---- fs.* (flat, confined to hal->fs_base) ---- */
 
-static int fs_path(lua_State *L, const catnip_hal *h, const char *name,
-                   char *out, size_t cap)
+static int fs_path(lua_State *L, const catnip_hal *h, const char *name, char *out,
+                   size_t cap)
 {
     if (!h || !h->fs_base) return luaL_error(L, "fs not available");
     /* Allow subdirectories, but never escape the base with "..". */
@@ -178,7 +178,10 @@ static int l_fs_write(lua_State *L)
     char path[512];
     fs_path(L, h, name, path, sizeof(path));
     FILE *f = fopen(path, "wb");
-    if (!f) { lua_pushboolean(L, 0); return 1; }
+    if (!f) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
     size_t wrote = fwrite(data, 1, len, f);
     fclose(f);
     lua_pushboolean(L, wrote == len);
@@ -192,7 +195,10 @@ static int l_fs_read(lua_State *L)
     char path[512];
     fs_path(L, h, name, path, sizeof(path));
     FILE *f = fopen(path, "rb");
-    if (!f) { lua_pushnil(L); return 1; }
+    if (!f) {
+        lua_pushnil(L);
+        return 1;
+    }
     luaL_Buffer b;
     luaL_buffinit(L, &b);
     char chunk[512];
@@ -249,13 +255,14 @@ static int l_fs_list(lua_State *L)
     if (strstr(sub, "..")) return luaL_error(L, "bad path");
 
     char dir[512];
-    if (sub[0])
-        snprintf(dir, sizeof(dir), "%s/%s", h->fs_base, sub);
-    else
-        snprintf(dir, sizeof(dir), "%s", h->fs_base);
+    if (sub[0]) snprintf(dir, sizeof(dir), "%s/%s", h->fs_base, sub);
+    else snprintf(dir, sizeof(dir), "%s", h->fs_base);
 
     DIR *d = opendir(dir);
-    if (!d) { lua_pushnil(L); return 1; }
+    if (!d) {
+        lua_pushnil(L);
+        return 1;
+    }
 
     lua_newtable(L);
     int i = 0;
@@ -292,7 +299,10 @@ static int l_fs_stat(lua_State *L)
     char path[512];
     fs_path(L, h, name, path, sizeof(path));
     struct stat st;
-    if (stat(path, &st) != 0) { lua_pushnil(L); return 1; }
+    if (stat(path, &st) != 0) {
+        lua_pushnil(L);
+        return 1;
+    }
     lua_newtable(L);
     lua_pushinteger(L, (lua_Integer)st.st_size);
     lua_setfield(L, -2, "size");
@@ -320,16 +330,15 @@ static void install(lua_State *L, const catnip_hal *hal, const char *name,
 }
 
 /* service.kv is a simple in-memory store; persistence is later fs/nvs work. */
-static const char KV_LUA[] =
-    "service.kv = (function()\n"
-    "  local store = {}\n"
-    "  return {\n"
-    "    set = function(k, v) store[k] = v end,\n"
-    "    get = function(k) return store[k] end,\n"
-    "    delete = function(k) store[k] = nil end,\n"
-    "  }\n"
-    "end)()\n"
-    "if catnip then catnip.service = service end\n";
+static const char KV_LUA[] = "service.kv = (function()\n"
+                             "  local store = {}\n"
+                             "  return {\n"
+                             "    set = function(k, v) store[k] = v end,\n"
+                             "    get = function(k) return store[k] end,\n"
+                             "    delete = function(k) store[k] = nil end,\n"
+                             "  }\n"
+                             "end)()\n"
+                             "if catnip then catnip.service = service end\n";
 
 int catnip_api_open(catnip_rt *rt, const catnip_hal *hal)
 {
@@ -337,22 +346,22 @@ int catnip_api_open(catnip_rt *rt, const catnip_hal *hal)
     if (!L) return -1;
 
     static const luaL_Reg device_funcs[] = {
-        {"vibrate", l_vibrate},       {"led", l_led},
-        {"battery", l_battery},       {"brightness", l_brightness},
-        {"button", l_button},         {NULL, NULL}};
-    static const luaL_Reg sensor_funcs[] = {
-        {"imu", l_imu}, {"rtc", l_rtc}, {NULL, NULL}};
-    static const luaL_Reg gpio_funcs[] = {
-        {"mode", l_gpio_mode}, {"write", l_gpio_write},
-        {"read", l_gpio_read}, {"adc", l_gpio_adc}, {NULL, NULL}};
-    static const luaL_Reg service_funcs[] = {
-        {"wifi_status", l_wifi_status}, {"wifi_ssid", l_wifi_ssid},
-        {"http_get", l_http_get},       {NULL, NULL}};
-    static const luaL_Reg fs_funcs[] = {
-        {"read", l_fs_read},     {"write", l_fs_write},
-        {"exists", l_fs_exists}, {"list", l_fs_list},
-        {"stat", l_fs_stat},     {"delete", l_fs_delete},
-        {"reset", l_fs_reset},   {NULL, NULL}};
+        {"vibrate", l_vibrate},       {"led", l_led},       {"battery", l_battery},
+        {"brightness", l_brightness}, {"button", l_button}, {NULL, NULL}};
+    static const luaL_Reg sensor_funcs[] = {{"imu", l_imu}, {"rtc", l_rtc}, {NULL, NULL}};
+    static const luaL_Reg gpio_funcs[] = {{"mode", l_gpio_mode},
+                                          {"write", l_gpio_write},
+                                          {"read", l_gpio_read},
+                                          {"adc", l_gpio_adc},
+                                          {NULL, NULL}};
+    static const luaL_Reg service_funcs[] = {{"wifi_status", l_wifi_status},
+                                             {"wifi_ssid", l_wifi_ssid},
+                                             {"http_get", l_http_get},
+                                             {NULL, NULL}};
+    static const luaL_Reg fs_funcs[] = {{"read", l_fs_read},     {"write", l_fs_write},
+                                        {"exists", l_fs_exists}, {"list", l_fs_list},
+                                        {"stat", l_fs_stat},     {"delete", l_fs_delete},
+                                        {"reset", l_fs_reset},   {NULL, NULL}};
 
     install(L, hal, "device", device_funcs);
     install(L, hal, "sensor", sensor_funcs);

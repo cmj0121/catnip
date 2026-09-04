@@ -42,8 +42,8 @@ typedef struct catnip_sched catnip_sched;
 
 /* Create a scheduler over `rt`. `now`/`pump`/`ud` are the host hooks. Installs
  * the `sys` table (sys.sleep, sys.now) into the runtime's globals. */
-catnip_sched *catnip_sched_new(catnip_rt *rt, catnip_now_fn now,
-                               catnip_pump_fn pump, void *ud);
+catnip_sched *catnip_sched_new(catnip_rt *rt, catnip_now_fn now, catnip_pump_fn pump,
+                               void *ud);
 
 /* Load `code` as the app coroutine, ready to run on the next step. Returns 0 on
  * success, non-zero on a load (syntax) error. */

@@ -9,17 +9,29 @@
 #include "lauxlib.h"
 #include "lua.h"
 
-static unsigned long g_now;  /* fake monotonic clock (ms) */
-static int g_pump;           /* counts host pumps (stand-in for lv_timer_handler) */
+static unsigned long g_now; /* fake monotonic clock (ms) */
+static int g_pump;          /* counts host pumps (stand-in for lv_timer_handler) */
 
-static unsigned long now_fn(void *ud) { (void)ud; return g_now; }
-static void pump_fn(void *ud) { (void)ud; g_pump++; }
+static unsigned long now_fn(void *ud)
+{
+    (void)ud;
+    return g_now;
+}
+static void pump_fn(void *ud)
+{
+    (void)ud;
+    g_pump++;
+}
 
 static int failures;
-#define CHECK(cond, name)                                                    \
-    do {                                                                     \
-        if (cond) { printf("  ok   - %s\n", name); }                        \
-        else { printf("  FAIL - %s\n", name); failures++; }                 \
+#define CHECK(cond, name)                                                                \
+    do {                                                                                 \
+        if (cond) {                                                                      \
+            printf("  ok   - %s\n", name);                                               \
+        } else {                                                                         \
+            printf("  FAIL - %s\n", name);                                               \
+            failures++;                                                                  \
+        }                                                                                \
     } while (0)
 
 static lua_Integer global_int(catnip_rt *rt, const char *name)
@@ -49,12 +61,11 @@ int main(void)
     CHECK(s != NULL, "scheduler created");
 
     /* A loop that sleeps between iterations - the canonical app shape. */
-    const char *app =
-        "count = 0\n"
-        "for i = 1, 3 do\n"
-        "  count = count + 1\n"
-        "  sys.sleep(1000)\n"
-        "end\n";
+    const char *app = "count = 0\n"
+                      "for i = 1, 3 do\n"
+                      "  count = count + 1\n"
+                      "  sys.sleep(1000)\n"
+                      "end\n";
 
     g_now = 0;
     g_pump = 0;

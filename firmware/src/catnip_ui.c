@@ -91,7 +91,7 @@ int catnip_ui_open(catnip_rt *rt)
 
     lua_getglobal(L, "catnip");
     if (lua_istable(L, -1)) {
-        lua_pushvalue(L, -2); /* ui */
+        lua_pushvalue(L, -2);      /* ui */
         lua_setfield(L, -2, "ui"); /* catnip.ui = ui */
     }
     lua_pop(L, 2); /* catnip (or its nil) + ui */

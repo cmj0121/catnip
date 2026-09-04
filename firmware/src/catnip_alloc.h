@@ -19,9 +19,9 @@ extern "C" {
 #endif
 
 typedef struct {
-    size_t in_use;       /* bytes Lua currently holds */
-    size_t peak;         /* high-water mark of in_use */
-    unsigned long ops;   /* number of alloc/realloc/free calls */
+    size_t in_use;     /* bytes Lua currently holds */
+    size_t peak;       /* high-water mark of in_use */
+    unsigned long ops; /* number of alloc/realloc/free calls */
 } catnip_alloc;
 
 void catnip_alloc_init(catnip_alloc *a);

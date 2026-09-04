@@ -56,8 +56,7 @@ void catnip_led_level(uint8_t brightness)
     g_level = brightness;
     /* Scale the brand colour rather than fading to white: a WS2812 has three
      * separate emitters, and dimming each in proportion keeps the hue. */
-    neopixelWrite(CATNIP_PIN_LED,
-                  (uint8_t)((BRAND_R * brightness) / 255),
+    neopixelWrite(CATNIP_PIN_LED, (uint8_t)((BRAND_R * brightness) / 255),
                   (uint8_t)((BRAND_G * brightness) / 255),
                   (uint8_t)((BRAND_B * brightness) / 255));
 }

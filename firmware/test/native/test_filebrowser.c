@@ -22,19 +22,31 @@
 #endif
 
 static int g_reset_calls;
-static int m_sd_reset(void *ud) { (void)ud; g_reset_calls++; return 0; }
+static int m_sd_reset(void *ud)
+{
+    (void)ud;
+    g_reset_calls++;
+    return 0;
+}
 
 static int failures;
-#define CHECK(cond, name)                                                    \
-    do {                                                                     \
-        if (cond) { printf("  ok   - %s\n", name); }                        \
-        else { printf("  FAIL - %s\n", name); failures++; }                 \
+#define CHECK(cond, name)                                                                \
+    do {                                                                                 \
+        if (cond) {                                                                      \
+            printf("  ok   - %s\n", name);                                               \
+        } else {                                                                         \
+            printf("  FAIL - %s\n", name);                                               \
+            failures++;                                                                  \
+        }                                                                                \
     } while (0)
 
 static void write_file(const char *path, const char *content)
 {
     FILE *f = fopen(path, "wb");
-    if (f) { fputs(content, f); fclose(f); }
+    if (f) {
+        fputs(content, f);
+        fclose(f);
+    }
 }
 
 static char *read_file(const char *path)
@@ -93,15 +105,25 @@ static const char *DRIVER =
 int main(void)
 {
     char base[] = "/tmp/catnip_fb_XXXXXX";
-    if (!mkdtemp(base)) { printf("FAIL - mkdtemp\n"); return 1; }
+    if (!mkdtemp(base)) {
+        printf("FAIL - mkdtemp\n");
+        return 1;
+    }
     char p[512];
-    snprintf(p, sizeof(p), "%s/a.txt", base); write_file(p, "hello");
-    snprintf(p, sizeof(p), "%s/b.txt", base); write_file(p, "bye");
-    snprintf(p, sizeof(p), "%s/docs", base); mkdir(p, 0777);
-    snprintf(p, sizeof(p), "%s/docs/note.txt", base); write_file(p, "note");
+    snprintf(p, sizeof(p), "%s/a.txt", base);
+    write_file(p, "hello");
+    snprintf(p, sizeof(p), "%s/b.txt", base);
+    write_file(p, "bye");
+    snprintf(p, sizeof(p), "%s/docs", base);
+    mkdir(p, 0777);
+    snprintf(p, sizeof(p), "%s/docs/note.txt", base);
+    write_file(p, "note");
 
     char *app = read_file(APP_MAIN);
-    if (!app) { printf("FAIL - cannot read %s\n", APP_MAIN); return 1; }
+    if (!app) {
+        printf("FAIL - cannot read %s\n", APP_MAIN);
+        return 1;
+    }
 
     catnip_hal hal;
     memset(&hal, 0, sizeof(hal));

@@ -17,13 +17,21 @@ static void capture(void *ud, const char *msg, size_t len)
     g_log[len] = '\0';
     g_lines++;
 }
-static void reset(void) { g_log[0] = '\0'; g_lines = 0; }
+static void reset(void)
+{
+    g_log[0] = '\0';
+    g_lines = 0;
+}
 
 static int failures;
-#define CHECK(cond, name)                                                    \
-    do {                                                                     \
-        if (cond) { printf("  ok   - %s\n", name); }                        \
-        else { printf("  FAIL - %s\n", name); failures++; }                 \
+#define CHECK(cond, name)                                                                \
+    do {                                                                                 \
+        if (cond) {                                                                      \
+            printf("  ok   - %s\n", name);                                               \
+        } else {                                                                         \
+            printf("  FAIL - %s\n", name);                                               \
+            failures++;                                                                  \
+        }                                                                                \
     } while (0)
 
 int main(void)

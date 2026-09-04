@@ -10,10 +10,14 @@
 #include "lua.h"
 
 static int failures;
-#define CHECK(cond, name)                                                    \
-    do {                                                                     \
-        if (cond) { printf("  ok   - %s\n", name); }                        \
-        else { printf("  FAIL - %s\n", name); failures++; }                 \
+#define CHECK(cond, name)                                                                \
+    do {                                                                                 \
+        if (cond) {                                                                      \
+            printf("  ok   - %s\n", name);                                               \
+        } else {                                                                         \
+            printf("  FAIL - %s\n", name);                                               \
+            failures++;                                                                  \
+        }                                                                                \
     } while (0)
 
 static const char *SCRIPT =

@@ -33,19 +33,19 @@
 
 /* The panel is a 240x320 part mounted sideways; rotation 3 presents it as the
  * 320x240 landscape screen the user actually sees. It also inverts. */
-#define CATNIP_LCD_PANEL_W    240
-#define CATNIP_LCD_PANEL_H    320
-#define CATNIP_LCD_ROTATION   3
-#define CATNIP_LCD_INVERT     true
-#define CATNIP_LCD_RGB_ORDER  false
-#define CATNIP_LCD_SPI_HZ     80000000
-#define CATNIP_LCD_BL_PWM_HZ  44100
+#define CATNIP_LCD_PANEL_W   240
+#define CATNIP_LCD_PANEL_H   320
+#define CATNIP_LCD_ROTATION  3
+#define CATNIP_LCD_INVERT    true
+#define CATNIP_LCD_RGB_ORDER false
+#define CATNIP_LCD_SPI_HZ    80000000
+#define CATNIP_LCD_BL_PWM_HZ 44100
 /* The backlight enable is active-low: driving IO42 low lights the panel and
  * a 100% PWM duty switches it off. Found by cycling the pin by hand and
  * watching the screen; the published source says invert = false, and with
  * that setting "brightness 0" at boot is full on and "brightness 255" is off,
  * which is how a working panel looked dead. */
-#define CATNIP_LCD_BL_INVERT  true
+#define CATNIP_LCD_BL_INVERT true
 
 /* Screen size as oriented for the user. */
 #define CATNIP_SCREEN_W 320
@@ -109,17 +109,17 @@
  * expander is unpowered rather than misaddressed: the peripheral rail is not
  * up merely because the CPU is running.
  */
-#define CATNIP_I2C_ADDR_PMU    0x34
-#define CATNIP_I2C_ADDR_IOEXP  0x19
-#define CATNIP_IOEXP_LCD_RST   0
-#define CATNIP_IOEXP_LCD_CS    1
-#define CATNIP_IOEXP_IO3       3
-#define CATNIP_IOEXP_AUX_RST   6
+#define CATNIP_I2C_ADDR_PMU   0x34
+#define CATNIP_I2C_ADDR_IOEXP 0x19
+#define CATNIP_IOEXP_LCD_RST  0
+#define CATNIP_IOEXP_LCD_CS   1
+#define CATNIP_IOEXP_IO3      3
+#define CATNIP_IOEXP_AUX_RST  6
 
 /* Reset timing, as the stock firmware does it. */
-#define CATNIP_IOEXP_RST_LOW_MS    20
-#define CATNIP_IOEXP_RST_HIGH_MS   120
-#define CATNIP_IOEXP_CS_SETTLE_MS  5
+#define CATNIP_IOEXP_RST_LOW_MS   20
+#define CATNIP_IOEXP_RST_HIGH_MS  120
+#define CATNIP_IOEXP_CS_SETTLE_MS 5
 
 /* Shared I2C bus: RTC, IMU, touch, audio codecs. */
 #define CATNIP_PIN_I2C_SCL 2

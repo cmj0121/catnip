@@ -13,7 +13,11 @@ static void rec(const char *s)
 {
     strncat(g_ops, s, sizeof(g_ops) - strlen(g_ops) - 1);
 }
-static void b_begin(void *ud) { (void)ud; rec("[begin]"); }
+static void b_begin(void *ud)
+{
+    (void)ud;
+    rec("[begin]");
+}
 static void b_label(void *ud, const char *id, const char *text)
 {
     (void)ud;
@@ -28,13 +32,21 @@ static void b_button(void *ud, const char *id, const char *text)
     snprintf(line, sizeof(line), "button(%s='%s')", id, text);
     rec(line);
 }
-static void b_end(void *ud) { (void)ud; rec("[end]"); }
+static void b_end(void *ud)
+{
+    (void)ud;
+    rec("[end]");
+}
 
 static int failures;
-#define CHECK(cond, name)                                                    \
-    do {                                                                     \
-        if (cond) { printf("  ok   - %s\n", name); }                        \
-        else { printf("  FAIL - %s\n", name); failures++; }                 \
+#define CHECK(cond, name)                                                                \
+    do {                                                                                 \
+        if (cond) {                                                                      \
+            printf("  ok   - %s\n", name);                                               \
+        } else {                                                                         \
+            printf("  FAIL - %s\n", name);                                               \
+            failures++;                                                                  \
+        }                                                                                \
     } while (0)
 
 int main(void)

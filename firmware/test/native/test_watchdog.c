@@ -8,8 +8,15 @@
 #include "catnip_sched.h"
 
 static unsigned long g_now;
-static void pump_fn(void *ud) { (void)ud; }
-static unsigned long now_fn(void *ud) { (void)ud; return g_now; }
+static void pump_fn(void *ud)
+{
+    (void)ud;
+}
+static unsigned long now_fn(void *ud)
+{
+    (void)ud;
+    return g_now;
+}
 
 static char g_log[512];
 static void capture(void *ud, const char *msg, size_t len)
@@ -21,10 +28,14 @@ static void capture(void *ud, const char *msg, size_t len)
 }
 
 static int failures;
-#define CHECK(cond, name)                                                    \
-    do {                                                                     \
-        if (cond) { printf("  ok   - %s\n", name); }                        \
-        else { printf("  FAIL - %s\n", name); failures++; }                 \
+#define CHECK(cond, name)                                                                \
+    do {                                                                                 \
+        if (cond) {                                                                      \
+            printf("  ok   - %s\n", name);                                               \
+        } else {                                                                         \
+            printf("  FAIL - %s\n", name);                                               \
+            failures++;                                                                  \
+        }                                                                                \
     } while (0)
 
 int main(void)
@@ -44,7 +55,9 @@ int main(void)
     /* A normal, finite script must not trip the watchdog. */
     catnip_sched_start(s, "total = 0 for i = 1, 100 do total = total + i end", "=ok");
     int guard = 0;
-    do { st = catnip_sched_step(s); } while (st == CATNIP_SLEEP && ++guard < 100);
+    do {
+        st = catnip_sched_step(s);
+    } while (st == CATNIP_SLEEP && ++guard < 100);
     CHECK(st == CATNIP_DONE, "well-behaved script completes normally");
 
     catnip_sched_free(s);
