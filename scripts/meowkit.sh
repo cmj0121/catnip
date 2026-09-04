@@ -227,20 +227,7 @@ cmd_install() {
 	# flasher stub is still winding down. So verify rather than announce: if the
 	# bootloader still answers, the app is not running.
 	log "starting the new firmware ..."
-	local started=0
-	for _ in 1 2 3; do
-		sleep 1
-		"${ESPTOOL_CMD[@]}" --chip "$CHIP" --port "$PORT" \
-			--before no-reset --after watchdog-reset chip-id >/dev/null 2>&1 || true
-		sleep 2
-		# A bootloader that answers means the reset did not take.
-		if ! "${ESPTOOL_CMD[@]}" --chip "$CHIP" --port "$PORT" \
-			--before no-reset --after no-reset chip-id >/dev/null 2>&1; then
-			started=1
-			break
-		fi
-	done
-	if [ "$started" = 1 ]; then
+	if esp_restart; then
 		log "running."
 	else
 		log "flashed, but it is still sitting in the bootloader."
@@ -248,6 +235,8 @@ cmd_install() {
 	fi
 
 	log "Catnip installed. To revert to stock: make uninstall"
+	log "--- boot log ---"
+	serial_read "${LOG_SECONDS:-10}"
 }
 
 cmd_restore_stock() {
@@ -295,50 +284,90 @@ cmd_uninstall() {
 	fi
 }
 
-# Watch the serial log. After a flash this is the difference between "it was
-# written" and "it is running".
-cmd_monitor() {
-	detect_port
-	log "watching $PORT (ctrl-c to stop)"
-	# pio's monitor wants a terminal and fails when there is not one, so read
-	# the port directly. Reconnect on the way through: the port disappears and
-	# comes back whenever the device resets, and dropping out at that moment
-	# loses exactly the boot log worth watching for.
-	local py
+# Restart the chip and check that it actually restarted. esptool's RTS reset is
+# a no-op on this board's native USB-Serial/JTAG; the watchdog reset lands, but
+# not always on the first attempt while the flasher stub is winding down. A
+# bootloader that still answers means the application is not running.
+esp_restart() {
+	for _ in 1 2 3; do
+		sleep 1
+		"${ESPTOOL_CMD[@]}" --chip "$CHIP" --port "$PORT" \
+			--before no-reset --after watchdog-reset chip-id >/dev/null 2>&1 || true
+		sleep 2
+		if ! "${ESPTOOL_CMD[@]}" --chip "$CHIP" --port "$PORT" \
+			--before no-reset --after no-reset chip-id >/dev/null 2>&1; then
+			return 0
+		fi
+	done
+	return 1
+}
+
+# Read the serial port for SECONDS, or until interrupted when given 0. Reading
+# straight after a flash is the one way the boot log reliably reaches the host
+# on this board, which is why install does it rather than leaving it to the
+# reader to catch the timing.
+serial_read() {
+	local secs="$1" py
 	for py in python3 /opt/homebrew/Cellar/esptool/*/libexec/bin/python; do
 		[ -x "$(command -v "$py" 2>/dev/null || echo "$py")" ] || continue
-		"$py" - "$PORT" <<-'PY' && return 0
+		"$py" - "$PORT" "$secs" <<-'PY' && return 0
 			import sys, time, glob
 			try:
 			    import serial
 			except ImportError:
 			    sys.exit(9)
-			want = sys.argv[1]
-			while True:
-			    ports = [want] if glob.glob(want) else sorted(glob.glob('/dev/cu.usbmodem*'))
-			    if not ports:
-			        time.sleep(0.3); continue
-			    try:
-			        s = serial.Serial(ports[0], 115200, timeout=0.3)
-			    except Exception:
-			        time.sleep(0.3); continue
-			    try:
-			        while True:
-			            d = s.read(512)
-			            if d:
-			                sys.stdout.write(d.decode("utf-8", "replace"))
-			                sys.stdout.flush()
-			    except KeyboardInterrupt:
-			        return
-			    except Exception:
-			        pass
-			    finally:
-			        try: s.close()
-			        except Exception: pass
-			    time.sleep(0.2)
+
+			want, secs = sys.argv[1], float(sys.argv[2])
+			end = time.time() + secs if secs > 0 else float("inf")
+
+			def stream():
+			    while time.time() < end:
+			        ports = [want] if glob.glob(want) else sorted(glob.glob('/dev/cu.usbmodem*'))
+			        if not ports:
+			            time.sleep(0.2)
+			            continue
+			        try:
+			            s = serial.Serial(ports[0], 115200, timeout=0.2)
+			            # Over USB CDC the firmware waits for a host to attach
+			            # before printing; opening the port does not say so.
+			            s.dtr = True
+			        except Exception:
+			            time.sleep(0.2)
+			            continue
+			        try:
+			            while time.time() < end:
+			                d = s.read(512)
+			                if d:
+			                    sys.stdout.write(d.decode("utf-8", "replace"))
+			                    sys.stdout.flush()
+			        except Exception:
+			            pass
+			        finally:
+			            try:
+			                s.close()
+			            except Exception:
+			                pass
+			        time.sleep(0.1)
+
+			try:
+			    stream()
+			except KeyboardInterrupt:
+			    pass
 		PY
 	done
 	die "no python with pyserial found; try: pio device monitor -p $PORT -b 115200"
+}
+
+# Watch the serial log until interrupted.
+cmd_monitor() {
+	resolve_esptool
+	detect_port
+	if [ "${RESET:-0}" = 1 ]; then
+		log "restarting the device so the log starts from boot ..."
+		esp_restart || log "could not restart it; showing the log as-is."
+	fi
+	log "watching $PORT (ctrl-c to stop)"
+	serial_read 0
 }
 
 usage() {

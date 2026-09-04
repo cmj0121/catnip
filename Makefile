@@ -30,7 +30,7 @@ backup:				# back up the MeowKit's full flash (do this before installing)
 install: ci			# check, back up stock, flash Catnip, and verify it started
 	@scripts/meowkit.sh install
 
-monitor:			# watch the serial log
+monitor:			# watch the serial log (RESET=1 to restart and catch the boot)
 	@scripts/meowkit.sh monitor
 
 uninstall:			# restore the MeowKit to stock (from your backup, or official)
