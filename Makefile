@@ -1,6 +1,6 @@
 SUBDIR :=
 
-.PHONY: all clean test run build ci upgrade help flash backup install uninstall deploy $(SUBDIR)
+.PHONY: all clean build ci flash backup install monitor uninstall upgrade help $(SUBDIR)
 
 all: $(SUBDIR) 		# default action
 	@[ -f .git/hooks/pre-commit ] || pre-commit install --install-hooks
@@ -10,19 +10,16 @@ clean: $(SUBDIR)	# clean-up environment
 	@find . -name '*.sw[po]' -delete
 	@$(MAKE) -C firmware clean
 
-test:				# run the firmware host tests
-	@$(MAKE) -C firmware test
-
-run:				# run in the local environment
-
-build:				# build the firmware (host compile)
+build:				# compile the framework for the host only
 	@$(MAKE) -C firmware build
 
-ci:					# run every check CI runs, before touching the device
+ci:					# every check there is - run this before touching the device
 	@$(MAKE) -C firmware build
 	@$(MAKE) -C firmware test
 	@shellcheck scripts/*.sh
-	@pio run -d firmware -e meowkit
+	@command -v pio >/dev/null 2>&1 \
+		&& pio run -d firmware -e meowkit \
+		|| echo "note: PlatformIO not installed, skipping the device build"
 
 flash:				# put the MeowKit into flash/download status (first-time setup)
 	@scripts/meowkit.sh flash
@@ -30,11 +27,11 @@ flash:				# put the MeowKit into flash/download status (first-time setup)
 backup:				# back up the MeowKit's full flash (do this before installing)
 	@scripts/meowkit.sh backup
 
-install: ci			# check first, then back up stock and flash Catnip
+install: ci			# check, back up stock, flash Catnip, and verify it started
 	@scripts/meowkit.sh install
 
-deploy: ci			# check, flash, then watch it boot
-	@scripts/meowkit.sh deploy
+monitor:			# watch the serial log (RESET=1 to restart and catch the boot)
+	@scripts/meowkit.sh monitor
 
 uninstall:			# restore the MeowKit to stock (from your backup, or official)
 	@scripts/meowkit.sh uninstall

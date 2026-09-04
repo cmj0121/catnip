@@ -1,9 +1,10 @@
 /*
  * display.h - the ST7789 panel, brought up and ready to take pixels.
  *
- * The panel is write-only (no CS, no RST, no MISO broken out), so nothing here
- * reads back from it: what we push is what is on screen. Callers get a raw
- * blit and backlight control; anything richer belongs to the renderer.
+ * The panel is write-only (MISO is not wired; its CS and RST hang off the I/O
+ * expander, see ioexp.h), so nothing here reads back from it: what we push is
+ * what is on screen. Callers get a raw blit and backlight control; anything
+ * richer belongs to the renderer.
  */
 #ifndef CATNIP_DISPLAY_H
 #define CATNIP_DISPLAY_H

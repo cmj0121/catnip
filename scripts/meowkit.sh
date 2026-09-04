@@ -9,7 +9,6 @@
 #   install      backup-first: back up stock, then build & flash Catnip (#13)
 #   uninstall    restore stock: re-flash your backup, or official stock (#14)
 #   restore-stock  download & flash the official MeowKit firmware (#14)
-#   deploy       build with PlatformIO and flash Catnip, then watch it boot
 #   monitor      watch the serial log (the fastest way to see a boot succeed)
 #
 # Safety model (see the "Install" story): the ESP32-S3 ROM download mode is
@@ -228,20 +227,7 @@ cmd_install() {
 	# flasher stub is still winding down. So verify rather than announce: if the
 	# bootloader still answers, the app is not running.
 	log "starting the new firmware ..."
-	local started=0
-	for _ in 1 2 3; do
-		sleep 1
-		"${ESPTOOL_CMD[@]}" --chip "$CHIP" --port "$PORT" \
-			--before no-reset --after watchdog-reset chip-id >/dev/null 2>&1 || true
-		sleep 2
-		# A bootloader that answers means the reset did not take.
-		if ! "${ESPTOOL_CMD[@]}" --chip "$CHIP" --port "$PORT" \
-			--before no-reset --after no-reset chip-id >/dev/null 2>&1; then
-			started=1
-			break
-		fi
-	done
-	if [ "$started" = 1 ]; then
+	if esp_restart; then
 		log "running."
 	else
 		log "flashed, but it is still sitting in the bootloader."
@@ -249,6 +235,8 @@ cmd_install() {
 	fi
 
 	log "Catnip installed. To revert to stock: make uninstall"
+	log "--- boot log ---"
+	serial_read "${LOG_SECONDS:-10}"
 }
 
 cmd_restore_stock() {
@@ -296,24 +284,90 @@ cmd_uninstall() {
 	fi
 }
 
-# Watch the boot log. After a deploy this is the difference between "it
-# flashed" and "it actually came up".
-cmd_monitor() {
-	detect_port
-	log "watching $PORT at 115200 (ctrl-] or ctrl-c to stop)"
-	if command -v pio >/dev/null 2>&1; then
-		pio device monitor -p "$PORT" -b 115200
-	else
-		die "no monitor available; install PlatformIO, or use: screen $PORT 115200"
-	fi
+# Restart the chip and check that it actually restarted. esptool's RTS reset is
+# a no-op on this board's native USB-Serial/JTAG; the watchdog reset lands, but
+# not always on the first attempt while the flasher stub is winding down. A
+# bootloader that still answers means the application is not running.
+esp_restart() {
+	for _ in 1 2 3; do
+		sleep 1
+		"${ESPTOOL_CMD[@]}" --chip "$CHIP" --port "$PORT" \
+			--before no-reset --after watchdog-reset chip-id >/dev/null 2>&1 || true
+		sleep 2
+		if ! "${ESPTOOL_CMD[@]}" --chip "$CHIP" --port "$PORT" \
+			--before no-reset --after no-reset chip-id >/dev/null 2>&1; then
+			return 0
+		fi
+	done
+	return 1
 }
 
-# Build and flash in one step, then show the boot log so the result is visible
-# rather than assumed. Backs up stock first, exactly like install.
-cmd_deploy() {
-	cmd_install
-	log "flashed; watching the boot log so you can see it come up."
-	cmd_monitor
+# Read the serial port for SECONDS, or until interrupted when given 0. Reading
+# straight after a flash is the one way the boot log reliably reaches the host
+# on this board, which is why install does it rather than leaving it to the
+# reader to catch the timing.
+serial_read() {
+	local secs="$1" py
+	for py in python3 /opt/homebrew/Cellar/esptool/*/libexec/bin/python; do
+		[ -x "$(command -v "$py" 2>/dev/null || echo "$py")" ] || continue
+		"$py" - "$PORT" "$secs" <<-'PY' && return 0
+			import sys, time, glob
+			try:
+			    import serial
+			except ImportError:
+			    sys.exit(9)
+
+			want, secs = sys.argv[1], float(sys.argv[2])
+			end = time.time() + secs if secs > 0 else float("inf")
+
+			def stream():
+			    while time.time() < end:
+			        ports = [want] if glob.glob(want) else sorted(glob.glob('/dev/cu.usbmodem*'))
+			        if not ports:
+			            time.sleep(0.2)
+			            continue
+			        try:
+			            s = serial.Serial(ports[0], 115200, timeout=0.2)
+			            # Over USB CDC the firmware waits for a host to attach
+			            # before printing; opening the port does not say so.
+			            s.dtr = True
+			        except Exception:
+			            time.sleep(0.2)
+			            continue
+			        try:
+			            while time.time() < end:
+			                d = s.read(512)
+			                if d:
+			                    sys.stdout.write(d.decode("utf-8", "replace"))
+			                    sys.stdout.flush()
+			        except Exception:
+			            pass
+			        finally:
+			            try:
+			                s.close()
+			            except Exception:
+			                pass
+			        time.sleep(0.1)
+
+			try:
+			    stream()
+			except KeyboardInterrupt:
+			    pass
+		PY
+	done
+	die "no python with pyserial found; try: pio device monitor -p $PORT -b 115200"
+}
+
+# Watch the serial log until interrupted.
+cmd_monitor() {
+	resolve_esptool
+	detect_port
+	if [ "${RESET:-0}" = 1 ]; then
+		log "restarting the device so the log starts from boot ..."
+		esp_restart || log "could not restart it; showing the log as-is."
+	fi
+	log "watching $PORT (ctrl-c to stop)"
+	serial_read 0
 }
 
 usage() {
@@ -332,10 +386,9 @@ main() {
 		install) cmd_install "$@" ;;
 		uninstall) cmd_uninstall "$@" ;;
 		restore-stock) cmd_restore_stock "$@" ;;
-		deploy) cmd_deploy "$@" ;;
 		monitor) cmd_monitor "$@" ;;
 		-h|--help|help) usage 0 ;;
-		*) die "unknown subcommand: $cmd (try: flash, probe, backup, install, uninstall, restore-stock, deploy, monitor)" ;;
+		*) die "unknown subcommand: $cmd (try: flash, probe, backup, install, uninstall, restore-stock, monitor)" ;;
 	esac
 }
 

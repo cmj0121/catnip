@@ -22,6 +22,8 @@
 #include "device/led.h"
 #include "device/pmu.h"
 #include "device/power.h"
+#include "generated/anim_f01_rgb565.h"
+#include "generated/anim_f02_rgb565.h"
 #include "generated/splash_rgb565.h"
 
 /* Where apps live once the SD card is mounted (#32). */
@@ -56,6 +58,30 @@ static void host_pump(void *ud)
     delay(1);
 }
 
+/* The idle animation (#40): the frames of catnip_idle_320x240.gif in the
+ * order the GIF plays them, but slower - the GIF's 170 ms per frame reads as
+ * twitchy on the panel, 400 ms reads as breathing. Frame 0 is the splash, so
+ * the first frame is already on screen when the animation starts. It keeps
+ * running until the shell takes the screen (#33), which is when g_animating
+ * gets cleared; until then it is the only sign the device has not frozen. */
+static bool g_animating = true;
+static const uint16_t *const g_anim_frames[] = {
+    catnip_splash, catnip_anim_f01, catnip_anim_f02, catnip_anim_f01,
+};
+static const size_t g_anim_count = sizeof(g_anim_frames) / sizeof(g_anim_frames[0]);
+static const unsigned long ANIM_FRAME_MS = 400;
+
+static void animate(void)
+{
+    static unsigned long last = 0;
+    static size_t frame = 0;
+    unsigned long now = millis();
+    if (!g_animating || now - last < ANIM_FRAME_MS) return;
+    last = now;
+    frame = (frame + 1) % g_anim_count;
+    catnip_display_blit(g_anim_frames[frame]);
+}
+
 /* Raise the backlight gradually - an abrupt jump to full reads as a flash. */
 static void fade_in(void)
 {
@@ -87,16 +113,13 @@ void setup()
      * attached to the serial port. It comes up after Serial deliberately: when
      * this was the very first call, a fault inside it left no output at all
      * and looked exactly like a board that never booted. */
-    /* A sign of life that does not depend on the screen or on anything having
-     * attached to the serial port. It comes up after Serial deliberately: when
-     * this was the very first call, a fault inside it left no output at all
-     * and looked exactly like a board that never booted. */
     catnip_led_begin();
 
     /* Order matters: the expander sits on LDO4, so the rail has to be up
-     * before the expander can answer, and the expander has to answer before
-     * the panel's chip-select can be asserted. The scan comes after the rails
-     * so that what it lists is the bus as the rest of the boot will see it. */
+     * before the expander can answer, and the expander has to release the
+     * panel's reset and assert its chip-select before the panel will take a
+     * command. The scan comes after the rails so that what it lists is the
+     * bus as the rest of the boot will see it. */
     catnip_i2c_begin();
     if (!catnip_pmu_begin()) Serial.println("[catnip] WARN: PMIC not found");
     catnip_i2c_scan();
@@ -131,6 +154,7 @@ void setup()
 
 void loop()
 {
+    animate();
     catnip_led_breathe();
     if (g_shell) catnip_shell_step(g_shell);
 }

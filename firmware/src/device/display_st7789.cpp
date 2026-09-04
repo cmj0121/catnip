@@ -2,8 +2,9 @@
  * display_st7789.cpp - ST7789 bring-up over SPI (issue #29).
  *
  * The panel configuration below is a property of the MeowKit's wiring, not a
- * preference: the part is a 240x320 die mounted sideways and wired without a
- * chip-select, reset, or MISO line, and it inverts. Getting any of those wrong
+ * preference: the part is a 240x320 die mounted sideways, its chip-select and
+ * reset live on the I/O expander (see ioexp.cpp) rather than on MCU pins, MISO
+ * is not wired, and it inverts. Getting any of those wrong
  * gives a blank, mirrored, or colour-swapped screen, so they live in board.h
  * next to the pin numbers rather than being scattered here.
  */
@@ -55,7 +56,7 @@ public:
         {
             auto cfg = light_.config();
             cfg.pin_bl = CATNIP_PIN_LCD_BL;
-            cfg.invert = false;
+            cfg.invert = CATNIP_LCD_BL_INVERT;
             cfg.freq   = CATNIP_LCD_BL_PWM_HZ;
             cfg.pwm_channel = 7;
             light_.config(cfg);

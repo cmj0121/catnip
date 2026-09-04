@@ -14,8 +14,8 @@
 #define CATNIP_PIN_PWR_HOLD 11
 #define CATNIP_PIN_PWR_ON   10
 
-/* ST7789 panel, SPI. There is no CS and no RST line broken out, and MISO is
- * not connected, so the panel is write-only. */
+/* ST7789 panel, SPI. Chip-select and reset are not MCU pins - they sit on the
+ * I/O expander below - and MISO is not connected, so the panel is write-only. */
 #define CATNIP_PIN_LCD_MOSI 40
 #define CATNIP_PIN_LCD_MISO -1
 #define CATNIP_PIN_LCD_SCLK 41
@@ -33,6 +33,12 @@
 #define CATNIP_LCD_RGB_ORDER  false
 #define CATNIP_LCD_SPI_HZ     80000000
 #define CATNIP_LCD_BL_PWM_HZ  44100
+/* The backlight enable is active-low: driving IO42 low lights the panel and
+ * a 100% PWM duty switches it off. Found by cycling the pin by hand and
+ * watching the screen; the published source says invert = false, and with
+ * that setting "brightness 0" at boot is full on and "brightness 255" is off,
+ * which is how a working panel looked dead. */
+#define CATNIP_LCD_BL_INVERT  true
 
 /* Screen size as oriented for the user. */
 #define CATNIP_SCREEN_W 320
@@ -68,11 +74,27 @@
  * executing - and so are the display and the LED. The others are not implied,
  * and an LDO that is off makes its peripheral simply absent from the bus.
  *
- * PCA9557 I/O expander. The panel's chip-select is not an MCU pin at all - it
- * hangs off this expander, which is why CATNIP_PIN_LCD_CS is -1. Until IO0 is
- * driven low the panel ignores everything sent to it and the screen stays
- * dark, looking exactly like a dead backlight. IO1 enables the speaker
- * amplifier; leave it alone unless you want audio.
+ * PCA9557 I/O expander. The panel's chip-select and reset are not MCU pins at
+ * all - they hang off this expander, which is why CATNIP_PIN_LCD_CS and
+ * CATNIP_PIN_LCD_RST are -1.
+ *
+ * The map below is NOT the one in the vendor's published devices.cpp (IO0 =
+ * chip-select, IO1 = speaker enable). That source describes an older board
+ * revision. On the unit that ships, the stock firmware - recovered by
+ * disassembling the flash backup in backup/ - drives the expander like this:
+ *
+ *   IO1  LCD_CS   high while the panel is reset, then low and left low
+ *   IO0  reset    pulsed low, then held high a while before CS drops
+ *   IO6  reset    pulsed together with IO0 (most likely the touch controller)
+ *   IO3  ?        driven low and left low; purpose unknown, so mirror it
+ *
+ * The speaker enable (PA_EN, IO1 in the published source) is not among them;
+ * where it went on this revision is not yet known.
+ *
+ * Following the published map drives CS high and holds the panel in reset at
+ * the same time, and the screen stays dark looking exactly like a dead
+ * backlight. Sweeping one pin at a time cannot find this: CS and reset have to
+ * be right together before the panel answers anything.
  *
  * The expander answers at 0x19. Do not be tempted by 0x18 turning up in a bus
  * scan: that is the ES8311 audio codec, and writing expander registers to it
@@ -82,8 +104,15 @@
  */
 #define CATNIP_I2C_ADDR_PMU    0x34
 #define CATNIP_I2C_ADDR_IOEXP  0x19
-#define CATNIP_IOEXP_LCD_CS    0
-#define CATNIP_IOEXP_PA_EN     1
+#define CATNIP_IOEXP_LCD_RST   0
+#define CATNIP_IOEXP_LCD_CS    1
+#define CATNIP_IOEXP_IO3       3
+#define CATNIP_IOEXP_AUX_RST   6
+
+/* Reset timing, as the stock firmware does it. */
+#define CATNIP_IOEXP_RST_LOW_MS    20
+#define CATNIP_IOEXP_RST_HIGH_MS   120
+#define CATNIP_IOEXP_CS_SETTLE_MS  5
 
 /* Shared I2C bus: RTC, IMU, touch, audio codecs. */
 #define CATNIP_PIN_I2C_SCL 2
