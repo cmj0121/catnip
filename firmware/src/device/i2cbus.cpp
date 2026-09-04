@@ -26,3 +26,21 @@ void catnip_i2c_scan(void)
     if (!found) Serial.print(" (nothing responded)");
     Serial.println();
 }
+
+bool catnip_i2c_write_reg(uint8_t addr, uint8_t reg, uint8_t value)
+{
+    Wire.beginTransmission(addr);
+    Wire.write(reg);
+    Wire.write(value);
+    return Wire.endTransmission() == 0;
+}
+
+bool catnip_i2c_read_reg(uint8_t addr, uint8_t reg, uint8_t *out)
+{
+    Wire.beginTransmission(addr);
+    Wire.write(reg);
+    if (Wire.endTransmission(false) != 0) return false;
+    if (Wire.requestFrom((int)addr, 1) != 1) return false;
+    *out = (uint8_t)Wire.read();
+    return true;
+}

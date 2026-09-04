@@ -1,9 +1,10 @@
 /*
  * ioexp.h - the PCA9557 I/O expander that gates the panel.
  *
- * The MeowKit routes the LCD's chip-select through this expander rather than
- * an MCU pin, so the display cannot be used until the expander is configured.
- * That makes this a prerequisite of display bring-up, not an accessory to it.
+ * The MeowKit routes the LCD's chip-select and its reset through this
+ * expander rather than MCU pins, so the display cannot be used until the
+ * expander has released the reset and asserted the select. That makes this a
+ * prerequisite of display bring-up, not an accessory to it.
  */
 #ifndef CATNIP_IOEXP_H
 #define CATNIP_IOEXP_H
@@ -12,8 +13,9 @@
 extern "C" {
 #endif
 
-/* Bring up the I2C bus and drive the panel's chip-select active. Returns true
- * if the expander acknowledged. */
+/* Pulse the panel's reset, then drive its chip-select active, the way the
+ * stock firmware does. Returns true if the expander acknowledged every
+ * write. */
 bool catnip_ioexp_begin(void);
 
 

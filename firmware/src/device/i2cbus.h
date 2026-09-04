@@ -8,6 +8,9 @@
 #ifndef CATNIP_I2CBUS_H
 #define CATNIP_I2CBUS_H
 
+#include <stdbool.h>
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -20,6 +23,11 @@ void catnip_i2c_begin(void);
 /* Log every address that answers. When something is missing this separates a
  * dead bus from a device on a rail that is still off. */
 void catnip_i2c_scan(void);
+
+/* One-byte register access, the shape every chip on this bus speaks. Both
+ * return false when the device did not acknowledge. */
+bool catnip_i2c_write_reg(uint8_t addr, uint8_t reg, uint8_t value);
+bool catnip_i2c_read_reg(uint8_t addr, uint8_t reg, uint8_t *out);
 
 #ifdef __cplusplus
 }

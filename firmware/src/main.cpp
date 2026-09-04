@@ -87,16 +87,13 @@ void setup()
      * attached to the serial port. It comes up after Serial deliberately: when
      * this was the very first call, a fault inside it left no output at all
      * and looked exactly like a board that never booted. */
-    /* A sign of life that does not depend on the screen or on anything having
-     * attached to the serial port. It comes up after Serial deliberately: when
-     * this was the very first call, a fault inside it left no output at all
-     * and looked exactly like a board that never booted. */
     catnip_led_begin();
 
     /* Order matters: the expander sits on LDO4, so the rail has to be up
-     * before the expander can answer, and the expander has to answer before
-     * the panel's chip-select can be asserted. The scan comes after the rails
-     * so that what it lists is the bus as the rest of the boot will see it. */
+     * before the expander can answer, and the expander has to release the
+     * panel's reset and assert its chip-select before the panel will take a
+     * command. The scan comes after the rails so that what it lists is the
+     * bus as the rest of the boot will see it. */
     catnip_i2c_begin();
     if (!catnip_pmu_begin()) Serial.println("[catnip] WARN: PMIC not found");
     catnip_i2c_scan();

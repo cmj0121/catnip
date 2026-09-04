@@ -6,12 +6,13 @@
  * configure the expander exactly as its library would, initialise the panel
  * with the vendor's configuration, and fill the screen.
  *
- * It does not light the panel, and that is why it is kept. Everything it
- * reports is correct - the rails are up, the expander answers, the
- * chip-select reads low, the panel configuration matches the vendor's field
- * for field, on the same library version - and the screen stays dark anyway.
- * Whatever is wrong is not visible from software, so this is the starting
- * point for someone with a meter: check Display_3V3 and BL_A at J1.
+ * It does not light the panel, and that is why it is kept: it is the
+ * faithful copy of the published source that proves the published source is
+ * for a different board. The cause was found afterwards by disassembling the
+ * stock firmware (see device/board.h): on the shipping board IO1 is the
+ * chip-select and IO0 is a reset line, so this sketch deselects the panel and
+ * holds it in reset at once. Sweeping one pin at a time could never show
+ * that.
  *
  * One trap it exists to document: the PCA9557 sits on an always-on rail and
  * keeps its registers across an ESP32 reset. Read-modify-write inherits
