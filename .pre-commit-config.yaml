@@ -11,6 +11,16 @@ repos:
     rev: v8.30.0
     hooks:
       - id: gitleaks
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v23.1.0
+    hooks:
+      - id: clang-format
+        # C and C++ only. The hook also claims JSON by default, where it would
+        # reformat app manifests - a published package format, not our code.
+        types_or: [c, c++]
+        # Vendored upstream code keeps upstream's formatting; reformatting it
+        # would bury the diff of the next update in noise.
+        exclude: '^firmware/lib/'
   - repo: https://github.com/igorshubovych/markdownlint-cli
     rev: v0.45.0
     hooks:
