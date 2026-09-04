@@ -311,7 +311,7 @@ serial_read() {
 	for py in python3 /opt/homebrew/Cellar/esptool/*/libexec/bin/python; do
 		[ -x "$(command -v "$py" 2>/dev/null || echo "$py")" ] || continue
 		"$py" - "$PORT" "$secs" <<-'PY' && return 0
-			import sys, time, glob
+			import os, sys, time, glob
 			try:
 			    import serial
 			except ImportError:
@@ -320,8 +320,17 @@ serial_read() {
 			want, secs = sys.argv[1], float(sys.argv[2])
 			end = time.time() + secs if secs > 0 else float("inf")
 
+			# Stop when the shell that started this is gone. Without it a
+			# killed `make monitor` leaves this holding the serial port, and
+			# the next flash fails with the device apparently disconnected -
+			# which reads as a hardware fault rather than a stale reader.
+			parent = os.getppid()
+
+			def orphaned():
+			    return os.getppid() != parent
+
 			def stream():
-			    while time.time() < end:
+			    while time.time() < end and not orphaned():
 			        ports = [want] if glob.glob(want) else sorted(glob.glob('/dev/cu.usbmodem*'))
 			        if not ports:
 			            time.sleep(0.2)
@@ -335,7 +344,7 @@ serial_read() {
 			            time.sleep(0.2)
 			            continue
 			        try:
-			            while time.time() < end:
+			            while time.time() < end and not orphaned():
 			                d = s.read(512)
 			                if d:
 			                    sys.stdout.write(d.decode("utf-8", "replace"))
