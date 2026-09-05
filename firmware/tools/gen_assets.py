@@ -54,9 +54,9 @@ def emit_rgb565(src, out, symbol):
 
 
 # (asset blob, generated header, C symbol). The splash doubles as frame 0 of
-# the idle animation: arm right. Frame 1 is arm left with dashed rings from
-# the right. Frame 2 is arm right with a solid swoosh at the right paw. The
-# firmware plays 0, 1, 2, 1.
+# the idle animation: the waving paw up at rest, no motion arcs. Frame 1 tips
+# the paw out with one short arc above it. Frame 2 is the full sweep, with arcs
+# off both the paw and the tail. The firmware plays 0, 1, 2, 1.
 BLOBS = [
     ("catnip_splash_320x240.rgb565", "splash_rgb565.h", "catnip_splash"),
     ("catnip_anim_f01_320x240.rgb565", "anim_f01_rgb565.h", "catnip_anim_f01"),
