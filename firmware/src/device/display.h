@@ -32,6 +32,18 @@ void catnip_display_blit(const void *data);
 /* Paint the whole screen one RGB565 colour. */
 void catnip_display_fill(uint16_t rgb565);
 
+/* Load an animation's frames from a directory on the card, in filename order:
+ * .jpg, .jpeg, .png and .qoi are all understood. Each frame is decoded once
+ * into PSRAM, so playing them afterwards costs no decoding.
+ *
+ * Returns how many frames are ready to show, which is zero when the directory
+ * is missing, holds no images, or holds nothing that could be decoded - all of
+ * which mean "use the built-in mascot" rather than "fail". */
+int catnip_display_load_frames(const char *dir);
+
+/* Show a frame loaded by catnip_display_load_frames. */
+void catnip_display_show_frame(int index);
+
 #ifdef __cplusplus
 }
 #endif

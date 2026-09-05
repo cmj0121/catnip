@@ -19,6 +19,8 @@ void catnip_shell_ui_render(const catnip_app_entry *apps, int n, int selected)
 {
     // TODO: draw with LVGL; decode apps[i].icon (PNG) -> lv_img; fall back to a
     // default icon when absent/undecodable.
-    (void)apps; (void)n; (void)selected;
+    (void)apps;
+    (void)n;
+    (void)selected;
 }
 #endif /* CATNIP_DEVICE_WIP */

@@ -20,21 +20,42 @@ typedef struct {
     char gpio_mode[8];
 } mock;
 
-static void m_vibrate(void *ud, int ms) { ((mock *)ud)->vibrate_ms = ms; }
+static void m_vibrate(void *ud, int ms)
+{
+    ((mock *)ud)->vibrate_ms = ms;
+}
 static void m_led(void *ud, int r, int g, int b)
 {
     mock *m = ud;
-    m->r = r; m->g = g; m->b = b;
+    m->r = r;
+    m->g = g;
+    m->b = b;
 }
-static int m_battery(void *ud) { (void)ud; return 77; }
-static void m_brightness(void *ud, int p) { ((mock *)ud)->brightness = p; }
-static int m_button(void *ud, const char *n) { (void)ud; return strcmp(n, "A") == 0; }
+static int m_battery(void *ud)
+{
+    (void)ud;
+    return 77;
+}
+static void m_brightness(void *ud, int p)
+{
+    ((mock *)ud)->brightness = p;
+}
+static int m_button(void *ud, const char *n)
+{
+    (void)ud;
+    return strcmp(n, "A") == 0;
+}
 static void m_imu(void *ud, float v[6])
 {
     (void)ud;
-    for (int i = 0; i < 6; i++) v[i] = (float)(i + 1);
+    for (int i = 0; i < 6; i++)
+        v[i] = (float)(i + 1);
 }
-static long m_rtc(void *ud) { (void)ud; return 1700000000L; }
+static long m_rtc(void *ud)
+{
+    (void)ud;
+    return 1700000000L;
+}
 static void m_gpio_mode(void *ud, int pin, const char *mode)
 {
     mock *m = ud;
@@ -44,24 +65,50 @@ static void m_gpio_mode(void *ud, int pin, const char *mode)
 static void m_gpio_write(void *ud, int pin, int v)
 {
     mock *m = ud;
-    m->gpio_pin = pin; m->gpio_val = v;
+    m->gpio_pin = pin;
+    m->gpio_val = v;
 }
-static int m_gpio_read(void *ud, int pin) { (void)ud; (void)pin; return 1; }
-static int m_gpio_adc(void *ud, int pin) { (void)ud; (void)pin; return 512; }
-static int m_wifi_status(void *ud) { (void)ud; return 1; }
-static const char *m_wifi_ssid(void *ud) { (void)ud; return "catnet"; }
+static int m_gpio_read(void *ud, int pin)
+{
+    (void)ud;
+    (void)pin;
+    return 1;
+}
+static int m_gpio_adc(void *ud, int pin)
+{
+    (void)ud;
+    (void)pin;
+    return 512;
+}
+static int m_wifi_status(void *ud)
+{
+    (void)ud;
+    return 1;
+}
+static const char *m_wifi_ssid(void *ud)
+{
+    (void)ud;
+    return "catnet";
+}
 static int m_http_get(void *ud, const char *url, char *buf, size_t cap)
 {
     (void)ud;
-    if (strstr(url, "ping")) { snprintf(buf, cap, "pong"); return 4; }
+    if (strstr(url, "ping")) {
+        snprintf(buf, cap, "pong");
+        return 4;
+    }
     return -1;
 }
 
 static int failures;
-#define CHECK(cond, name)                                                    \
-    do {                                                                     \
-        if (cond) { printf("  ok   - %s\n", name); }                        \
-        else { printf("  FAIL - %s\n", name); failures++; }                 \
+#define CHECK(cond, name)                                                                \
+    do {                                                                                 \
+        if (cond) {                                                                      \
+            printf("  ok   - %s\n", name);                                               \
+        } else {                                                                         \
+            printf("  FAIL - %s\n", name);                                               \
+            failures++;                                                                  \
+        }                                                                                \
     } while (0)
 
 static const char *SCRIPT =
@@ -95,19 +142,31 @@ static const char *SCRIPT =
 int main(void)
 {
     char base[] = "/tmp/catnip_fs_XXXXXX";
-    if (!mkdtemp(base)) { printf("FAIL - mkdtemp\n"); return 1; }
+    if (!mkdtemp(base)) {
+        printf("FAIL - mkdtemp\n");
+        return 1;
+    }
 
     mock mk;
     memset(&mk, 0, sizeof(mk));
     catnip_hal hal;
     memset(&hal, 0, sizeof(hal));
     hal.ud = &mk;
-    hal.vibrate = m_vibrate; hal.led = m_led; hal.battery = m_battery;
-    hal.brightness = m_brightness; hal.button = m_button; hal.imu = m_imu;
-    hal.rtc_now = m_rtc; hal.gpio_mode = m_gpio_mode; hal.gpio_write = m_gpio_write;
-    hal.gpio_read = m_gpio_read; hal.gpio_adc = m_gpio_adc;
-    hal.wifi_status = m_wifi_status; hal.wifi_ssid = m_wifi_ssid;
-    hal.http_get = m_http_get; hal.fs_base = base;
+    hal.vibrate = m_vibrate;
+    hal.led = m_led;
+    hal.battery = m_battery;
+    hal.brightness = m_brightness;
+    hal.button = m_button;
+    hal.imu = m_imu;
+    hal.rtc_now = m_rtc;
+    hal.gpio_mode = m_gpio_mode;
+    hal.gpio_write = m_gpio_write;
+    hal.gpio_read = m_gpio_read;
+    hal.gpio_adc = m_gpio_adc;
+    hal.wifi_status = m_wifi_status;
+    hal.wifi_ssid = m_wifi_ssid;
+    hal.http_get = m_http_get;
+    hal.fs_base = base;
 
     catnip_rt *rt = catnip_rt_new_tracked();
     catnip_ui_open(rt);

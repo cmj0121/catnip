@@ -26,6 +26,11 @@ bool catnip_pmu_begin(void);
  * press is reported to exactly one caller. */
 bool catnip_pmu_power_key_pressed(void);
 
+/* True once when the power button has been held down. The PMIC decides how
+ * long "held" is; acting on it is the firmware's business - see
+ * catnip_power_off(). */
+bool catnip_pmu_power_key_held(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -18,7 +18,6 @@ extern "C" {
  * write. */
 bool catnip_ioexp_begin(void);
 
-
 #ifdef __cplusplus
 }
 #endif

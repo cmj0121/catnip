@@ -8,23 +8,25 @@
 namespace {
 
 /* AXP173 registers, per the datasheet. */
-const uint8_t REG_RAIL_CONTROL  = 0x12; /* DC-DC1 / LDO4 / LDO2 / LDO3 enable */
+const uint8_t REG_RAIL_CONTROL = 0x12;  /* DC-DC1 / LDO4 / LDO2 / LDO3 enable */
 const uint8_t REG_DCDC1_VOLTAGE = 0x26; /* 700-3500 mV in 25 mV steps */
-const uint8_t REG_LDO4_VOLTAGE  = 0x27; /* 700-3500 mV in 25 mV steps */
-const uint8_t REG_LDO23_VOLTAGE = 0x28;
-const uint8_t REG_IRQ_ENABLE_3  = 0x42; /* bit 1 short press, bit 0 long press */
-const uint8_t REG_IRQ_STATUS_3  = 0x46; /* same bits; write 1 to clear */
+const uint8_t REG_LDO4_VOLTAGE = 0x27;  /* 700-3500 mV in 25 mV steps */
+const uint8_t REG_LDO23_VOLTAGE =
+    0x28; /* LDO2 high nibble, LDO3 low; 100 mV steps from 1800 */
+const uint8_t REG_IRQ_ENABLE_3 = 0x42; /* bit 1 short press, bit 0 long press */
+const uint8_t REG_IRQ_STATUS_3 = 0x46; /* same bits; write 1 to clear */
 
 const uint8_t BIT_PEK_SHORT = 1u << 1;
-const uint8_t BIT_PEK_LONG  = 1u << 0; /* LDO2 high nibble, LDO3 low nibble; 1800-3300 mV in 100 mV steps */
+const uint8_t BIT_PEK_LONG = 1u << 0;
 
 /* Bits within REG_RAIL_CONTROL. Bit 0 is DC-DC1, which supplies the MCU: this
  * code must never clear it, so the enable write is read-modify-OR. */
 const uint8_t BIT_DCDC1 = 1u << 0;
-const uint8_t BIT_LDO4  = 1u << 1;
-const uint8_t BIT_LDO2  = 1u << 2;
-const uint8_t BIT_LDO3  = 1u << 3;
-const uint8_t ALL_RAILS = BIT_DCDC1 | BIT_LDO4 | BIT_LDO2 | BIT_LDO3; /* stock expects 0x0F */
+const uint8_t BIT_LDO4 = 1u << 1;
+const uint8_t BIT_LDO2 = 1u << 2;
+const uint8_t BIT_LDO3 = 1u << 3;
+const uint8_t ALL_RAILS =
+    BIT_DCDC1 | BIT_LDO4 | BIT_LDO2 | BIT_LDO3; /* stock expects 0x0F */
 
 /* Every rail on this board is 3.3 V; the stock firmware sets all four before
  * it touches anything else. Relying on what the PMIC remembers from the last
@@ -66,11 +68,10 @@ bool catnip_pmu_begin(void)
     /* Set the voltages before enabling, so a rail never comes up at whatever
      * the previous setting happened to be. Writing unconditionally is cheaper
      * than reading first, and the values are constants. */
-    const uint8_t v25    = encode_25mv(RAIL_MILLIVOLTS);
+    const uint8_t v25 = encode_25mv(RAIL_MILLIVOLTS);
     const uint8_t nibble = encode_100mv_nibble(RAIL_MILLIVOLTS);
-    const uint8_t v23    = (uint8_t)((nibble << 4) | nibble);
-    if (!write_reg(REG_DCDC1_VOLTAGE, v25) ||
-        !write_reg(REG_LDO4_VOLTAGE, v25) ||
+    const uint8_t v23 = (uint8_t)((nibble << 4) | nibble);
+    if (!write_reg(REG_DCDC1_VOLTAGE, v25) || !write_reg(REG_LDO4_VOLTAGE, v25) ||
         !write_reg(REG_LDO23_VOLTAGE, v23)) {
         Serial.println("[catnip] pmu: voltage write failed");
         return false;
@@ -83,8 +84,8 @@ bool catnip_pmu_begin(void)
         return false;
     }
 
-    Serial.printf("[catnip] pmu: rails were 0x%02X, all at 3.3V%s\n",
-                  rails, needs_enable ? ", enabled the missing ones" : "");
+    Serial.printf("[catnip] pmu: rails were 0x%02X, all at 3.3V%s\n", rails,
+                  needs_enable ? ", enabled the missing ones" : "");
 
     /* Latch power-button presses. The button is not wired to any MCU pin on
      * this board, so this is the only way the firmware can see it. */
@@ -105,10 +106,31 @@ bool catnip_pmu_begin(void)
     return true;
 }
 
+/* Both key events come from one register, and reading it clears every bit
+ * that was set - so read once and answer for the bit that was asked about,
+ * remembering the other for its own caller. Without that, whichever of the
+ * two ran first would swallow the other's press. */
+static bool take_key_event(uint8_t bit)
+{
+    static uint8_t pending = 0;
+
+    uint8_t status = 0;
+    if (read_reg(REG_IRQ_STATUS_3, &status) &&
+        (status & (BIT_PEK_SHORT | BIT_PEK_LONG))) {
+        write_reg(REG_IRQ_STATUS_3, status); /* write 1 to clear what was set */
+        pending |= (uint8_t)(status & (BIT_PEK_SHORT | BIT_PEK_LONG));
+    }
+    if (!(pending & bit)) return false;
+    pending &= (uint8_t)~bit;
+    return true;
+}
+
 bool catnip_pmu_power_key_pressed(void)
 {
-    uint8_t status = 0;
-    if (!read_reg(REG_IRQ_STATUS_3, &status) || !(status & BIT_PEK_SHORT)) return false;
-    write_reg(REG_IRQ_STATUS_3, status); /* write 1 to clear what was set */
-    return true;
+    return take_key_event(BIT_PEK_SHORT);
+}
+
+bool catnip_pmu_power_key_held(void)
+{
+    return take_key_event(BIT_PEK_LONG);
 }

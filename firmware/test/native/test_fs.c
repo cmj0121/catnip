@@ -16,20 +16,32 @@
 #include "lua.h"
 
 static int failures;
-#define CHECK(cond, name)                                                    \
-    do {                                                                     \
-        if (cond) { printf("  ok   - %s\n", name); }                        \
-        else { printf("  FAIL - %s\n", name); failures++; }                 \
+#define CHECK(cond, name)                                                                \
+    do {                                                                                 \
+        if (cond) {                                                                      \
+            printf("  ok   - %s\n", name);                                               \
+        } else {                                                                         \
+            printf("  FAIL - %s\n", name);                                               \
+            failures++;                                                                  \
+        }                                                                                \
     } while (0)
 
 static void write_file(const char *path, const char *content)
 {
     FILE *f = fopen(path, "wb");
-    if (f) { fputs(content, f); fclose(f); }
+    if (f) {
+        fputs(content, f);
+        fclose(f);
+    }
 }
 
 static int g_reset_calls;
-static int m_sd_reset(void *ud) { (void)ud; g_reset_calls++; return 0; }
+static int m_sd_reset(void *ud)
+{
+    (void)ud;
+    g_reset_calls++;
+    return 0;
+}
 
 static const char *SCRIPT =
     "local ok, err = pcall(function()\n"
@@ -56,7 +68,10 @@ static const char *SCRIPT =
 int main(void)
 {
     char base[] = "/tmp/catnip_fslist_XXXXXX";
-    if (!mkdtemp(base)) { printf("FAIL - mkdtemp\n"); return 1; }
+    if (!mkdtemp(base)) {
+        printf("FAIL - mkdtemp\n");
+        return 1;
+    }
     char path[512];
     snprintf(path, sizeof(path), "%s/a.txt", base);
     write_file(path, "hello");

@@ -19,8 +19,8 @@ const uint8_t REG_OUTPUT = 0x01;
 const uint8_t REG_CONFIG = 0x03;
 
 const uint8_t BIT_LCD_RST = (uint8_t)(1u << CATNIP_IOEXP_LCD_RST);
-const uint8_t BIT_LCD_CS  = (uint8_t)(1u << CATNIP_IOEXP_LCD_CS);
-const uint8_t BIT_IO3     = (uint8_t)(1u << CATNIP_IOEXP_IO3);
+const uint8_t BIT_LCD_CS = (uint8_t)(1u << CATNIP_IOEXP_LCD_CS);
+const uint8_t BIT_IO3 = (uint8_t)(1u << CATNIP_IOEXP_IO3);
 const uint8_t BIT_AUX_RST = (uint8_t)(1u << CATNIP_IOEXP_AUX_RST);
 
 /* The four pins we drive; everything else stays an input. */
@@ -40,7 +40,8 @@ bool catnip_ioexp_begin(void)
     bool acked = false;
     for (int attempt = 0; attempt < 5 && !acked; attempt++) {
         acked = set_outputs(BIT_LCD_CS) &&
-                catnip_i2c_write_reg(CATNIP_I2C_ADDR_IOEXP, REG_CONFIG, (uint8_t)~OUTPUT_PINS);
+                catnip_i2c_write_reg(CATNIP_I2C_ADDR_IOEXP, REG_CONFIG,
+                                     (uint8_t)~OUTPUT_PINS);
         if (!acked) delay(20);
     }
     if (!acked) return false;

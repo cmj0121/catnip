@@ -81,8 +81,8 @@ static void harden_env(catnip_rt *rt)
     lua_State *L = rt->L;
 
     /* Whole libraries / globals that are unsafe or filesystem/native-code. */
-    static const char *const nuke[] = {"io",       "package", "require",
-                                       "dofile",   "loadfile", "debug", NULL};
+    static const char *const nuke[] = {"io",       "package", "require", "dofile",
+                                       "loadfile", "debug",   NULL};
     for (int i = 0; nuke[i]; i++) {
         lua_pushnil(L);
         lua_setglobal(L, nuke[i]);
@@ -91,9 +91,8 @@ static void harden_env(catnip_rt *rt)
     /* Keep os time helpers, drop the dangerous members. */
     lua_getglobal(L, "os");
     if (lua_istable(L, -1)) {
-        static const char *const os_nuke[] = {"execute", "exit",   "remove",
-                                              "rename",  "tmpname", "getenv",
-                                              "setlocale", NULL};
+        static const char *const os_nuke[] = {"execute", "exit",   "remove",    "rename",
+                                              "tmpname", "getenv", "setlocale", NULL};
         for (int i = 0; os_nuke[i]; i++) {
             lua_pushnil(L);
             lua_setfield(L, -2, os_nuke[i]);
@@ -167,7 +166,10 @@ void catnip_rt_set_log(catnip_rt *rt, catnip_log_fn fn, void *ud)
     rt->log_ud = ud;
 }
 
-lua_State *catnip_rt_lua(catnip_rt *rt) { return rt ? rt->L : NULL; }
+lua_State *catnip_rt_lua(catnip_rt *rt)
+{
+    return rt ? rt->L : NULL;
+}
 
 void catnip_rt_report_error(catnip_rt *rt, lua_State *L)
 {
@@ -200,11 +202,11 @@ static int run_protected(catnip_rt *rt, int load_status, const char *what)
         lua_pop(L, 1);
         return load_status;
     }
-    int base = lua_gettop(L);      /* the loaded function */
+    int base = lua_gettop(L); /* the loaded function */
     lua_pushcfunction(L, msgh);
-    lua_insert(L, base);           /* msgh below the function */
+    lua_insert(L, base); /* msgh below the function */
     int st = lua_pcall(L, 0, 0, base);
-    lua_remove(L, base);           /* remove msgh */
+    lua_remove(L, base); /* remove msgh */
     if (st != LUA_OK) {
         size_t len;
         const char *err = lua_tolstring(L, -1, &len);

@@ -16,20 +16,34 @@
 #include "lua.h"
 
 static unsigned long g_now;
-static unsigned long now_fn(void *ud) { (void)ud; return g_now; }
-static void pump_fn(void *ud) { (void)ud; }
+static unsigned long now_fn(void *ud)
+{
+    (void)ud;
+    return g_now;
+}
+static void pump_fn(void *ud)
+{
+    (void)ud;
+}
 
 static int failures;
-#define CHECK(cond, name)                                                    \
-    do {                                                                     \
-        if (cond) { printf("  ok   - %s\n", name); }                        \
-        else { printf("  FAIL - %s\n", name); failures++; }                 \
+#define CHECK(cond, name)                                                                \
+    do {                                                                                 \
+        if (cond) {                                                                      \
+            printf("  ok   - %s\n", name);                                               \
+        } else {                                                                         \
+            printf("  FAIL - %s\n", name);                                               \
+            failures++;                                                                  \
+        }                                                                                \
     } while (0)
 
 static void write_file(const char *path, const char *content)
 {
     FILE *f = fopen(path, "wb");
-    if (f) { fputs(content, f); fclose(f); }
+    if (f) {
+        fputs(content, f);
+        fclose(f);
+    }
 }
 static void make_app(const char *root, const char *sub, const char *manifest,
                      const char *main_lua)
@@ -65,7 +79,10 @@ static int global_bool(catnip_rt *rt, const char *name)
 int main(void)
 {
     char root[] = "/tmp/catnip_shell_XXXXXX";
-    if (!mkdtemp(root)) { printf("FAIL - mkdtemp\n"); return 1; }
+    if (!mkdtemp(root)) {
+        printf("FAIL - mkdtemp\n");
+        return 1;
+    }
 
     make_app(root, "quick",
              "{\"id\":\"quick\",\"name\":\"Quick\",\"catnip_api\":\"1.0\"}",

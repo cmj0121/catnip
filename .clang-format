@@ -1,0 +1,39 @@
+# Matches the style this codebase was already written in, rather than imposing
+# a new one: four spaces, a brace on its own line for functions but attached
+# everywhere else, and short guard clauses left on one line because that is
+# what most of the error handling here looks like.
+#
+# Two alignment settings carry the intent. Macros stay aligned, because the pin
+# and register tables in device/board.h are read as tables and lose their point
+# unformatted. Ordinary assignments do not, because forcing them into columns
+# lines up variables that have nothing to do with each other.
+#
+# Vendored code under firmware/lib is excluded in .pre-commit-config.yaml: it is
+# upstream's to format, and reformatting it would bury the next update's diff.
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 90
+
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+  AfterNamespace: false
+  AfterClass: false
+  AfterStruct: false
+  AfterEnum: false
+  AfterControlStatement: Never
+  AfterCaseLabel: false
+  BeforeElse: false
+
+AlignConsecutiveMacros: Consecutive
+AlignConsecutiveAssignments: None
+AlignTrailingComments: true
+
+AllowShortIfStatementsOnASingleLine: AllIfsAndElse
+AllowShortFunctionsOnASingleLine: None
+AllowShortLoopsOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: true
+
+PointerAlignment: Right
+SortIncludes: false
+ReflowComments: false

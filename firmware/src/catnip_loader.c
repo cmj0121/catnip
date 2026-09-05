@@ -18,12 +18,21 @@ static char *read_file(const char *path)
 {
     FILE *f = fopen(path, "rb");
     if (!f) return NULL;
-    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return NULL; }
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return NULL;
+    }
     long n = ftell(f);
-    if (n < 0) { fclose(f); return NULL; }
+    if (n < 0) {
+        fclose(f);
+        return NULL;
+    }
     rewind(f);
     char *buf = (char *)malloc((size_t)n + 1);
-    if (!buf) { fclose(f); return NULL; }
+    if (!buf) {
+        fclose(f);
+        return NULL;
+    }
     size_t got = fread(buf, 1, (size_t)n, f);
     fclose(f);
     buf[got] = '\0';
@@ -85,8 +94,8 @@ int catnip_loader_discover(const char *apps_root, catnip_app_entry *out, int max
     return count;
 }
 
-int catnip_loader_open(const char *dir, catnip_manifest *m, char **code,
-                       char *errbuf, size_t errlen)
+int catnip_loader_open(const char *dir, catnip_manifest *m, char **code, char *errbuf,
+                       size_t errlen)
 {
     if (!dir || !m || !code) return fail(errbuf, errlen, "bad arguments");
 
@@ -101,8 +110,7 @@ int catnip_loader_open(const char *dir, catnip_manifest *m, char **code,
 
     if (!catnip_manifest_compatible(m)) {
         char msg[128];
-        snprintf(msg, sizeof(msg),
-                 "app needs catnip_api %d.%d, this platform is %d.%d",
+        snprintf(msg, sizeof(msg), "app needs catnip_api %d.%d, this platform is %d.%d",
                  m->api_major, m->api_minor, CATNIP_API_MAJOR, CATNIP_API_MINOR);
         return fail(errbuf, errlen, msg);
     }

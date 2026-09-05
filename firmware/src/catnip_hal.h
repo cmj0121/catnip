@@ -22,8 +22,8 @@ typedef struct {
     /* device.* */
     void (*vibrate)(void *ud, int ms);
     void (*led)(void *ud, int r, int g, int b);
-    int (*battery)(void *ud);             /* 0..100, or -1 if unknown */
-    void (*brightness)(void *ud, int pct); /* 0..100 */
+    int (*battery)(void *ud);                  /* 0..100, or -1 if unknown */
+    void (*brightness)(void *ud, int pct);     /* 0..100 */
     int (*button)(void *ud, const char *name); /* 1 pressed, 0 released */
 
     /* sensor.* */

@@ -18,16 +18,23 @@
 #include "lua.h"
 
 static int failures;
-#define CHECK(cond, name)                                                    \
-    do {                                                                     \
-        if (cond) { printf("  ok   - %s\n", name); }                        \
-        else { printf("  FAIL - %s\n", name); failures++; }                 \
+#define CHECK(cond, name)                                                                \
+    do {                                                                                 \
+        if (cond) {                                                                      \
+            printf("  ok   - %s\n", name);                                               \
+        } else {                                                                         \
+            printf("  FAIL - %s\n", name);                                               \
+            failures++;                                                                  \
+        }                                                                                \
     } while (0)
 
 static void write_file(const char *path, const char *content)
 {
     FILE *f = fopen(path, "wb");
-    if (f) { fputs(content, f); fclose(f); }
+    if (f) {
+        fputs(content, f);
+        fclose(f);
+    }
 }
 
 static void make_app(const char *root, const char *sub, const char *manifest,
@@ -56,21 +63,23 @@ int main(void)
     /* --- manifest parsing units --- */
     catnip_manifest m;
     char err[128];
-    CHECK(catnip_manifest_parse(
-              "{\"id\":\"a\",\"name\":\"A\",\"catnip_api\":\"1.0\"}", &m, err,
-              sizeof(err)) == 0,
+    CHECK(catnip_manifest_parse("{\"id\":\"a\",\"name\":\"A\",\"catnip_api\":\"1.0\"}",
+                                &m, err, sizeof(err)) == 0,
           "valid manifest parses");
     CHECK(strcmp(m.entry, "main.lua") == 0, "entry defaults to main.lua");
-    CHECK(catnip_manifest_parse("{\"name\":\"A\",\"catnip_api\":\"1.0\"}", &m,
-                                err, sizeof(err)) != 0,
-          "missing id is rejected");
-    CHECK(catnip_manifest_parse("{\"id\":\"a\",\"name\":\"A\"}", &m, err,
+    CHECK(catnip_manifest_parse("{\"name\":\"A\",\"catnip_api\":\"1.0\"}", &m, err,
                                 sizeof(err)) != 0,
+          "missing id is rejected");
+    CHECK(catnip_manifest_parse("{\"id\":\"a\",\"name\":\"A\"}", &m, err, sizeof(err)) !=
+              0,
           "missing catnip_api is rejected");
 
     /* --- filesystem discovery + open --- */
     char root[] = "/tmp/catnip_apps_XXXXXX";
-    if (!mkdtemp(root)) { printf("FAIL - mkdtemp\n"); return 1; }
+    if (!mkdtemp(root)) {
+        printf("FAIL - mkdtemp\n");
+        return 1;
+    }
 
     make_app(root, "hello",
              "{\"id\":\"hello\",\"name\":\"Hello\",\"catnip_api\":\"1.0\","
@@ -88,7 +97,8 @@ int main(void)
     const catnip_app_entry *hello = find(apps, n, "hello");
     const catnip_app_entry *future = find(apps, n, "future");
     CHECK(hello && hello->compatible == 1, "compatible app is marked compatible");
-    CHECK(hello && strcmp(hello->icon, "icon.png") == 0, "manifest icon is carried into the entry");
+    CHECK(hello && strcmp(hello->icon, "icon.png") == 0,
+          "manifest icon is carried into the entry");
     CHECK(future && future->compatible == 0, "future-API app is marked incompatible");
 
     /* open + run the compatible app */

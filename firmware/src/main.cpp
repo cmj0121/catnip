@@ -11,8 +11,10 @@
  * host test build (`make test`) compiles src/*.c and never this file.
  */
 #include <Arduino.h>
+#include <SD_MMC.h>
 
 #include "catnip_api.h"
+#include "catnip_config.h"
 #include "catnip_runtime.h"
 #include "catnip_shell.h"
 #include "device/board.h"
@@ -21,6 +23,7 @@
 #include "device/ioexp.h"
 #include "device/led.h"
 #include "device/pmu.h"
+#include "device/sd_mount.h"
 #include "device/power.h"
 #include "generated/anim_f01_rgb565.h"
 #include "generated/anim_f02_rgb565.h"
@@ -58,34 +61,58 @@ static void host_pump(void *ud)
     delay(1);
 }
 
-/* The idle animation (#40): the frames of catnip_idle_320x240.gif in the
- * order the GIF plays them, but slower - the GIF's 170 ms per frame reads as
- * twitchy on the panel, 400 ms reads as breathing. Frame 0 is the splash, so
+/* The idle animation (#40): the cat waves. Two poses only - the extra arm is
+ * either right of the body or left of it, never in between - so the wave is a
+ * jump cut. The table ping-pongs (f00, f01, f02, f01) so the rest pose is
+ * not shown twice in a row at the loop. Drawn streaks trail from where the
+ * arm just was (see docs/assets/meowkit/BRIEF.md). Frame 0 is the splash, so
  * the first frame is already on screen when the animation starts. It keeps
  * running until the shell takes the screen (#33), which is when g_animating
  * gets cleared; until then it is the only sign the device has not frozen. */
 static bool g_animating = true;
 static const uint16_t *const g_anim_frames[] = {
-    catnip_splash, catnip_anim_f01, catnip_anim_f02, catnip_anim_f01,
+    catnip_splash,   /* f00: arm right, rest */
+    catnip_anim_f01, /* f01: arm left, dashed rings from the right */
+    catnip_anim_f02, /* f02: arm right, solid swoosh at the right paw */
+    catnip_anim_f01, /* back through f01 so the loop is 0,1,2,1 */
 };
 static const size_t g_anim_count = sizeof(g_anim_frames) / sizeof(g_anim_frames[0]);
-static const unsigned long ANIM_FRAME_MS = 400;
+static unsigned long g_frame_ms = 625; /* one 4-frame cycle = one 2.5 s breath */
+
+/* Frames from the card, when the owner supplied any: zero means the built-in
+ * mascot above. The two are played by the same loop, so the only difference
+ * between a stock device and a customised one is where the pixels came from. */
+static int g_sd_frames = 0;
+
+static size_t frame_count(void)
+{
+    return g_sd_frames ? (size_t)g_sd_frames : g_anim_count;
+}
+
+static void show_frame(size_t i)
+{
+    if (g_sd_frames) {
+        catnip_display_show_frame((int)i);
+    } else {
+        catnip_display_blit(g_anim_frames[i]);
+    }
+}
 
 static size_t g_frame = 0;
 
 static void draw_current_frame(void)
 {
-    if (g_animating) catnip_display_blit(g_anim_frames[g_frame]);
+    if (g_animating) show_frame(g_frame);
 }
 
 static void animate(void)
 {
     static unsigned long last = 0;
     unsigned long now = millis();
-    if (!g_animating || now - last < ANIM_FRAME_MS) return;
+    if (!g_animating || now - last < g_frame_ms) return;
     last = now;
-    g_frame = (g_frame + 1) % g_anim_count;
-    catnip_display_blit(g_anim_frames[g_frame]);
+    g_frame = (g_frame + 1) % frame_count();
+    show_frame(g_frame);
 }
 
 /* A short press of the power button turns the screen off and on again. The
@@ -114,6 +141,7 @@ static void set_screen(bool on)
         g_animating = false;
     }
     g_screen_on = on;
+    catnip_led_dim(!on);
     /* Draw before lighting the panel, not after: the frame that was on screen
      * when it went dark is stale by now, and raising the backlight over it
      * shows the old frame first and the new one a moment later. */
@@ -122,9 +150,80 @@ static void set_screen(bool on)
     Serial.printf("[catnip] screen %s (%lu ms)\n", on ? "on" : "off", millis() - t0);
 }
 
+/* Switch off in the order the user can see: the screen goes first, so the
+ * device reads as shutting down rather than as having hung, and the LED goes
+ * dark just before the rail does. */
+static void power_off(void)
+{
+    Serial.println("[catnip] powering off");
+    Serial.flush();
+    g_animating = false;
+    catnip_display_backlight(0);
+    catnip_led_level(0);
+    catnip_power_off();
+}
+
 static void poll_power_button(void)
 {
+    if (catnip_pmu_power_key_held()) power_off();
     if (catnip_pmu_power_key_pressed()) set_screen(!g_screen_on);
+}
+
+/* Read the owner's settings off the card and act on them. Everything here is
+ * optional: no file, an unreadable file or a file full of typos all leave the
+ * built-in behaviour in place, and say so in the log rather than on screen. */
+#ifndef CATNIP_CONFIG_PATH
+#define CATNIP_CONFIG_PATH "/sd/catnip/config.json"
+#endif
+
+static void apply_config(void)
+{
+    catnip_config cfg;
+    catnip_config_defaults(&cfg);
+
+    File f = SD_MMC.open(CATNIP_CONFIG_PATH);
+    if (!f || f.isDirectory()) {
+        Serial.println("[catnip] config: none on the card, using the built-in settings");
+    } else {
+        size_t len = f.size();
+        char *text = (char *)malloc(len + 1);
+        if (text && f.readBytes(text, len) == len) {
+            text[len] = '\0';
+            if (catnip_config_parse(&cfg, text, len)) {
+                Serial.println("[catnip] config: read from " CATNIP_CONFIG_PATH);
+            } else {
+                Serial.println(
+                    "[catnip] config: not valid JSON, using the built-in settings");
+            }
+        } else {
+            Serial.println(
+                "[catnip] config: could not be read, using the built-in settings");
+        }
+        free(text);
+        f.close();
+    }
+
+    catnip_led_configure(cfg.led_brightness, cfg.led_breaths_per_second);
+    if (cfg.boot_frames_dir[0]) {
+        g_sd_frames = catnip_display_load_frames(cfg.boot_frames_dir);
+        if (g_sd_frames) {
+            g_frame = 0;
+            show_frame(0);
+        }
+    }
+    /* Built-in mascot: one ping-pong cycle (f00, f01, f02, f01) is one LED
+     * breath, so the cat and the light stay in time. Frames from the card
+     * keep the owner's boot.frame_ms, since those are not this cycle. */
+    if (g_sd_frames) {
+        g_frame_ms = cfg.boot_frame_ms;
+    } else {
+        unsigned long breath_ms = 2500;
+        if (cfg.led_breaths_per_second > 0.0f) {
+            breath_ms = (unsigned long)(1000.0f / cfg.led_breaths_per_second);
+        }
+        if (breath_ms < 4) breath_ms = 4;
+        g_frame_ms = breath_ms / 4;
+    }
 }
 
 /* Raise the backlight gradually - an abrupt jump to full reads as a flash. */
@@ -154,7 +253,6 @@ void setup()
     }
     Serial.println("[catnip] boot");
 
-
     /* A sign of life that does not depend on the screen or on anything having
      * attached to the serial port. It comes up after Serial deliberately: when
      * this was the very first call, a fault inside it left no output at all
@@ -179,6 +277,10 @@ void setup()
     } else {
         Serial.println("[catnip] display init FAILED");
     }
+
+    /* After the splash, deliberately: the card is the slowest thing in the
+     * boot and nothing on screen should wait for it. */
+    if (catnip_sd_mount()) apply_config();
 
     g_rt = catnip_rt_new_tracked(); /* Lua heap lives in PSRAM (#8) */
     if (!g_rt) {

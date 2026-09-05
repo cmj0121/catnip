@@ -18,15 +18,18 @@ struct catnip_shell {
     int running; /* index of the running app, or -1 */
 };
 
-catnip_shell *catnip_shell_new(catnip_rt *rt, const char *apps_root,
-                               catnip_now_fn now, catnip_pump_fn pump, void *ud)
+catnip_shell *catnip_shell_new(catnip_rt *rt, const char *apps_root, catnip_now_fn now,
+                               catnip_pump_fn pump, void *ud)
 {
     if (!rt || !apps_root) return NULL;
     catnip_shell *s = (catnip_shell *)calloc(1, sizeof(*s));
     if (!s) return NULL;
     s->rt = rt;
     s->sched = catnip_sched_new(rt, now, pump, ud);
-    if (!s->sched) { free(s); return NULL; }
+    if (!s->sched) {
+        free(s);
+        return NULL;
+    }
     catnip_ui_open(rt); /* apps get ui.* */
     snprintf(s->apps_root, sizeof(s->apps_root), "%s", apps_root);
     s->state = CATNIP_SHELL_MENU;
@@ -43,7 +46,10 @@ int catnip_shell_refresh(catnip_shell *s)
     return s->n_apps;
 }
 
-int catnip_shell_count(const catnip_shell *s) { return s ? s->n_apps : 0; }
+int catnip_shell_count(const catnip_shell *s)
+{
+    return s ? s->n_apps : 0;
+}
 
 const catnip_app_entry *catnip_shell_app(const catnip_shell *s, int index)
 {
@@ -79,8 +85,7 @@ int catnip_shell_launch(catnip_shell *s, int index, char *errbuf, size_t errlen)
     return 0;
 }
 
-int catnip_shell_launch_id(catnip_shell *s, const char *id, char *errbuf,
-                           size_t errlen)
+int catnip_shell_launch_id(catnip_shell *s, const char *id, char *errbuf, size_t errlen)
 {
     if (!s || !id) return -1;
     for (int i = 0; i < s->n_apps; i++) {

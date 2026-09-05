@@ -55,9 +55,9 @@ so the device cannot be permanently bricked by flashing. If anything looks wrong
 
 Override via environment variables:
 
-| Var | Default | Meaning |
-| --- | --- | --- |
-| `PORT` | auto-detected | serial port |
-| `BAUD` | `921600` | upload baud |
-| `BACKUP` | timestamped | backup file path |
+| Var          | Default         | Meaning                   |
+| ------------ | --------------- | ------------------------- |
+| `PORT`       | auto-detected   | serial port               |
+| `BAUD`       | `921600`        | upload baud               |
+| `BACKUP`     | timestamped     | backup file path          |
 | `STOCK_BASE` | upstream GitHub | where to fetch stock bins |

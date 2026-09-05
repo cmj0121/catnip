@@ -6,3 +6,6 @@ firmware/.build/
 
 # on-device flash backups (large, machine-specific)
 backup/
+
+# Python bytecode from the asset tools
+__pycache__/

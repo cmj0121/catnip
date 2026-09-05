@@ -8,10 +8,10 @@
 /* heap_caps_realloc(NULL, n, cap) behaves like malloc; passing SPIRAM keeps the
  * Lua heap in external RAM. */
 #define CN_REALLOC(p, n) heap_caps_realloc((p), (n), MALLOC_CAP_SPIRAM)
-#define CN_FREE(p) heap_caps_free((p))
+#define CN_FREE(p)       heap_caps_free((p))
 #else
 #define CN_REALLOC(p, n) realloc((p), (n))
-#define CN_FREE(p) free((p))
+#define CN_FREE(p)       free((p))
 #endif
 
 void catnip_alloc_init(catnip_alloc *a)

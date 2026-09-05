@@ -54,7 +54,9 @@ def emit_rgb565(src, out, symbol):
 
 
 # (asset blob, generated header, C symbol). The splash doubles as frame 0 of
-# the idle animation; the GIF plays 0, 1, 2, 1.
+# the idle animation: arm right. Frame 1 is arm left with dashed rings from
+# the right. Frame 2 is arm right with a solid swoosh at the right paw. The
+# firmware plays 0, 1, 2, 1.
 BLOBS = [
     ("catnip_splash_320x240.rgb565", "splash_rgb565.h", "catnip_splash"),
     ("catnip_anim_f01_320x240.rgb565", "anim_f01_rgb565.h", "catnip_anim_f01"),
@@ -62,8 +64,21 @@ BLOBS = [
 ]
 
 
+def drop_stale_headers():
+    """A leftover anim_f03_rgb565.h from an earlier 12-frame wave would still
+    compile if anything included it. Only the three current headers stay."""
+    keep = set(header for _, header, _ in BLOBS)
+    if not os.path.isdir(OUT_DIR):
+        return
+    for name in os.listdir(OUT_DIR):
+        if name.endswith(".h") and name not in keep:
+            os.remove(os.path.join(OUT_DIR, name))
+            print("gen_assets: removed leftover %s" % name)
+
+
 def build():
     os.makedirs(OUT_DIR, exist_ok=True)
+    drop_stale_headers()
     for blob, header, symbol in BLOBS:
         src = os.path.join(ASSETS, blob)
         out = os.path.join(OUT_DIR, header)

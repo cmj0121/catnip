@@ -75,7 +75,8 @@ int catnip_manifest_parse(const char *json, catnip_manifest *out, char *errbuf,
     const cJSON *perms = cJSON_GetObjectItemCaseSensitive(root, "permissions");
     if (cJSON_IsArray(perms)) {
         const cJSON *p = NULL;
-        cJSON_ArrayForEach(p, perms) {
+        cJSON_ArrayForEach(p, perms)
+        {
             if (out->n_permissions >= CATNIP_MAX_PERMISSIONS) break;
             if (cJSON_IsString(p) && p->valuestring) {
                 snprintf(out->permissions[out->n_permissions],

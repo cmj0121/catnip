@@ -10,12 +10,24 @@
 static int push_root(lua_State *L)
 {
     lua_getglobal(L, "ui");
-    if (!lua_istable(L, -1)) { lua_pop(L, 1); return 0; }
+    if (!lua_istable(L, -1)) {
+        lua_pop(L, 1);
+        return 0;
+    }
     lua_getfield(L, -1, "root"); /* ui.root function */
     lua_remove(L, -2);           /* drop ui */
-    if (!lua_isfunction(L, -1)) { lua_pop(L, 1); return 0; }
-    if (lua_pcall(L, 0, 1, 0) != LUA_OK) { lua_pop(L, 1); return 0; }
-    if (!lua_istable(L, -1)) { lua_pop(L, 1); return 0; }
+    if (!lua_isfunction(L, -1)) {
+        lua_pop(L, 1);
+        return 0;
+    }
+    if (lua_pcall(L, 0, 1, 0) != LUA_OK) {
+        lua_pop(L, 1);
+        return 0;
+    }
+    if (!lua_istable(L, -1)) {
+        lua_pop(L, 1);
+        return 0;
+    }
     return 1;
 }
 

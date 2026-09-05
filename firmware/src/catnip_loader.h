@@ -21,8 +21,8 @@ extern "C" {
 typedef struct {
     char id[64];
     char name[64];
-    char icon[64]; /* icon filename from the manifest (for the launcher) */
-    char dir[256]; /* full path to the app folder */
+    char icon[64];  /* icon filename from the manifest (for the launcher) */
+    char dir[256];  /* full path to the app folder */
     int compatible; /* 1 if its manifest parsed and the API is satisfiable */
 } catnip_app_entry;
 
@@ -34,8 +34,8 @@ int catnip_loader_discover(const char *apps_root, catnip_app_entry *out, int max
  * read the entry script into a freshly malloc'd buffer (caller frees *code).
  * Returns 0 on success; on error returns non-zero and writes a message into
  * errbuf, leaving *code untouched. */
-int catnip_loader_open(const char *dir, catnip_manifest *m, char **code,
-                       char *errbuf, size_t errlen);
+int catnip_loader_open(const char *dir, catnip_manifest *m, char **code, char *errbuf,
+                       size_t errlen);
 
 #ifdef __cplusplus
 }

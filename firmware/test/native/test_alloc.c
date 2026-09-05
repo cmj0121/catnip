@@ -7,10 +7,14 @@
 #include "catnip_runtime.h"
 
 static int failures;
-#define CHECK(cond, name)                                                    \
-    do {                                                                     \
-        if (cond) { printf("  ok   - %s\n", name); }                        \
-        else { printf("  FAIL - %s\n", name); failures++; }                 \
+#define CHECK(cond, name)                                                                \
+    do {                                                                                 \
+        if (cond) {                                                                      \
+            printf("  ok   - %s\n", name);                                               \
+        } else {                                                                         \
+            printf("  FAIL - %s\n", name);                                               \
+            failures++;                                                                  \
+        }                                                                                \
     } while (0)
 
 int main(void)
@@ -30,8 +34,8 @@ int main(void)
     CHECK(base_peak >= base_use, "peak >= in_use");
 
     /* Allocate a big table; in_use must climb. */
-    int rc = catnip_rt_dostring(
-        rt, "big = {} for i = 1, 20000 do big[i] = i * 2 end", "=grow");
+    int rc = catnip_rt_dostring(rt, "big = {} for i = 1, 20000 do big[i] = i * 2 end",
+                                "=grow");
     CHECK(rc == 0, "allocating script runs");
 
     size_t grown_use = 0, grown_peak = 0;
@@ -46,7 +50,8 @@ int main(void)
     size_t freed_use = 0, freed_peak = 0;
     catnip_rt_mem(rt, &freed_use, &freed_peak);
     CHECK(freed_use < grown_use, "in_use shrinks after GC");
-    CHECK(freed_peak >= grown_peak, "peak is a monotonic high-water mark, not reset by GC");
+    CHECK(freed_peak >= grown_peak,
+          "peak is a monotonic high-water mark, not reset by GC");
 
     catnip_rt_free(rt);
 
