@@ -213,6 +213,11 @@ cmd_install() {
 
 	resolve_pio
 	detect_port
+	# PNGs are the source of truth. rgb565 blobs and generated headers from
+	# earlier (12-frame, giant-arm) waves must not ride into this flash.
+	log "syncing boot animation from docs/assets/meowkit/catnip_animimg/ ..."
+	python3 "$FIRMWARE_DIR/tools/sync_boot_art.py"
+	rm -f "$FIRMWARE_DIR/src/generated/"*.h
 	log "building and flashing Catnip via PlatformIO (env: $PIO_ENV) ..."
 	if ! "${PIO_CMD[@]}" run -d "$FIRMWARE_DIR" -e "$PIO_ENV" \
 		-t upload --upload-port "$PORT"; then
