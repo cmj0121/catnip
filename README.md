@@ -145,10 +145,10 @@ line rather than the whole file.
 
 ## Buttons
 
-| Press        | Does                                                                                                      |
-| ------------ | --------------------------------------------------------------------------------------------------------- |
-| Power, short | Turns the screen off and on. The LED keeps breathing, so a dark screen is still visibly a running device. |
-| Power, held  | Switches the device off.                                                                                  |
+| Press        | Does                                                                                                                           |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| Power, short | Turns the screen off and on. The LED keeps breathing, dimmed to a glimmer, so a dark screen is still visibly a running device. |
+| Power, held  | Switches the device off.                                                                                                       |
 
 ## Status
 

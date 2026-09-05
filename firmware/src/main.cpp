@@ -141,6 +141,7 @@ static void set_screen(bool on)
         g_animating = false;
     }
     g_screen_on = on;
+    catnip_led_dim(!on);
     /* Draw before lighting the panel, not after: the frame that was on screen
      * when it went dark is stale by now, and raising the backlight over it
      * shows the old frame first and the new one a moment later. */
