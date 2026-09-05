@@ -61,21 +61,23 @@ static void host_pump(void *ud)
     delay(1);
 }
 
-/* The idle animation (#40): the frames of catnip_idle_320x240.gif in the
- * order the GIF plays them, but slower - the GIF's 170 ms per frame reads as
- * twitchy on the panel, 400 ms reads as breathing. Frame 0 is the splash, so
+/* The idle animation (#40): the cat waves. Two poses only - the extra arm is
+ * either right of the body or left of it, never in between - so the wave is a
+ * jump cut. The table ping-pongs (f00, f01, f02, f01) so the rest pose is
+ * not shown twice in a row at the loop. Drawn streaks trail from where the
+ * arm just was (see docs/assets/meowkit/BRIEF.md). Frame 0 is the splash, so
  * the first frame is already on screen when the animation starts. It keeps
  * running until the shell takes the screen (#33), which is when g_animating
  * gets cleared; until then it is the only sign the device has not frozen. */
 static bool g_animating = true;
 static const uint16_t *const g_anim_frames[] = {
-    catnip_splash,
-    catnip_anim_f01,
-    catnip_anim_f02,
-    catnip_anim_f01,
+    catnip_splash,   /* f00: arm right, rest */
+    catnip_anim_f01, /* f01: arm left, dashed rings from the right */
+    catnip_anim_f02, /* f02: arm right, solid swoosh at the right paw */
+    catnip_anim_f01, /* back through f01 so the loop is 0,1,2,1 */
 };
 static const size_t g_anim_count = sizeof(g_anim_frames) / sizeof(g_anim_frames[0]);
-static unsigned long g_frame_ms = 400;
+static unsigned long g_frame_ms = 625; /* one 4-frame cycle = one 2.5 s breath */
 
 /* Frames from the card, when the owner supplied any: zero means the built-in
  * mascot above. The two are played by the same loop, so the only difference
@@ -201,13 +203,25 @@ static void apply_config(void)
     }
 
     catnip_led_configure(cfg.led_brightness, cfg.led_breaths_per_second);
-    g_frame_ms = cfg.boot_frame_ms;
     if (cfg.boot_frames_dir[0]) {
         g_sd_frames = catnip_display_load_frames(cfg.boot_frames_dir);
         if (g_sd_frames) {
             g_frame = 0;
             show_frame(0);
         }
+    }
+    /* Built-in mascot: one ping-pong cycle (f00, f01, f02, f01) is one LED
+     * breath, so the cat and the light stay in time. Frames from the card
+     * keep the owner's boot.frame_ms, since those are not this cycle. */
+    if (g_sd_frames) {
+        g_frame_ms = cfg.boot_frame_ms;
+    } else {
+        unsigned long breath_ms = 2500;
+        if (cfg.led_breaths_per_second > 0.0f) {
+            breath_ms = (unsigned long)(1000.0f / cfg.led_breaths_per_second);
+        }
+        if (breath_ms < 4) breath_ms = 4;
+        g_frame_ms = breath_ms / 4;
     }
 }
 
