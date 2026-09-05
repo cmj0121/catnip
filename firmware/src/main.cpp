@@ -61,19 +61,19 @@ static void host_pump(void *ud)
     delay(1);
 }
 
-/* The idle animation (#40): the cat waves. Two poses only - the extra arm is
- * either right of the body or left of it, never in between - so the wave is a
- * jump cut. The table ping-pongs (f00, f01, f02, f01) so the rest pose is
- * not shown twice in a row at the loop. Drawn streaks trail from where the
- * arm just was (see docs/assets/meowkit/BRIEF.md). Frame 0 is the splash, so
- * the first frame is already on screen when the animation starts. It keeps
- * running until the shell takes the screen (#33), which is when g_animating
- * gets cleared; until then it is the only sign the device has not frozen. */
+/* The idle animation (#40): the cat waves. The cat has two arms - the left one
+ * holds the folder and never moves - so the wave is the right paw swinging
+ * wider each frame, with the tail counter-swinging to carry it. The table
+ * ping-pongs (f00, f01, f02, f01) so the rest pose is not shown twice in a row
+ * at the loop. Frame 0 is the splash, so the first frame is already on screen
+ * when the animation starts. It keeps running until the shell takes the screen
+ * (#33), which is when g_animating gets cleared; until then it is the only
+ * sign the device has not frozen. */
 static bool g_animating = true;
 static const uint16_t *const g_anim_frames[] = {
-    catnip_splash,   /* f00: arm right, rest */
-    catnip_anim_f01, /* f01: arm left, dashed rings from the right */
-    catnip_anim_f02, /* f02: arm right, solid swoosh at the right paw */
+    catnip_splash,   /* f00: paw up, rest, no motion arcs */
+    catnip_anim_f01, /* f01: paw tipped out, one short arc above it */
+    catnip_anim_f02, /* f02: full sweep, arcs off both the paw and the tail */
     catnip_anim_f01, /* back through f01 so the loop is 0,1,2,1 */
 };
 static const size_t g_anim_count = sizeof(g_anim_frames) / sizeof(g_anim_frames[0]);
