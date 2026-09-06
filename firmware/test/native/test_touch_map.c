@@ -7,12 +7,20 @@
  * is pinned down here by mapping the panel's corners and its centre to the
  * screen positions they have to come out at.
  *
- * Read the corner expectations as the specification of a handedness that is
- * not yet confirmed against the device (see touch_map.c). They are the
- * assumption written down where a corner capture can contradict it: when the
- * capture arrives, this test is what says whether the driver already agrees
- * with it, and if it does not, the four corners below and the two lines in
- * touch_map.c change together and nothing else has to. */
+ * The corner expectations below are anchored to a measurement. They started
+ * out as a falsifiable spec for a handedness that had only been inferred from
+ * the graphics library's rotation convention - rotation 3 admits two mappings
+ * a half turn apart, and every reading taken at the time sat too near the
+ * middle of the panel to tell them apart. That has since been settled on the
+ * device: a finger dragged into the top-left corner of the screen made the
+ * input diagnostic page report "MARKER: top-left", which the other mapping
+ * could not have produced. touch_map.c carries the full record.
+ *
+ * So a failure here is a regression in the transform, not a hypothesis being
+ * disproved, and these four values are not to be edited into agreement with a
+ * changed transform. Should a second unit ever disagree, that is a finding
+ * about that unit and belongs in board.h and touch_map.c before it touches
+ * anything here. */
 #include <stdio.h>
 
 #include "device/board.h"

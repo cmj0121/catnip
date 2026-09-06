@@ -7,10 +7,11 @@
  * instead of by touching a screen and squinting. That leaves touch.cpp as I2C
  * register reads and nothing else worth testing.
  *
- * It also gives the rotation exactly one home. The handedness below is not yet
- * confirmed (see touch_map.c), and when the corner capture settles it, the
- * correction is an edit to one function rather than a hunt for signs spread
- * through a driver.
+ * It also gives the rotation exactly one home. The handedness below was
+ * confirmed on the device rather than assumed (see touch_map.c), and keeping
+ * it in one function is what made that a single place to check - and would
+ * have made it a single place to correct, rather than a hunt for signs spread
+ * through a driver, had it gone the other way.
  */
 #ifndef CATNIP_TOUCH_MAP_H
 #define CATNIP_TOUCH_MAP_H

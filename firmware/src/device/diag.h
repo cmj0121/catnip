@@ -9,13 +9,20 @@
  * reach an app, this page says whether the switch reached the firmware at all,
  * and that is a different question from whether the layer above dispatched it.
  *
- * The second is to settle the touch rotation. catnip_touch_panel_to_screen()
- * currently encodes one of the two handednesses rotation 3 admits, and says so
- * in its own comment: the three readings taken from the device all sit well
- * inside the panel and are consistent with either. This page draws a marker at
- * the mapped position, wherever the finger is, so a wrong handedness shows up
- * as a marker that is mirrored or turned away from the fingertip - visible in
- * one touch, instead of a corner-by-corner capture read back over serial.
+ * The second was to settle the touch rotation, which it did. Rotation 3 admits
+ * two mappings a half turn apart, and the readings available when
+ * catnip_touch_panel_to_screen() was written all sat well inside the panel,
+ * where the two are indistinguishable. This page draws a marker at the mapped
+ * position, wherever the finger is, and names the quarter of the screen it
+ * believes that position is in; a finger dragged into the top-left corner
+ * reported "MARKER: top-left", which excluded the other mapping. That took one
+ * drag rather than a corner-by-corner capture read back over serial, and
+ * touch_map.c carries the record.
+ *
+ * It stays in the firmware because that was never the last question of its
+ * kind. The same drag re-checks the rotation on a different unit, and the same
+ * boxes answer "did the switch reach the firmware at all" for whatever fails
+ * next.
  *
  * HOW IT IS ENTERED, AND WHY NOT BY A KEY. A held button at boot is the
  * obvious gesture and it is the wrong one here: the buttons are the thing

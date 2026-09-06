@@ -33,25 +33,37 @@ bool catnip_touch_panel_to_screen(uint16_t panel_x, uint16_t panel_y, uint16_t *
      * lines below. So a finger at the panel's origin lands at the top right of
      * the screen, and walking down the panel's Y axis walks left across it.
      *
-     * THE HANDEDNESS IS NOT CONFIRMED. Rotation 3 admits a second mapping -
-     * screen_x = panel_y and screen_y = PANEL_W - 1 - panel_x - which is this
-     * one turned through 180 degrees, and every reading taken from the device
-     * so far is consistent with both. The measurements were (212, 273),
-     * (63, 158) and (118, 205), all of them well inside the panel and none of
-     * them near an edge, so nothing in them says which way either axis runs.
-     * The form above is derived from the library's own rotation convention,
-     * which is the best reason available for preferring it, but the touch
-     * digitiser is a separate part bonded to the glass and nothing guarantees
-     * it was fitted the same way up as the display it sits on.
+     * THE HANDEDNESS IS CONFIRMED on this unit, and the paragraphs below are
+     * the record of how, kept because without them this transform reads as
+     * more complicated than it needs to be and invites being "simplified" into
+     * the wrong one of two forms that look equally reasonable on paper.
      *
-     * What would settle it: touch each corner of the screen in turn and record
-     * the raw panel coordinate for each. If the top-left corner of what the
-     * user sees reports a panel Y near 319 and a panel X near 0, this mapping
-     * is right. If it reports a panel Y near 0 and a panel X near 239, the
-     * other one is, and the fix is to swap the two subtractions here. A capture
-     * of those four corners is being taken; until it is in, treat a tap that
-     * lands in the diagonally opposite corner as this comment's fault and not
-     * the caller's. */
+     * Rotation 3 admits a second mapping - screen_x = panel_y and
+     * screen_y = PANEL_W - 1 - panel_x - which is this one turned through 180
+     * degrees about the centre of the screen. Near the middle of the panel the
+     * two agree closely enough to be indistinguishable, and the first three
+     * readings taken from the device - (212, 273), (63, 158) and (118, 205) -
+     * were all well inside it, so none of them said which way either axis
+     * runs. The form above was derived from the graphics library's own
+     * rotation convention, which was the best reason available for preferring
+     * it and was not a measurement: the touch digitiser is a separate part
+     * bonded to the glass, and nothing guarantees it was fitted the same way
+     * up as the display underneath it.
+     *
+     * What settled it: the input diagnostic page (device/diag.cpp) draws a
+     * crosshair at the mapped position and prints, in words, which quarter of
+     * the screen that position is in. A finger dragged into the top-left
+     * corner of the screen the user is looking at made the page report
+     * "MARKER: top-left", with its line from screen centre pointing back at
+     * the fingertip. The alternative mapping is a half turn, so for that same
+     * finger it would have reported "bottom-right"; it is excluded.
+     *
+     * The two lines below are therefore measured rather than inferred, and
+     * swapping the two subtractions - the correction this comment used to hold
+     * in reserve - would now be the bug rather than the fix. The check repeats
+     * on another unit in one drag: put /sd/catnip/diag on the card or type
+     * "diag" over serial, drag a finger into a named corner of the screen, and
+     * read the quadrant the page prints. */
     *screen_x = (uint16_t)(CATNIP_LCD_PANEL_H - 1 - panel_y);
     *screen_y = panel_x;
     return true;
