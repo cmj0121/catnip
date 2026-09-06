@@ -9,3 +9,6 @@ backup/
 
 # Python bytecode from the asset tools
 __pycache__/
+
+# agent worktrees (transient, one directory per background agent)
+.claude/worktrees/
