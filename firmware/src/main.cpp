@@ -18,6 +18,7 @@
 #include "catnip_runtime.h"
 #include "catnip_shell.h"
 #include "device/board.h"
+#include "device/diag.h"
 #include "device/display.h"
 #include "device/i2cbus.h"
 #include "device/ioexp.h"
@@ -70,6 +71,17 @@ static void host_pump(void *ud)
  * (#33), which is when g_animating gets cleared; until then it is the only
  * sign the device has not frozen. */
 static bool g_animating = true;
+
+/* Hand the screen to the input diagnostic (#42). The boot animation stops the
+ * same way it will when the shell takes over (#33): g_animating goes false and
+ * stays false, so nothing repaints the mascot over the page. */
+static void enter_diag(void)
+{
+    if (catnip_diag_active()) return;
+    g_animating = false;
+    if (!catnip_diag_begin()) g_animating = true;
+}
+
 static const uint16_t *const g_anim_frames[] = {
     catnip_splash,   /* f00: paw up, rest, no motion arcs */
     catnip_anim_f01, /* f01: paw tipped out, one short arc above it */
@@ -102,6 +114,13 @@ static size_t g_frame = 0;
 
 static void draw_current_frame(void)
 {
+    /* Once the input diagnostic has the screen it owns every repaint, so
+     * switching the panel off and on again brings the page back rather than
+     * the mascot it replaced. */
+    if (catnip_diag_active()) {
+        catnip_diag_redraw();
+        return;
+    }
     if (g_animating) show_frame(g_frame);
 }
 
@@ -280,7 +299,19 @@ void setup()
 
     /* After the splash, deliberately: the card is the slowest thing in the
      * boot and nothing on screen should wait for it. */
-    if (catnip_sd_mount()) apply_config();
+    if (catnip_sd_mount()) {
+        apply_config();
+        /* The marker file means the owner wants the input page and nothing
+         * else, so the Lua runtime and the shell below are never started: they
+         * would only delay the page and then compete with it for the screen.
+         * The other way in - typing "diag" - is in loop(), because it has to
+         * work on a device with no card in the slot. */
+        if (catnip_diag_marker_present()) {
+            Serial.println("[catnip] diag: " CATNIP_DIAG_MARKER_PATH " is on the card");
+            enter_diag();
+            return;
+        }
+    }
 
     g_rt = catnip_rt_new_tracked(); /* Lua heap lives in PSRAM (#8) */
     if (!g_rt) {
@@ -305,6 +336,25 @@ void loop()
     /* Either side of the frame draw: a full-screen blit takes long enough that
      * a press landing during one would otherwise wait for it to finish. */
     poll_power_button();
+
+    if (catnip_diag_active()) {
+        /* The page polls the drivers it draws, so it is the whole loop. The
+         * power button still works, because it arrives from the PMIC rather
+         * than from any of the switches the page is testing. */
+        catnip_diag_step();
+        poll_power_button();
+        catnip_led_breathe();
+        return;
+    }
+
+    /* Typed over USB, so it reaches a device with no card. Checked before the
+     * frame draw so the request is not held up behind a blit. */
+    if (catnip_diag_serial_request()) {
+        Serial.println("[catnip] diag: asked for over serial");
+        enter_diag();
+        return;
+    }
+
     animate();
     poll_power_button();
     catnip_led_breathe();

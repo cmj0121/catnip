@@ -32,6 +32,7 @@ RT_SRC  := $(wildcard $(SRCDIR)/*.c)
 # wildcarded, so that adding a device source cannot quietly break this build.
 RT_SRC  += $(SRCDIR)/device/input_debounce.c
 RT_SRC  += $(SRCDIR)/device/touch_map.c
+RT_SRC  += $(SRCDIR)/device/diag_layout.c
 TEST_SRC := $(wildcard test/native/*.c)
 TESTS   := $(patsubst test/native/%.c,$(BUILD)/%,$(TEST_SRC))
 
