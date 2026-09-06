@@ -31,6 +31,7 @@ RT_SRC  := $(wildcard $(SRCDIR)/*.c)
 # driver so a host test can drive it - are listed one by one rather than
 # wildcarded, so that adding a device source cannot quietly break this build.
 RT_SRC  += $(SRCDIR)/device/input_debounce.c
+RT_SRC  += $(SRCDIR)/device/touch_map.c
 TEST_SRC := $(wildcard test/native/*.c)
 TESTS   := $(patsubst test/native/%.c,$(BUILD)/%,$(TEST_SRC))
 
