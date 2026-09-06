@@ -13,6 +13,7 @@
 #include "display.h"
 #include "input.h"
 #include "touch.h"
+#include "touch_debug.h" /* the raw pair, shown beside the mapped one */
 
 /*
  * HOW THIS DRAWS, AND WHY NOT THROUGH display.h.
@@ -124,14 +125,16 @@ void draw_box(catnip_button b, uint8_t down_mask, int touch_box)
 /* A crosshair at the mapped touch position, drawn wherever the finger is and
  * not only inside a box.
  *
- * This is the page's reason for existing. catnip_touch_panel_to_screen()
- * encodes one of the two handednesses that rotation 3 admits and cannot yet
- * tell them apart from the readings taken so far - all three landed well
- * inside the panel, where the two mappings agree closely enough to be
- * indistinguishable. Near the edges they do not: the wrong one puts the
- * marker through a 180 degree turn about the centre of the screen. So the
- * marker under a finger dragged to a corner settles it by eye, in one touch,
- * with no capture to read back and no arithmetic to do afterwards.
+ * This is the page's reason for existing, and it has already paid for itself.
+ * Rotation 3 admits two mappings, and near the middle of the panel - where
+ * every reading available when catnip_touch_panel_to_screen() was written
+ * happened to land - they agree closely enough to be indistinguishable. Near
+ * the edges they do not: the wrong one puts the marker through a 180 degree
+ * turn about the centre of the screen. A finger dragged into the top-left
+ * corner put the marker under the fingertip and made the page say
+ * "MARKER: top-left", which settled it by eye in one touch, with no capture to
+ * read back and no arithmetic afterwards. The same drag re-checks it on
+ * another unit.
  *
  * It is drawn last, over the boxes, because a marker hidden behind the thing
  * it is meant to be compared against would answer nothing. */

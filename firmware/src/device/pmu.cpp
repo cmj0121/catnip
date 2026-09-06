@@ -13,11 +13,11 @@ const uint8_t REG_DCDC1_VOLTAGE = 0x26; /* 700-3500 mV in 25 mV steps */
 const uint8_t REG_LDO4_VOLTAGE = 0x27;  /* 700-3500 mV in 25 mV steps */
 const uint8_t REG_LDO23_VOLTAGE =
     0x28; /* LDO2 high nibble, LDO3 low; 100 mV steps from 1800 */
+/* The interrupt-enable register is this driver's own business. Its status
+ * counterpart and the two power-key bits are in pmu.h instead, because the
+ * probe reads the same register while it is sweeping every other input, and
+ * one part deserves one definition. */
 const uint8_t REG_IRQ_ENABLE_3 = 0x42; /* bit 1 short press, bit 0 long press */
-const uint8_t REG_IRQ_STATUS_3 = 0x46; /* same bits; write 1 to clear */
-
-const uint8_t BIT_PEK_SHORT = 1u << 1;
-const uint8_t BIT_PEK_LONG = 1u << 0;
 
 /* Bits within REG_RAIL_CONTROL. Bit 0 is DC-DC1, which supplies the MCU: this
  * code must never clear it, so the enable write is read-modify-OR. */
@@ -91,13 +91,14 @@ bool catnip_pmu_begin(void)
      * this board, so this is the only way the firmware can see it. */
     uint8_t irq_enable = 0;
     if (read_reg(REG_IRQ_ENABLE_3, &irq_enable)) {
-        write_reg(REG_IRQ_ENABLE_3, (uint8_t)(irq_enable | BIT_PEK_SHORT | BIT_PEK_LONG));
+        write_reg(REG_IRQ_ENABLE_3, (uint8_t)(irq_enable | CATNIP_PMU_IRQ_PEK_SHORT |
+                                              CATNIP_PMU_IRQ_PEK_LONG));
     }
     /* Clear whatever is pending, including the press that switched the device
      * on - otherwise the first thing the firmware does is act on it. */
     uint8_t pending = 0;
-    if (read_reg(REG_IRQ_STATUS_3, &pending) && pending) {
-        write_reg(REG_IRQ_STATUS_3, pending);
+    if (read_reg(CATNIP_PMU_REG_IRQ_STATUS_3, &pending) && pending) {
+        write_reg(CATNIP_PMU_REG_IRQ_STATUS_3, pending);
     }
 
     /* A rail that just came up needs a moment before what hangs off it will
@@ -115,10 +116,12 @@ static bool take_key_event(uint8_t bit)
     static uint8_t pending = 0;
 
     uint8_t status = 0;
-    if (read_reg(REG_IRQ_STATUS_3, &status) &&
-        (status & (BIT_PEK_SHORT | BIT_PEK_LONG))) {
-        write_reg(REG_IRQ_STATUS_3, status); /* write 1 to clear what was set */
-        pending |= (uint8_t)(status & (BIT_PEK_SHORT | BIT_PEK_LONG));
+    if (read_reg(CATNIP_PMU_REG_IRQ_STATUS_3, &status) &&
+        (status & (CATNIP_PMU_IRQ_PEK_SHORT | CATNIP_PMU_IRQ_PEK_LONG))) {
+        write_reg(CATNIP_PMU_REG_IRQ_STATUS_3,
+                  status); /* write 1 to clear what was set */
+        pending |=
+            (uint8_t)(status & (CATNIP_PMU_IRQ_PEK_SHORT | CATNIP_PMU_IRQ_PEK_LONG));
     }
     if (!(pending & bit)) return false;
     pending &= (uint8_t)~bit;
@@ -127,10 +130,10 @@ static bool take_key_event(uint8_t bit)
 
 bool catnip_pmu_power_key_pressed(void)
 {
-    return take_key_event(BIT_PEK_SHORT);
+    return take_key_event(CATNIP_PMU_IRQ_PEK_SHORT);
 }
 
 bool catnip_pmu_power_key_held(void)
 {
-    return take_key_event(BIT_PEK_LONG);
+    return take_key_event(CATNIP_PMU_IRQ_PEK_LONG);
 }

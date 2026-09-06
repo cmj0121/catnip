@@ -82,19 +82,11 @@ bool catnip_touch_lifted(void);
  * find out where the tap that just ended actually was. */
 bool catnip_touch_position(uint16_t *screen_x, uint16_t *screen_y);
 
-/* The same touch as the controller reported it, before the rotation: a
- * position on the 240x320 panel in the panel's own orientation. Returns false,
- * and writes nothing, under the same conditions as catnip_touch_position().
- *
- * This exists for the diagnostic page and for nothing else, and no ordinary
- * caller should want it - the whole point of this driver reporting screen
- * coordinates is that callers do not have to know how the panel is mounted.
- * But the handedness of that rotation is not yet confirmed (see touch_map.c),
- * and a page showing only the mapped position can say that a tap landed in the
- * wrong place without saying whether the controller or the rotation put it
- * there. Showing both side by side is the difference between diagnosing that
- * from the screen and having to take a serial capture. */
-bool catnip_touch_panel_position(uint16_t *panel_x, uint16_t *panel_y);
+/* The raw panel coordinate behind that position is deliberately NOT here.
+ * Callers of this header get screen coordinates and never need to know how the
+ * panel is mounted, which is the whole point of the driver rotating them; a
+ * diagnostic that genuinely needs the pre-rotation pair includes
+ * touch_debug.h, and says so by doing it. */
 
 #ifdef __cplusplus
 }

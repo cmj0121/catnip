@@ -4,6 +4,7 @@
 #include "board.h"
 #include "i2cbus.h"
 #include "touch.h"
+#include "touch_debug.h"
 #include "touch_map.h"
 
 /* The FT6336's own register map. board.h owns the bus address, because that is
@@ -17,9 +18,29 @@
  * - so they are masked off. The probe read them this way on the device and got
  * positions that fall inside the panel. */
 static const uint8_t kRegTdStatus = 0x02;
-static const uint8_t kRegP1Xh = 0x03;
 static const uint8_t kRegChipId = 0xA3;
 static const uint8_t kRegVendorId = 0xA8;
+
+/* TD_STATUS and the first point are consecutive and the part auto-increments
+ * its register pointer, so 0x02 to 0x06 come back as one frame: finger count,
+ * X high, X low, Y high, Y low. */
+static const size_t kFrameLen = 5;
+
+/* How often the controller is actually interrogated. This is a budget rather
+ * than a preference, and the thing being budgeted is not this driver's time
+ * but the bus's: the FT6336 shares 400 kHz with the PMIC, the I/O expander,
+ * the RTC and the IMU, and a caller polling from the main loop would otherwise
+ * ask it a question as fast as the CPU can form one. That buys nothing - the
+ * part conditions and reports its own touches at something like 60 Hz, so
+ * reading it faster returns the same frame again - while taking time from
+ * every other device on the bus. 12 ms is comfortably inside the part's update
+ * rate and leaves a finger feeling immediate.
+ *
+ * The gate is here rather than in any caller so that it protects the bus from
+ * all of them, including the ones not written yet. Callers still poll from
+ * their loop as the header tells them to; they just do not all get a
+ * transaction each time they ask. */
+static const uint32_t kPollIntervalMs = 12;
 
 /* What an FT6336 answers with. Measured on this device: 0xA3 read 0x64 and
  * 0xA8 read 0x11. */
@@ -36,23 +57,19 @@ static uint16_t g_y;
 static bool g_have_panel;
 static uint16_t g_panel_x;
 static uint16_t g_panel_y;
+static uint32_t g_last_poll_ms;
 
-/* Read the first touch point and turn it into a screen position. Four separate
- * register reads are not one atomic sample - a finger moving between them
- * could pair an old X with a new Y - and that is tolerable for the same reason
- * it was in the probe: the error is at most one poll's worth of movement, on a
- * position that is only ever used to say where on the screen the finger is. */
-static bool read_position(uint16_t *screen_x, uint16_t *screen_y)
+/* Turn the four coordinate bytes of a frame into a screen position. Only the
+ * low nibble of each high byte is coordinate; the bits above carry an event
+ * flag on X and a touch id on Y, so they are masked off.
+ *
+ * Because the frame arrived in one transaction, this is one atomic sample: the
+ * X and Y here were read from the part at the same instant and cannot pair an
+ * old X with a new Y, which four separate register reads could. */
+static bool decode_position(const uint8_t *p, uint16_t *screen_x, uint16_t *screen_y)
 {
-    uint8_t r[4];
-
-    for (uint8_t i = 0; i < 4; i++) {
-        if (!catnip_i2c_read_reg(CATNIP_I2C_ADDR_TOUCH, (uint8_t)(kRegP1Xh + i), &r[i]))
-            return false;
-    }
-
-    uint16_t panel_x = (uint16_t)(((r[0] & 0x0F) << 8) | r[1]);
-    uint16_t panel_y = (uint16_t)(((r[2] & 0x0F) << 8) | r[3]);
+    uint16_t panel_x = (uint16_t)(((p[0] & 0x0F) << 8) | p[1]);
+    uint16_t panel_y = (uint16_t)(((p[2] & 0x0F) << 8) | p[3]);
 
     /* Keep the raw pair whether or not the rotation accepts it. A coordinate
      * that decodes to a point off the panel is precisely what the diagnostic
@@ -101,28 +118,44 @@ bool catnip_touch_begin(void)
     }
 
     g_present = true;
+    /* Backdated so the first poll after this is a real one rather than being
+     * served from a frame that was never read. */
+    g_last_poll_ms = millis() - kPollIntervalMs;
     return true;
 }
 
 void catnip_touch_poll(void)
 {
-    uint8_t td;
+    uint8_t frame[kFrameLen];
+    uint32_t now;
 
     if (!g_present) return;
 
-    if (!catnip_i2c_read_reg(CATNIP_I2C_ADDR_TOUCH, kRegTdStatus, &td)) return;
+    /* Serve the last frame until the budget above has elapsed. Unsigned
+     * subtraction, so this stays correct across the wrap of millis() every 49
+     * days, the same way the bounce filter's clock does. */
+    now = millis();
+    if (now - g_last_poll_ms < kPollIntervalMs) return;
+    g_last_poll_ms = now;
 
-    bool down = (td & 0x0F) != 0;
+    /* One transaction for the finger count and the point together. The five
+     * separate reads this replaces paid the write-reg and repeated-start
+     * overhead five times for the same five bytes, and nothing between them
+     * can now change underneath the sample. */
+    if (!catnip_i2c_read_regs(CATNIP_I2C_ADDR_TOUCH, kRegTdStatus, frame, kFrameLen))
+        return;
+
+    bool down = (frame[0] & 0x0F) != 0;
 
     if (down) {
         uint16_t x;
         uint16_t y;
 
-        /* A position that does not read, or that decodes to a point off the
-         * panel, leaves the last one standing. The finger is still down either
-         * way, and a stale position is closer to the truth than a jump to
-         * wherever the noise decoded to. */
-        if (read_position(&x, &y)) {
+        /* A position that decodes to a point off the panel leaves the last one
+         * standing. The finger is still down either way, and a stale position
+         * is closer to the truth than a jump to wherever the noise decoded
+         * to. */
+        if (decode_position(&frame[1], &x, &y)) {
             g_x = x;
             g_y = y;
             g_have_position = true;
