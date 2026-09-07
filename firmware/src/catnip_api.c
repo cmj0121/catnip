@@ -5,9 +5,9 @@
 #include <dirent.h>
 #include <math.h>
 #include <stdio.h>
-#include <string.h>
 #include <sys/stat.h>
 
+#include "catnip_fs_path.h"
 #include "lauxlib.h"
 #include "lua.h"
 
@@ -170,13 +170,24 @@ static int l_http_get(lua_State *L)
 
 /* ---- fs.* (flat, confined to hal->fs_base) ---- */
 
+/* The one place a name chosen by an app becomes a path on the device. Every
+ * fs.* entry point below goes through it, fs.list() included, so that the rule
+ * stated in device/fs_path.h has a single implementation: six copies of it
+ * would be five chances to leave one out, and the one left out is the hole.
+ *
+ * Neither refusal below is a value an app could mistake for an answer. Both
+ * raise, because both are the app's own mistake rather than a fact about the
+ * card, and a nil here would be read as "no such file". */
 static int fs_path(lua_State *L, const catnip_hal *h, const char *name, char *out,
                    size_t cap)
 {
+    /* No base means no storage - on the MeowKit, no card in the slot. The HAL
+     * leaves fs_base NULL rather than naming a mount point that is not there,
+     * precisely so that this is an error and not a directory that answers
+     * "empty" to every question asked of it. See device/hal_meowkit.cpp. */
     if (!h || !h->fs_base) return luaL_error(L, "fs not available");
-    /* Allow subdirectories, but never escape the base with "..". */
-    if (strstr(name, "..")) return luaL_error(L, "bad path");
-    snprintf(out, cap, "%s/%s", h->fs_base, name);
+    if (!catnip_fs_resolve(h->fs_base, name, out, cap))
+        return luaL_error(L, "bad path: %s", name);
     return 0;
 }
 
@@ -261,13 +272,13 @@ static int l_fs_reset(lua_State *L)
 static int l_fs_list(lua_State *L)
 {
     const catnip_hal *h = hal_of(L);
+    /* No argument means the root, which fs_path() resolves from the empty name.
+     * This call built its path and checked it itself until #45, and the two
+     * checks had already drifted apart - a rule with two implementations is a
+     * rule with two behaviours. */
     const char *sub = luaL_optstring(L, 1, "");
-    if (!h || !h->fs_base) return luaL_error(L, "fs not available");
-    if (strstr(sub, "..")) return luaL_error(L, "bad path");
-
     char dir[512];
-    if (sub[0]) snprintf(dir, sizeof(dir), "%s/%s", h->fs_base, sub);
-    else snprintf(dir, sizeof(dir), "%s", h->fs_base);
+    fs_path(L, h, sub, dir, sizeof(dir));
 
     DIR *d = opendir(dir);
     if (!d) {

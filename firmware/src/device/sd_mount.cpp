@@ -19,7 +19,7 @@ bool catnip_sd_mount(void)
         Serial.println("[catnip] sd: pins rejected");
         return false;
     }
-    if (!SD_MMC.begin("/sd", true /* 1-bit */)) {
+    if (!SD_MMC.begin(CATNIP_SD_MOUNT_POINT, true /* 1-bit */)) {
         Serial.println("[catnip] sd: no card");
         return false;
     }
@@ -36,8 +36,8 @@ bool catnip_sd_mount(void)
     case CARD_SDHC: type = "SDHC"; break;
     default: break;
     }
-    Serial.printf("[catnip] sd: %s card, %llu MB, mounted at /sd\n", type,
-                  SD_MMC.cardSize() / (1024ULL * 1024ULL));
+    Serial.printf("[catnip] sd: %s card, %llu MB, mounted at " CATNIP_SD_MOUNT_POINT "\n",
+                  type, SD_MMC.cardSize() / (1024ULL * 1024ULL));
     g_mounted = true;
     return true;
 }

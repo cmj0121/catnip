@@ -88,6 +88,11 @@ Anything that is arithmetic rather than I/O is split into a plain C file with no
 | `input_names.c`    | `test/native/test_input_names.c`    | which switch `device.button('a')` means |
 | `battery_gauge.c`  | `test/native/test_battery_gauge.c`  | a cell voltage, or that it is not one   |
 
+`catnip_fs_path.c` follows the same pattern but lives one layer up, in `src/`,
+because deciding whether a path is still under a root is string work with no
+board in it - and `catnip_api.c` had to include it, which would have pointed
+the portable core at this directory. The arrow goes the other way.
+
 This is not ceremony. The debounce filter's first design — accept an edge, then
 ignore the pin for a while — was proved wrong on the host by replaying a real
 trace: the rebound lasted 160 ms and would have been reported as a second press.
