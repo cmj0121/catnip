@@ -6,8 +6,8 @@
  * directory; anything that needed thinking about belongs in the driver, and if
  * a hook here starts growing logic that is the sign it went to the wrong place.
  *
- * What is live: the status LED, the battery, the backlight, the seven switches
- * and the accelerometer.
+ * What is live: the status LED, the battery, the backlight, the seven switches,
+ * the accelerometer and the SD card.
  *
  * What is deliberately not, and why - because a reader looking for a missing
  * hook will look here first, and "it is not in the table" does not say whether
@@ -42,9 +42,9 @@
  *   service.*       wifi and http are another issue's; this one does not touch
  *                   the radio.
  *
- *   fs.*            fs_base and sd_reset stay NULL here. The card is mounted in
- *                   main.cpp and giving apps a filesystem is #32's scope, not
- *                   this file's.
+ *   fs.reset        sd_reset stays NULL, so fs.reset() reports "not available"
+ *                   rather than doing nothing and saying it worked. Formatting
+ *                   the card is #46. fs_base itself is wired - see below.
  */
 #include <Arduino.h>
 
@@ -55,6 +55,7 @@
 #include "input_names.h"
 #include "led.h"
 #include "pmu.h"
+#include "sd_mount.h"
 
 namespace {
 
@@ -160,6 +161,31 @@ const catnip_hal *catnip_meowkit_hal_begin(void)
     g_hal.brightness = hal_brightness;
     g_hal.button = hal_button;
     g_hal.imu = hal_imu;
+
+    /* fs.* is the card and nothing else. The root is the mount point itself,
+     * because catnip_api.c reaches the card through plain stdio - fopen,
+     * opendir, stat, remove on "<fs_base>/<name>" - rather than through the
+     * SD_MMC object, and the mount point is the name the virtual filesystem
+     * answers to. It carries no trailing separator for the same reason: the
+     * join there is "%s/%s" and would otherwise produce "//".
+     *
+     * main.cpp mounts the card before this runs, and mounting is what settles
+     * whether there is one, so this reads the answer rather than asking again.
+     *
+     * With no card the pointer stays NULL, which catnip_hal.h defines as "fs is
+     * off" and catnip_api.c turns into an error an app can catch. That is the
+     * point of leaving it NULL rather than naming /sd regardless: against a
+     * mount point that is not there, fs.read() would return nil and
+     * fs.exists() false - the same answers a working card gives for a file that
+     * simply is not on it. No app could tell the two apart, and the File
+     * Browser would cheerfully offer to write to a card nobody inserted. */
+    if (catnip_sd_mounted()) {
+        g_hal.fs_base = CATNIP_SD_MOUNT_POINT;
+    } else {
+        /* Not fatal, and not silent - the same treatment the IMU gets above.
+         * The boot log already says "sd: no card"; this says what that costs. */
+        Serial.println("[catnip] hal: no card, fs.* will report \"fs not available\"");
+    }
     return &g_hal;
 }
 
