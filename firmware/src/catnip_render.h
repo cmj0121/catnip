@@ -16,6 +16,14 @@
 extern "C" {
 #endif
 
+/* Every string a callback is handed is owned by Lua and borrowed for the length
+ * of that one call. The renderer guarantees it that far by keeping the Lua value
+ * anchored on the Lua stack across the call; it drops the anchor as soon as the
+ * call returns, and Lua is then free to collect the string. A backend that wants
+ * a string to outlive its callback must copy it - the device's LVGL backend does
+ * not have to think about this, because lv_label_set_text copies. Anyone adding
+ * a field here follows the same rule: read it into the node's stack frame in
+ * catnip_render.c, never into a pointer that outlives the frame. */
 typedef struct {
     void *ud;
     void (*begin_screen)(void *ud);
