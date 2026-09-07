@@ -19,6 +19,7 @@
 #ifndef CATNIP_SCHED_H
 #define CATNIP_SCHED_H
 
+#include "catnip_render.h"
 #include "catnip_runtime.h"
 
 #ifdef __cplusplus
@@ -52,6 +53,22 @@ int catnip_sched_start(catnip_sched *s, const char *code, const char *chunkname)
 /* Advance the app by one step: resume it if it is due, otherwise pump the host.
  * Returns one of the CATNIP_* states. */
 int catnip_sched_step(catnip_sched *s);
+
+/* A catnip_render_dispatch_fn (pass the scheduler as `ud`) that runs one ui
+ * handler on a coroutine of its own, resumed exactly once, carrying the same
+ * count hook an app coroutine carries. The hook is the point: a handler on the
+ * main lua_State would run with no hook at all, so an on_click containing
+ * `while true do end` would freeze the device and the watchdog that exists for
+ * precisely that would never fire.
+ *
+ * A handler that yields - sys.sleep inside on_click, which is among the first
+ * things anyone will write - is an error today, and the message says so in
+ * those words rather than in Lua's ("attempt to yield from outside a
+ * coroutine", which names nothing the author did). Making it yieldable needs
+ * the scheduler to hold a queue of runnable coroutines instead of one, which is
+ * this file's contract to change and not the renderer's; #48 does it, and then
+ * the only thing that changes here is which function is installed. */
+int catnip_sched_dispatch(void *ud, catnip_rt *rt, int node_ref, const char *event);
 
 void catnip_sched_free(catnip_sched *s);
 

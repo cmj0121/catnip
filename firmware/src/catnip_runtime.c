@@ -192,6 +192,12 @@ void catnip_rt_report_error(catnip_rt *rt, lua_State *L)
     lua_pop(L, 2); /* traceback + original error */
 }
 
+void catnip_rt_log(catnip_rt *rt, const char *msg)
+{
+    if (!rt || !msg) return;
+    emit(rt, msg, strlen(msg));
+}
+
 /* A traceback message handler so runtime errors carry a stack, not just text. */
 static int msgh(lua_State *L)
 {

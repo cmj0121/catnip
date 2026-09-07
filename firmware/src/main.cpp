@@ -24,6 +24,7 @@
 #include "device/ioexp.h"
 #include "device/led.h"
 #include "device/hal_meowkit.h"
+#include "device/lvgl_backend.h"
 #include "device/lvgl_port.h"
 #include "device/pmu.h"
 #include "device/sd_mount.h"
@@ -39,6 +40,10 @@
 
 static catnip_rt *g_rt;
 static catnip_shell *g_shell;
+/* The renderer's backend (#30). Held here rather than fetched at each use, so
+ * that the shell's teardown and the main loop's pass are visibly drawing
+ * through the same one. */
+static const catnip_render_backend *g_be;
 
 static void serial_log(void *ud, const char *msg, size_t len)
 {
@@ -81,6 +86,15 @@ static bool g_animating = true;
 static void enter_diag(void)
 {
     if (catnip_diag_active()) return;
+    /* The page draws on lv_screen_active() and keeps it for good, so whatever
+     * is loaded there has to be empty before it starts. An app's widgets are
+     * still on its own screen at this point, and the page would strip that
+     * screen's styles and put its boxes underneath them. Tearing the app down
+     * through the shell releases them and leaves the backend's blank screen
+     * loaded, which is the screen the page would have had if no app had ever
+     * run. Nothing hands the screen back afterwards and nothing needs to:
+     * loop() stops stepping the shell the moment the page is up. */
+    if (g_shell) catnip_shell_exit(g_shell);
     g_animating = false;
     if (!catnip_diag_begin()) g_animating = true;
 }
@@ -124,6 +138,13 @@ static void draw_current_frame(void)
         catnip_diag_redraw();
         return;
     }
+    /* The same handover, one step further along: once an app's widgets are on
+     * the panel LVGL owns every repaint, and blitting the mascot over them
+     * would leave half a screen of each. */
+    if (catnip_lvgl_backend_active()) {
+        catnip_lvgl_backend_redraw();
+        return;
+    }
     if (g_animating) show_frame(g_frame);
 }
 
@@ -131,6 +152,12 @@ static void animate(void)
 {
     static unsigned long last = 0;
     unsigned long now = millis();
+    /* g_animating is deliberately not cleared when the renderer takes over: it
+     * is what set_screen() restores when the panel comes back on, and clearing
+     * it would make the handover depend on whether the screen happened to be
+     * off at the moment it occurred. Who owns the panel is asked afresh here
+     * every pass instead. */
+    if (catnip_lvgl_backend_active()) return;
     if (!g_animating || now - last < g_frame_ms) return;
     last = now;
     g_frame = (g_frame + 1) % frame_count();
@@ -332,6 +359,13 @@ void setup()
         Serial.println("[catnip] FATAL: shell init failed");
         return;
     }
+    /* Where a running app's ui.* tree becomes pixels (#30). The shell holds it
+     * only so that a finished app's widgets are torn down through the same
+     * vtable that built them; the pass itself belongs in loop(), next to the
+     * display's own step. */
+    g_be = catnip_lvgl_backend(g_rt);
+    catnip_shell_set_backend(g_shell, g_be);
+
     /* Expect zero apps until the SD card is mounted (#32). */
     Serial.printf("[catnip] shell ready, %d app(s) under %s\n",
                   catnip_shell_count(g_shell), CATNIP_APPS_ROOT);
@@ -370,11 +404,18 @@ void loop()
      * script reads the device as it was this pass rather than last. */
     catnip_meowkit_hal_poll();
 
-    /* Nothing has brought LVGL up on this path yet - the boot animation goes
-     * straight through the blit - so this is a no-op until the shell owns the
-     * screen (#33). It is here rather than added then because a renderer that
+    /* A no-op until something brings LVGL up, which on this path is the first
+     * widget an app draws (#30) - the boot animation goes straight through the
+     * blit and never asks. It is called unconditionally because a renderer that
      * is only stepped on some passes through the loop is a stall nobody can
      * see the cause of. */
     catnip_lvgl_step();
+
+    /* The order is catnip_render.h's, and its reasons are there: handlers run
+     * in the drain and nowhere else, so they are outside LVGL's dispatch and on
+     * the scheduler's watchdog; the app's own coroutine advances next; and the
+     * pass comes last, so it sees whatever either of them changed. */
+    if (g_rt) catnip_render_drain(g_rt);
     if (g_shell) catnip_shell_step(g_shell);
+    if (g_rt && g_be) catnip_render(g_rt, g_be);
 }

@@ -4,10 +4,18 @@ Everything here talks to the MeowKit's hardware directly. Above it sits the Lua
 runtime, which reaches hardware only through `catnip_hal.h`; below it there is
 nothing but the board.
 
-Most of this is real, built into the firmware, and verified on a device. Two
-files are still scaffolds: `lvgl_backend.cpp` and `shell_ui.cpp` are guarded by
-`CATNIP_DEVICE_WIP` and compile to nothing. They are waiting on the `ui.*`
-renderer (#30) and the on-screen shell (#33).
+Most of this is real, built into the firmware, and verified on a device. One
+file is still a scaffold: `shell_ui.cpp` is guarded by `CATNIP_DEVICE_WIP` and
+compiles to nothing, waiting on the on-screen shell (#33).
+
+`lvgl_backend.cpp` is no longer one. It is the `catnip_render_backend` a running
+app's `ui.*` tree is drawn through (#30): the traversal and the diff are
+host-tested in `catnip_render.c`, and what is here is one LVGL call per verb.
+The guard came off with it, so `pio run` is now a compile check on every LVGL
+call in the file — which is more than the scaffold it replaced ever had, having
+been written against LVGL 8 names that no compiler ever saw. What it has _not_
+had is a device: nothing launches an app until #33 draws a menu, so no widget
+this file makes has yet reached the glass.
 
 LVGL is in the build now (#29) and `lvgl_port.cpp` is what binds it to this
 board: a full-screen draw buffer in PSRAM, `millis()` as its clock, and a flush

@@ -56,4 +56,17 @@
  * what makes an answer and the working behind it tell apart at a glance. */
 #define LV_FONT_MONTSERRAT_10 1
 
+/* The large font, for the ui.* renderer's `title` role (#30). The five style
+ * roles an app can name are a vocabulary and each one has to be tellable from
+ * the others; `title` and `body` set in the same face at the same size are the
+ * same thing with a different name, and an app that marked its heading would
+ * have nothing to show for it. Three sizes cover the three that differ - 10
+ * for `caption`, 14 for `body`, 16 for `title` - and the remaining two roles,
+ * `primary` and `danger`, differ in colour rather than in size.
+ *
+ * This is a UI decision in a file that otherwise carries hardware ones, which
+ * is the same exception the line above already is: a font has to be compiled
+ * in, so the only place to ask for one is here. */
+#define LV_FONT_MONTSERRAT_16 1
+
 #endif /* LV_CONF_H */
