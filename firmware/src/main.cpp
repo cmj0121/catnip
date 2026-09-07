@@ -15,6 +15,7 @@
 
 #include "catnip_api.h"
 #include "catnip_config.h"
+#include "catnip_menu.h"
 #include "catnip_runtime.h"
 #include "catnip_shell.h"
 #include "device/board.h"
@@ -29,6 +30,7 @@
 #include "device/pmu.h"
 #include "device/sd_mount.h"
 #include "device/power.h"
+#include "device/ui_input.h"
 #include "generated/anim_f01_rgb565.h"
 #include "generated/anim_f02_rgb565.h"
 #include "generated/splash_rgb565.h"
@@ -44,6 +46,10 @@ static catnip_shell *g_shell;
  * that the shell's teardown and the main loop's pass are visibly drawing
  * through the same one. */
 static const catnip_render_backend *g_be;
+/* The launcher menu (#33): itself a ui.* screen drawn through g_be, so the same
+ * renderer and input layer that run an app run the menu. It is what finally
+ * exercises the whole path end to end. */
+static catnip_menu *g_menu;
 
 static void serial_log(void *ud, const char *msg, size_t len)
 {
@@ -95,6 +101,10 @@ static void enter_diag(void)
      * run. Nothing hands the screen back afterwards and nothing needs to:
      * loop() stops stepping the shell the moment the page is up. */
     if (g_shell) catnip_shell_exit(g_shell);
+    /* Hand the touch panel back before the page takes it: the input layer's LVGL
+     * pointer indev would otherwise keep injecting taps onto the page's own
+     * screen (#31/#42). Safe on the boot-marker path, where no indev was made. */
+    catnip_ui_input_end();
     g_animating = false;
     if (!catnip_diag_begin()) g_animating = true;
 }
@@ -284,6 +294,42 @@ static void fade_in(void)
     }
 }
 
+/* Put the battery on the menu's status line. Wifi is deliberately not shown:
+ * the MeowKit HAL leaves wifi_status unwired (see hal_meowkit.cpp), so an
+ * indicator would read "disconnected" forever rather than the truth, and an
+ * honest gap beats a fake reading - a lesson this project has paid for before.
+ * Throttled to once every couple of seconds, because it runs Lua to reach the
+ * label and the charge barely moves; `force` refreshes it the moment the menu
+ * is rebuilt so the line is never briefly blank. */
+static unsigned long g_status_last;
+
+static void update_status(bool force)
+{
+    if (!g_menu) return;
+    unsigned long now = millis();
+    if (!force && now - g_status_last < 2000) return;
+    g_status_last = now;
+
+    int pct = catnip_pmu_battery_percent();
+    char buf[32];
+    if (pct >= 0) snprintf(buf, sizeof(buf), "Battery %d%%", pct);
+    else snprintf(buf, sizeof(buf), "Battery --");
+    catnip_menu_set_status(g_menu, buf);
+}
+
+/* (Re)draw the menu with the apps the shell found. Called at boot and every
+ * time an app returns, because the renderer's teardown between apps has cleared
+ * the tree by then. catnip_shell_app(,0) is the base of the shell's contiguous
+ * app array, which is what the menu reads. */
+static void rebuild_menu(void)
+{
+    if (!g_menu || !g_shell) return;
+    int n = catnip_shell_count(g_shell);
+    const catnip_app_entry *apps = (n > 0) ? catnip_shell_app(g_shell, 0) : nullptr;
+    catnip_menu_show(g_menu, apps, n);
+    update_status(true);
+}
+
 void setup()
 {
     /* First, and before anything slow: without this the board switches off. */
@@ -366,6 +412,17 @@ void setup()
     g_be = catnip_lvgl_backend(g_rt);
     catnip_shell_set_backend(g_shell, g_be);
 
+    /* The touch panel, for the pointer indev the input layer feeds LVGL (#31).
+     * The switches are already up - the HAL began them - so this is the other
+     * half. It shares the I2C bus that came up above. */
+    catnip_ui_input_begin();
+
+    /* The launcher menu (#33). Building it here is what takes the screen from
+     * the boot animation: the first pass draws it, catnip_lvgl_backend_active()
+     * turns true, and animate() stands down. */
+    g_menu = catnip_menu_new(g_rt);
+    rebuild_menu();
+
     /* Expect zero apps until the SD card is mounted (#32). */
     Serial.printf("[catnip] shell ready, %d app(s) under %s\n",
                   catnip_shell_count(g_shell), CATNIP_APPS_ROOT);
@@ -404,18 +461,56 @@ void loop()
      * script reads the device as it was this pass rather than last. */
     catnip_meowkit_hal_poll();
 
+    /* Input into the event model (#31): the switches move a focus cursor over
+     * the renderer's focus order and post prev/next/click to what is focused,
+     * and the touch panel feeds the LVGL pointer indev so a tap activates the
+     * button under it. Before the LVGL step, so the touch read the indev makes
+     * there is fresh, and before the drain, so a press is delivered this same
+     * frame. It returns true when B was pressed - the request to leave the app. */
+    bool back = (g_rt && g_shell) ? catnip_ui_input_step(g_rt) : false;
+
     /* A no-op until something brings LVGL up, which on this path is the first
-     * widget an app draws (#30) - the boot animation goes straight through the
-     * blit and never asks. It is called unconditionally because a renderer that
-     * is only stepped on some passes through the loop is a stall nobody can
-     * see the cause of. */
+     * widget the menu or an app draws (#30) - the boot animation goes straight
+     * through the blit and never asks. It is called unconditionally because a
+     * renderer that is only stepped on some passes through the loop is a stall
+     * nobody can see the cause of. */
     catnip_lvgl_step();
 
     /* The order is catnip_render.h's, and its reasons are there: handlers run
      * in the drain and nowhere else, so they are outside LVGL's dispatch and on
-     * the scheduler's watchdog; the app's own coroutine advances next; and the
-     * pass comes last, so it sees whatever either of them changed. */
+     * the scheduler's watchdog. The menu's on_click latches its pick here; an
+     * app's on_* run here too. */
     if (g_rt) catnip_render_drain(g_rt);
-    if (g_shell) catnip_shell_step(g_shell);
+
+    /* The menu and a running app are the same kind of tree; which is up is the
+     * shell's state, and the transitions between them are here (#33). */
+    if (g_shell) {
+        if (catnip_shell_state(g_shell) == CATNIP_SHELL_RUNNING) {
+            if (back) {
+                /* B leaves the app. Teardown loads the blank screen, so the menu
+                 * has to be rebuilt before the next pass draws it. */
+                catnip_shell_exit(g_shell);
+                rebuild_menu();
+            } else if (catnip_shell_step(g_shell) == CATNIP_SHELL_MENU) {
+                /* The app finished or faulted on its own: same return. */
+                rebuild_menu();
+            }
+        } else {
+            /* In the menu. A click has latched which app to launch; the launch
+             * tears the menu tree down, so one that then fails to load must put
+             * the menu back rather than leave a blank screen. */
+            const char *id = catnip_menu_take_pick(g_menu);
+            if (id) {
+                char err[64];
+                if (catnip_shell_launch_id(g_shell, id, err, sizeof(err)) != 0) {
+                    Serial.printf("[catnip] menu: %s could not launch: %s\n", id, err);
+                    rebuild_menu();
+                }
+            } else {
+                update_status(false);
+            }
+        }
+    }
+
     if (g_rt && g_be) catnip_render(g_rt, g_be);
 }

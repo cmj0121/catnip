@@ -67,6 +67,11 @@ Entry g_map[kMaxObjects];
 
 catnip_rt *g_rt;
 
+/* The handle whose object wears the focus ring (#31), or CATNIP_HANDLE_NONE. It
+ * lives here because the object it names is the backend's to touch, and it is
+ * cleared in be_destroy() when that object is the one being freed. */
+catnip_handle g_focused = CATNIP_HANDLE_NONE;
+
 /* LVGL is up and this backend has drawn into it. Once true it stays true: see
  * the header for why the panel is not handed back. */
 bool g_up;
@@ -442,6 +447,10 @@ void be_destroy(void *ud, catnip_handle h)
     if (!e) return;
     mark_list(e->parent);
 
+    /* If the ring was on this object, forget it before the object goes, so a
+     * later focus move does not try to take the ring off a freed object. */
+    if (h == g_focused) g_focused = CATNIP_HANDLE_NONE;
+
     /* Deleting the screen that is on the panel would leave the display with no
      * active screen, and the next lv_timer_handler() would dereference it. The
      * blank screen is loaded first so there is always one. */
@@ -514,4 +523,18 @@ bool catnip_lvgl_backend_active(void)
 void catnip_lvgl_backend_redraw(void)
 {
     if (g_up) lv_obj_invalidate(lv_screen_active());
+}
+
+void catnip_lvgl_backend_focus(catnip_handle h)
+{
+    /* Move the ring only when the focused handle actually changes: an unchanged
+     * pass returns at once rather than searching the map twice. A destroyed
+     * object takes its state with it and be_destroy() clears g_focused when it is
+     * the one that goes, so nothing here ever paints a ring onto a reused slot. */
+    if (h == g_focused) return;
+    Entry *was = map_find(g_focused);
+    if (was) lv_obj_remove_state(was->obj, LV_STATE_FOCUSED);
+    Entry *now = map_find(h);
+    if (now) lv_obj_add_state(now->obj, LV_STATE_FOCUSED);
+    g_focused = h;
 }

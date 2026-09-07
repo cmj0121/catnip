@@ -1,9 +1,12 @@
 /*
  * shell_ui.cpp - STATUS: scaffold, UNTESTED (needs PlatformIO + hardware).
- * Issue #33: draw the shell menu + status bar on the display.
- * Issue #34 (render half): show each app's manifest icon (decode the PNG, e.g.
- * with a vendored lodepng, into an lv_img). The icon path is already carried in
- * catnip_app_entry.icon.
+ *
+ * Issue #33 - the menu and its status bar - now lives in catnip_menu.c, drawn
+ * through the same ui.* renderer an app uses, so it is not built here. What is
+ * left for this file is issue #34 (render half): show each app's manifest icon
+ * (decode the PNG, e.g. with a vendored lodepng, into an lv_img). The icon path
+ * is already carried in catnip_app_entry.icon, and catnip_menu builds the row
+ * out of the app's name today - an icon is the thing it does not yet have.
  */
 #ifdef CATNIP_DEVICE_WIP
 #include <lvgl.h>
