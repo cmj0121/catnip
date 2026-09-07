@@ -42,6 +42,7 @@ RT_SRC  += $(SRCDIR)/device/battery_gauge.c
 RT_SRC  += $(SRCDIR)/device/touch_map.c
 RT_SRC  += $(SRCDIR)/device/diag_layout.c
 RT_SRC  += $(SRCDIR)/device/imu_map.c
+RT_SRC  += $(SRCDIR)/device/ui_input_map.c
 TEST_SRC := $(wildcard test/native/*.c)
 TESTS   := $(patsubst test/native/%.c,$(BUILD)/%,$(TEST_SRC))
 

@@ -49,6 +49,16 @@ bool catnip_lvgl_backend_active(void);
  * know about: the power button blanking it is the case that exists today. */
 void catnip_lvgl_backend_redraw(void);
 
+/* Move the focus ring onto the object this backend drew for `h`, taking it off
+ * whatever wore it before. Pass CATNIP_HANDLE_NONE to clear it. The input layer
+ * (#31) needs to show which focusable the joystick is on, and the renderer hands
+ * out focus in handles - but the object behind a handle is the backend's to
+ * dereference and no one else's (see the map comment in catnip_render.h), so the
+ * input layer names the handle and the ring is moved here, inside the code that
+ * made the object. Called every pass; a handle that has not changed since the
+ * last call costs nothing, so the caller need not track what it last focused. */
+void catnip_lvgl_backend_focus(catnip_handle h);
+
 #ifdef __cplusplus
 }
 #endif
