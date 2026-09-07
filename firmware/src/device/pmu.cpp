@@ -1,6 +1,7 @@
 /* pmu.cpp - see pmu.h. */
 #include <Arduino.h>
 
+#include "battery_gauge.h"
 #include "board.h"
 #include "i2cbus.h"
 #include "pmu.h"
@@ -18,6 +19,35 @@ const uint8_t REG_LDO23_VOLTAGE =
  * probe reads the same register while it is sweeping every other input, and
  * one part deserves one definition. */
 const uint8_t REG_IRQ_ENABLE_3 = 0x42; /* bit 1 short press, bit 0 long press */
+
+/* The battery side, per the datasheet - and, unlike the rails above, not yet
+ * confirmed against this board. See catnip_pmu_battery_percent() in pmu.h for
+ * what that means for the number it reports. */
+const uint8_t REG_POWER_MODE = 0x01; /* bit 5 set while a battery is attached */
+const uint8_t BIT_BATTERY_PRESENT = 1u << 5;
+const uint8_t REG_ADC_ENABLE_1 = 0x82; /* bit 7 enables the battery-voltage ADC */
+const uint8_t BIT_ADC_BATTERY_VOLTAGE = 1u << 7;
+/* 12 bits across two registers: 0x78 holds the high 8, 0x79 the low 4. */
+const uint8_t REG_BATTERY_VOLTAGE = 0x78;
+
+/* The ADC step is 1.1 mV. Kept as a numerator over a denominator rather than a
+ * float so the conversion is exact integer arithmetic, the same reason the IMU
+ * reports milli-g. */
+const uint32_t VOLTAGE_STEP_NUM = 11;
+const uint32_t VOLTAGE_STEP_DEN = 10;
+
+/* Five seconds - see catnip_pmu_poll() in pmu.h for why it is this long. */
+const uint32_t kPollIntervalMs = 5000;
+
+/* Whether the PMIC answered at boot. Without it, a board with no PMIC would
+ * have every poll go to the bus and time out. */
+bool g_present = false;
+
+/* -1 until a plausible reading has been taken, and back to -1 whenever one
+ * stops being available. Nothing here ever holds a stale percentage: a battery
+ * that has been unplugged is not still at 60%. */
+int g_battery_percent = -1;
+uint32_t g_last_poll_ms = 0;
 
 /* Bits within REG_RAIL_CONTROL. Bit 0 is DC-DC1, which supplies the MCU: this
  * code must never clear it, so the enable write is read-modify-OR. */
@@ -101,10 +131,75 @@ bool catnip_pmu_begin(void)
         write_reg(CATNIP_PMU_REG_IRQ_STATUS_3, pending);
     }
 
+    /* Ask the PMIC to measure the battery. Read-modify-OR rather than a plain
+     * write, for the same reason the rail control register is: the other bits
+     * in here enable ADCs this driver does not read but has no business
+     * switching off. */
+    uint8_t adc = 0;
+    if (read_reg(REG_ADC_ENABLE_1, &adc)) {
+        write_reg(REG_ADC_ENABLE_1, (uint8_t)(adc | BIT_ADC_BATTERY_VOLTAGE));
+    }
+
     /* A rail that just came up needs a moment before what hangs off it will
      * answer. */
     if (needs_enable) delay(50);
+    g_present = true;
     return true;
+}
+
+void catnip_pmu_poll(void)
+{
+    uint8_t mode = 0;
+    uint8_t raw[2];
+    uint32_t counts, mv;
+
+    if (!g_present) return;
+
+    /* Unsigned subtraction, so this stays correct across the wrap of millis()
+     * every 49 days - the same arithmetic the IMU's budget and the bounce
+     * filter's clock use. */
+    uint32_t now = millis();
+    /* The zero check is so the first call always reads: at boot g_last_poll_ms
+     * is 0 and millis() is already a few thousand, which for a budget this long
+     * would otherwise skip the first poll and leave the battery unknown for
+     * five seconds after the screen is up. */
+    if (g_last_poll_ms != 0 && now - g_last_poll_ms < kPollIntervalMs) return;
+    g_last_poll_ms = now;
+
+    if (!read_reg(REG_POWER_MODE, &mode) || !(mode & BIT_BATTERY_PRESENT)) {
+        /* No battery attached: the device is running off USB. That is not a
+         * failure and it is not zero percent. */
+        g_battery_percent = -1;
+        return;
+    }
+
+    /* Both halves in one transaction, so the low nibble belongs to the same
+     * conversion as the high byte. */
+    if (!catnip_i2c_read_regs(CATNIP_I2C_ADDR_PMU, REG_BATTERY_VOLTAGE, raw,
+                              sizeof(raw))) {
+        g_battery_percent = -1;
+        return;
+    }
+
+    counts = ((uint32_t)raw[0] << 4) | (uint32_t)(raw[1] & 0x0F);
+    mv = counts * VOLTAGE_STEP_NUM / VOLTAGE_STEP_DEN;
+
+    /* The estimate, and the refusal to make one, are both in battery_gauge.h,
+     * where a host test can reach them - decoding the registers is this
+     * driver's job, deciding what the number means is not. */
+    g_battery_percent = catnip_battery_percent_from_mv(mv);
+    if (g_battery_percent < 0) {
+        /* Say so rather than failing silently: a register map that turned out
+         * to be wrong is exactly what someone needs to be told about, and this
+         * log line is the only place it would surface. */
+        Serial.printf("[catnip] pmu: battery ADC read %lu mV, which is not a cell\n",
+                      (unsigned long)mv);
+    }
+}
+
+int catnip_pmu_battery_percent(void)
+{
+    return g_battery_percent;
 }
 
 /* Both key events come from one register, and reading it clears every bit

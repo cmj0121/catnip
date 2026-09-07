@@ -46,6 +46,37 @@ bool catnip_pmu_power_key_pressed(void);
  * catnip_power_off(). */
 bool catnip_pmu_power_key_held(void);
 
+/* Sample what changes slowly: the battery. Call it from the main loop - it has
+ * its own budget inside and returns without touching the bus most of the time.
+ *
+ * The budget is five seconds, which is far longer than the touch controller's
+ * 12 ms or the IMU's 50 ms, and for the opposite reason. Those two are read
+ * often because a hand moves fast. A lithium cell's terminal voltage moves over
+ * minutes, so a faster poll would buy no accuracy at all and would spend the
+ * shared bus that the touch controller and the IMU are waiting on. */
+void catnip_pmu_poll(void);
+
+/* The battery's charge as a percentage, 0-100, as of the last poll - or -1 when
+ * there is nothing honest to report: the PMIC never answered, no battery is
+ * connected (the device is running off USB), or the voltage register read back
+ * a value no single-cell lithium battery can produce.
+ *
+ * That last case is deliberate and it is why this can say -1 even on a working
+ * board. Unlike the rail registers above, which were confirmed by this firmware
+ * setting them and the board staying up, the battery ADC's registers here come
+ * from the AXP173 datasheet and have not been checked against a meter on this
+ * unit. The vendor's documentation for this board has been wrong three times
+ * already - the display's chip-select, all three button pins, the IMU's part
+ * number - so a number decoded from an unconfirmed register is a guess. If the
+ * map is wrong the reading lands outside what a lithium cell can be, and "I do
+ * not know" is the true answer; clamping it into 0-100 would turn a wrong
+ * register into a confident wrong percentage instead.
+ *
+ * The percentage itself is an estimate from voltage, not a fuel gauge - see
+ * battery_gauge.h, where the curve and the refusal both live and where a host
+ * test drives them. It reads low under load and recovers when the load goes. */
+int catnip_pmu_battery_percent(void);
+
 #ifdef __cplusplus
 }
 #endif

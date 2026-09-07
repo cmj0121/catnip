@@ -3,6 +3,7 @@
 #include "catnip_api.h"
 
 #include <dirent.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -65,11 +66,21 @@ static int l_button(lua_State *L)
 static int l_imu(lua_State *L)
 {
     const catnip_hal *h = hal_of(L);
-    float v[6] = {0, 0, 0, 0, 0, 0};
+    /* NaN to start with, not zero. An axis the HAL leaves alone is one nothing
+     * measured, and it stays NaN through to the loop below, which drops it:
+     * the returned table simply has no gx field rather than a gx of 0.0. See
+     * catnip_hal.h for why zero cannot be made to mean "absent" here.
+     *
+     * This is also what a runtime with no imu hook at all now reports - an
+     * empty table rather than six confident zeros. */
+    float v[6];
+    for (int i = 0; i < 6; i++)
+        v[i] = NAN;
     if (h && h->imu) h->imu(h->ud, v);
     lua_newtable(L);
     static const char *const keys[6] = {"ax", "ay", "az", "gx", "gy", "gz"};
     for (int i = 0; i < 6; i++) {
+        if (isnan(v[i])) continue;
         lua_pushnumber(L, v[i]);
         lua_setfield(L, -2, keys[i]);
     }
