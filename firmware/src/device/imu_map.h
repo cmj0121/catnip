@@ -9,10 +9,12 @@
  * nothing else worth testing.
  *
  * It also gives the mapping exactly one home. The correspondence between the
- * part's axes and the screen's edges is a GUESS - see the table in imu_map.c -
- * and the whole point of keeping it in one table is that correcting it is an
- * edit to that table and to nothing else. No caller reads an axis directly, so
- * no sign has to be chased through a driver or a drawing routine.
+ * part's axes and the screen's edges could not be derived, only measured, and
+ * for the four screen edges it now has been - see the record above the table in
+ * imu_map.c. The two flat attitudes are still unverified there. Keeping all six
+ * in one table is what made confirming them an exercise in reading the screen
+ * rather than in chasing signs: no caller reads an axis directly, so nothing
+ * downstream had to be adjusted in step.
  */
 #ifndef CATNIP_IMU_MAP_H
 #define CATNIP_IMU_MAP_H
