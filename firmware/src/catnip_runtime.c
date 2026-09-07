@@ -48,13 +48,22 @@ static int catnip_print(lua_State *L)
     luaL_Buffer b;
     luaL_buffinit(L, &b);
     for (int i = 1; i <= n; i++) {
-        size_t len;
-        const char *s = luaL_tolstring(L, i, &len); /* pushes the string */
+        /* The separator goes in before the conversion, because every luaL_Buffer
+         * call except luaL_addvalue addresses the buffer through the top of the
+         * stack, and luaL_tolstring leaves its result sitting there. Operate the
+         * buffer with that result on top and its first move to the heap removes
+         * the converted string instead of the buffer's own slot, which both
+         * unanchors the string across the allocation that follows and leaves the
+         * heap block where the next pop will free it. luaL_addvalue is the one
+         * call that expects the value above the buffer, and it pops it itself. */
         if (i > 1) luaL_addchar(&b, '\t');
-        luaL_addlstring(&b, s, len);
-        lua_pop(L, 1); /* pop the string luaL_tolstring pushed */
+        luaL_tolstring(L, i, NULL);
+        luaL_addvalue(&b);
     }
     luaL_pushresult(&b);
+    /* luaL_pushresult always leaves a string, so lua_tolstring reads it rather
+     * than converting a value in place, and the slot holding it is not popped
+     * until emit has returned: the sink is handed a pointer Lua still owns. */
     size_t out_len;
     const char *out = lua_tolstring(L, -1, &out_len);
     emit(rt, out, out_len);
