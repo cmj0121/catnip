@@ -126,12 +126,29 @@ struct Shown {
     bool imu_ready;
     bool imu_have_who;
     uint8_t imu_who;
+    /* INTERNAL_STATUS after the configuration upload, and whether it was read
+     * at all. A BMI270 that never reaches init_ok answers its identity
+     * register perfectly and produces no data, so without this the page could
+     * only say "it refused its setup" about a part whose bus transactions were
+     * all acknowledged - which would send the owner looking at the wiring. */
+    bool imu_have_status;
+    uint8_t imu_status;
     /* A row in imu_map.c's table, or null when no edge is named. Comparing the
      * pointer compares the attitude: the rows are static and there is exactly
      * one of them per half-axis. */
     const catnip_imu_up *up;
     char event[48];
 };
+
+/* Whether the IMU's INTERNAL_STATUS says its configuration image was accepted.
+ * Only the low nibble is the message; the bits above it are separate error
+ * flags, and comparing the whole byte would call a working part broken the
+ * moment one of them was set. */
+bool imu_init_ok(const Shown *s)
+{
+    return s->imu_have_status &&
+           (s->imu_status & CATNIP_IMU_INIT_MSG_MASK) == CATNIP_IMU_INIT_OK;
+}
 
 /* The step the acceleration is rounded to, in milli-g. 50 mg is far coarser
  * than the part's noise at rest, so a still device holds a still number, and
@@ -218,12 +235,18 @@ void draw_marker(uint16_t x, uint16_t y)
 /* The arrow, from the centre of the screen out toward whichever edge the
  * firmware believes is up.
  *
- * This is the whole of how the axis mapping gets settled, and it is the same
- * move that settled the touch rotation in one drag after two attempts at
- * inferring it from serial output had failed. Hold the device any way round
- * and the arrow should point at the ceiling. When it does not, the guess in
- * imu_map.c is wrong - and that is visible without reading a number, reporting
- * a value, or anyone interpreting a log line over a link that drops lines.
+ * This is how the axis mapping was settled, and it is the same move that
+ * settled the touch rotation in one drag after two attempts at inferring it
+ * from serial output had failed. Held with each screen edge in turn toward the
+ * ceiling, the arrow pointed at the ceiling all four times, which is what makes
+ * imu_map.c's four horizontal rows a measurement rather than a prediction - and
+ * it was visible without reading a number, reporting a value, or anyone
+ * interpreting a log line over a link that drops lines. The same four turns
+ * re-check the table on any other unit.
+ *
+ * It cannot settle the two flat attitudes, and that is the limit of the method
+ * rather than an oversight: they have no edge up, so this function is never
+ * called for them. Those are read off the headline instead.
  *
  * The direction comes out of the same table row as the edge's name, so the
  * arrow and the word cannot disagree. Both components are never zero here: the
@@ -342,13 +365,21 @@ void redraw(const Shown *s)
      * not there is an arrow to go with it, because the cases where there is no
      * arrow are the ones that most need saying out loud.
      *
-     * There are five such cases and they are not the same failure: nothing
-     * answering at 0x68 at all, something answering that is not the part the
-     * vendor named, the right part refusing its configuration, the right part
-     * configured but not yet read, and the right part working perfectly while
-     * lying flat, where no edge is up. A page that quietly drew nothing in all
-     * five would be indistinguishable from a page whose arrow is broken, and
-     * telling them apart is what this row and the footer are for.
+     * There are six such cases and they are not the same failure: nothing
+     * answering at 0x68 at all, something answering that is not a BMI270, a
+     * BMI270 whose configuration image never took, a BMI270 that came up and
+     * then refused its accelerometer settings, the part configured but not yet
+     * read, and the part working perfectly while lying flat, where no edge is
+     * up. A page that quietly drew nothing in all six would be
+     * indistinguishable from a page whose arrow is broken, and telling them
+     * apart is what this row and the footer are for.
+     *
+     * The third of them is new with the BMI270 and is the one most worth
+     * separating out. The part identifies itself before anything is written to
+     * it, so a failed upload leaves a chip that answers every read,
+     * acknowledges every write and produces no data whatsoever - which under
+     * the old wording would have been reported as a refused setup and sent
+     * whoever read it looking at the bus.
      *
      * The last of them is not a failure at all, which is why it is worded like
      * an attitude rather than an apology. */
@@ -356,13 +387,22 @@ void redraw(const Shown *s)
     g_fb.setTextColor(kColUp);
     if (!s->imu_have_who) {
         snprintf(line, sizeof(line), "UP: nothing answered at 0x68");
-    } else if (s->imu_who != CATNIP_IMU_WHO_AM_I_QMI8658A) {
-        snprintf(line, sizeof(line), "UP: 0x68 is not a QMI8658A");
+    } else if (s->imu_who != CATNIP_IMU_CHIP_ID_BMI270) {
+        snprintf(line, sizeof(line), "UP: 0x68 is not a BMI270");
+    } else if (!s->imu_ready && s->imu_have_status && !imu_init_ok(s)) {
+        /* It is a BMI270 and its firmware image did not take. Named for what
+         * it is rather than folded into the line below, because the two want
+         * different things done about them. The status is tested by value and
+         * not merely by having been read: it is read on the way to success
+         * too, and a part that reached init_ok and then refused a range write
+         * belongs on the next line, not this one. */
+        snprintf(line, sizeof(line), "UP: the IMU never finished its upload");
     } else if (!s->imu_ready) {
-        /* The part is the expected one and still would not come up: a write it
-         * did not acknowledge, or a range field that read back as something
-         * this driver has no scale for. Saying "not a QMI8658A" here would
-         * contradict the identity printed in the footer two rows down. */
+        /* The part is the expected one and still would not come up before the
+         * upload was ever reached: a write it did not acknowledge, or a range
+         * field that read back as something this driver has no scale for.
+         * Saying "not a BMI270" here would contradict the identity printed in
+         * the footer two rows down. */
         snprintf(line, sizeof(line), "UP: the IMU refused its setup");
     } else if (!s->have_accel) {
         snprintf(line, sizeof(line), "UP: no reading yet");
@@ -392,12 +432,19 @@ void redraw(const Shown *s)
 
     /* The identity, and the axes behind the arrow.
      *
-     * The raw WHO_AM_I is here because it is the one number that decides
+     * The raw CHIP_ID is here because it is the one number that decides
      * whether anything else about the arrow means anything: an axis mapping
      * read out of the wrong chip is not a mapping that needs correcting, it is
      * a number that means nothing, and the two look identical from the arrow
-     * alone. Printing it beside what a QMI8658A is supposed to report settles
+     * alone. Printing it beside what a BMI270 is supposed to report settles
      * the identity in the same glance as the mapping.
+     *
+     * INTERNAL_STATUS joins it when the upload failed, because on a BMI270 the
+     * identity alone no longer settles anything. The part reports 0x24 whether
+     * or not it has firmware in it, and without firmware it reports nothing
+     * else at all - so the raw status byte is what distinguishes a chip that
+     * did not come up from one that is not the right chip, and its value says
+     * which of the part's error codes came back.
      *
      * The three axes are here for the same reason the raw touch pair is: they
      * are what makes a wrong edge name correctable without another run. Read
@@ -405,9 +452,12 @@ void redraw(const Shown *s)
      * is that row. */
     if (!s->imu_have_who) {
         snprintf(line, sizeof(line), "IMU 0x68: no answer - absent or unpowered");
-    } else if (s->imu_who != CATNIP_IMU_WHO_AM_I_QMI8658A) {
-        snprintf(line, sizeof(line), "IMU 0x68: who=0x%02X, not a QMI8658A's 0x%02X",
-                 s->imu_who, CATNIP_IMU_WHO_AM_I_QMI8658A);
+    } else if (s->imu_who != CATNIP_IMU_CHIP_ID_BMI270) {
+        snprintf(line, sizeof(line), "IMU 0x68: who=0x%02X, not a BMI270's 0x%02X",
+                 s->imu_who, CATNIP_IMU_CHIP_ID_BMI270);
+    } else if (!s->imu_ready && s->imu_have_status && !imu_init_ok(s)) {
+        snprintf(line, sizeof(line), "IMU 0x68: BMI270, status=0x%02X not init_ok 0x%02X",
+                 s->imu_status, CATNIP_IMU_INIT_OK);
     } else if (!s->imu_ready) {
         snprintf(line, sizeof(line), "IMU 0x68: who=0x%02X, but it refused its setup",
                  s->imu_who);
@@ -539,6 +589,7 @@ bool catnip_diag_begin(void)
      * frame, on the row whose whole job is to be believed. */
     g_now.imu_ready = g_imu_ready;
     g_now.imu_have_who = catnip_imu_who_am_i(&g_now.imu_who);
+    g_now.imu_have_status = catnip_imu_internal_status(&g_now.imu_status);
     redraw(&g_now);
     memcpy(&g_shown, &g_now, sizeof(g_shown));
     catnip_display_backlight(255);
@@ -579,6 +630,7 @@ void catnip_diag_step(void)
      * still device would redraw a 150 KB frame on every poll. */
     g_now.imu_ready = g_imu_ready;
     g_now.imu_have_who = catnip_imu_who_am_i(&g_now.imu_who);
+    g_now.imu_have_status = catnip_imu_internal_status(&g_now.imu_status);
     if (catnip_imu_acceleration(mg)) {
         for (int i = 0; i < 3; i++)
             g_now.mg[i] = round_mg(mg[i]);

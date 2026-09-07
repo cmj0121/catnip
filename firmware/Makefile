@@ -24,7 +24,13 @@ endif
 
 LIBDIRS := $(wildcard lib/*)
 INC     := $(addprefix -I,$(LIBDIRS)) -I$(SRCDIR)
-LIB_SRC := $(wildcard lib/*/*.c)
+# lib/bmi270 is the IMU's 8192-byte configuration image, which exists to be
+# pushed over I2C into a chip that is not present on a host. Nothing built here
+# reads it, and the wildcard would otherwise link 8 KB of unreachable data into
+# every test binary. The device build picks it up on its own: PlatformIO's
+# library finder sees imu.cpp include bmi270_config.h and compiles lib/bmi270
+# into the image, which is why no -I for it appears in platformio.ini.
+LIB_SRC := $(filter-out lib/bmi270/%,$(wildcard lib/*/*.c))
 RT_SRC  := $(wildcard $(SRCDIR)/*.c)
 # Most of src/device is Arduino C++ and cannot be built here. The few pieces
 # that are deliberately hardware-free - a driver's logic, lifted out of the

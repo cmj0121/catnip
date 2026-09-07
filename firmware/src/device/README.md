@@ -82,7 +82,7 @@ the keys are what it exists to test and that gesture would fail exactly when it
 was needed.
 
 It draws an arrow from the centre of the screen toward whichever edge the
-firmware believes is up, and prints the IMU's raw `WHO_AM_I` beside it. That is
+firmware believes is up, and prints the IMU's raw `CHIP_ID` beside it. That is
 how the axis mapping in `imu_map.c` gets settled: hold the device any way round
 and the arrow should point at the ceiling. The identity is on the same screen
 because an axis mapping read out of the wrong chip is not a mapping that needs
@@ -90,9 +90,25 @@ correcting — it is a number that means nothing, and the two look identical fro
 the arrow alone.
 
 That check has already paid for itself: 0x68 reports `0x24`, not the `0x05` a
-QMI8658A reports, so the page draws no arrow and says on screen why. The part
-is unidentified, `catnip_imu_begin()` dumps the registers that would identify
-it, and nothing is written to it until they do.
+QMI8658A reports, so the part the vendor's code named was never there. It is a
+Bosch BMI270, which produces no data at all until an 8 KB configuration image
+has been uploaded into it — `catnip_imu_begin()` does that at every boot, and
+`board.h` records the registers that identified it and where the image came
+from. Because the identity register answers whether or not that upload
+succeeded, the page reports `INTERNAL_STATUS` too: a BMI270 that never reached
+`init_ok` acknowledges every transaction and reports nothing, which without
+that byte would read as a wiring fault.
+
+The axis mapping has since been settled the same way the touch rotation was:
+with the accelerometer running, the device was turned so each screen edge in
+turn pointed at the ceiling, and the arrow followed it all four times. Those
+four rows in `imu_map.c` are a measurement now, and its host test pins them —
+a failure there means the table regressed, not that the mapping was wrong.
+
+The two flat attitudes are still unverified. They draw no arrow, so getting
+them the wrong way round would look like nothing happening rather than like a
+mistake; lay the device flat each way up and read whether the headline says
+`flat, screen up` or `flat, screen down`.
 
 It has already earned its place twice. It settled the touch rotation in one
 drag, after two attempts to infer the same thing from serial output gave

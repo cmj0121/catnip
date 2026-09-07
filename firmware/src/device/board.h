@@ -214,19 +214,65 @@
  *                                 0xA3 = 0x64 and 0xA8 = 0x11, which is what
  *                                 an FT6336 reports
  *   0x51  likely a PCF8563 / BM8563 RTC
- *   0x68  an IMU, and NOT the QMI8658A the vendor's code names: asked for its
- *                                 identity it reports 0x24 at register 0x00,
- *                                 where a QMI8658A reports 0x05. What it is
- *                                 has not been established; device/imu.cpp
- *                                 dumps the registers that would say.
+ *   0x68  BMI270 accelerometer/gyro  identified by its own registers, and NOT
+ *                                 the QMI8658A the vendor's code named. See
+ *                                 the record below.
  *   0x41  unknown
  *
- * The last three are addresses that were seen answering. 0x51 is the
+ * The last two are addresses that were seen answering. 0x51 is the
  * conventional address for an RTC, which is consistent with what this bus is
  * supposed to carry, but no chip there has been identified by reading a
  * register, and 0x41 has no guess attached at all. Do not let the plausible
  * names harden into facts the way the vendor's pin map did - 0x68 is the third
  * time it did exactly that, after the display's chip-select and the buttons.
+ *
+ * WHAT 0x68 ACTUALLY IS, AND HOW THAT WAS ESTABLISHED.
+ *
+ * A read-only dump, taken twice a hundred milliseconds apart with nothing
+ * written to the part in between:
+ *
+ *   reg 0x00 = 0x24   CHIP_ID. A BMI270 reports 0x24 here; a QMI8658A, which
+ *                     is what hal_meowkit.cpp named, reports 0x05.
+ *   reg 0x01 = 0x21
+ *   reg 0x02 = 0x00   ERR_REG - no error.
+ *   reg 0x03 = 0x10   STATUS - cmd_rdy set, no data ready.
+ *   reg 0x21 = 0x00   INTERNAL_STATUS - not_init.
+ *   reg 0x75 = 0x00   rules out the MPU-6000/6050/6886 family, which keeps its
+ *                     WHO_AM_I there.
+ *
+ * Nothing moved between the two passes. cmd_rdy set alongside not_init is the
+ * textbook state of a BMI270 that has powered up and has never been
+ * configured, and it is also why the part reported nothing: a BMI270 produces
+ * no data at all until an 8192-byte configuration image has been written into
+ * it. That image is Bosch's, is not derivable, and is not retained across a
+ * power cycle, so the firmware uploads it at every boot.
+ *
+ * The image is vendored at firmware/lib/bmi270/: bmi270_config.c holds
+ * bmi270_config_file[], 8192 bytes copied unmodified from the
+ * bmi270_config_file[] array in bmi270.c of Bosch's BMI270-Sensor-API
+ * (https://github.com/boschsensortec/BMI270-Sensor-API), under BSD-3-Clause.
+ * The licence and the attribution header beside it stay. It is vendored rather
+ * than fetched at build time so this firmware builds offline and always
+ * against a known version.
+ *
+ * The identity is now confirmed twice over: by CHIP_ID before anything was
+ * written, and by the part accepting that image and reporting init_ok, which
+ * is the stronger of the two because resembling a BMI270 and running BMI270
+ * firmware are different claims. device/imu.cpp carries the upload sequence.
+ *
+ * How the part is MOUNTED has now been measured, for the four screen edges.
+ * With the accelerometer running, the device was turned so that each edge in
+ * turn pointed at the ceiling and the diagnostic page's arrow followed it every
+ * time - the same method that settled the touch rotation. So +X toward the
+ * ceiling is the bottom edge up and +Y toward the ceiling is the left edge up,
+ * read off the screen rather than derived. device/imu_map.c holds the table and
+ * the record of how it was taken.
+ *
+ * The two FLAT attitudes are still unverified: screen up and screen down were
+ * not exercised. They are the ones to be careful about, because they draw no
+ * arrow, so a wrong Z row shows up as nothing rather than as something wrong.
+ * Laying the device flat each way up and reading the diagnostic page's headline
+ * is what would confirm them.
  *
  * All three scans - at reset, after the PMIC bring-up, and after the expander
  * bring-up - returned identical lists. The touch controller was answering

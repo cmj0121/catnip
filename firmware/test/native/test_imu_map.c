@@ -1,22 +1,31 @@
 /* Native test for issue #43: the axis-to-edge map behind the IMU driver.
  *
- * WHAT THIS TEST IS AND IS NOT. The table in imu_map.c is a guess about how
- * the part is mounted, and no host test can turn a guess into a measurement -
- * only turning the device over in front of the diagnostic page can do that. So
- * these cases are not evidence that "bottom edge" is the right name for +X.
+ * WHAT THESE ASSERTIONS NOW MEAN. They were written as a falsifiable spec
+ * around an assumption about how the part is mounted. That assumption has since
+ * been measured: the device was turned so that each screen edge in turn pointed
+ * at the ceiling, and the diagnostic page's arrow pointed at the ceiling all
+ * four times. So the four edge cases below pin a measurement, and imu_map.c
+ * carries the record of how it was taken.
  *
- * What they do pin down is everything around the guess: that the table covers
- * all six half-axes so no attitude falls through it, that the dominant axis is
- * picked by magnitude rather than by order, that the threshold below which no
- * edge is named actually holds, that the two flat attitudes are named but
- * carry no arrow direction, and that every named edge points somewhere
- * different. Those are the properties that make a wrong guess correctable by
- * editing the table, and they are exactly what would break if someone
- * "simplified" the lookup.
+ * WHICH MEANS A FAILURE HERE IS A REGRESSION IN THE TABLE, not a hypothesis
+ * being disproved. If "+X up names the bottom edge" starts failing, the table
+ * has been changed away from what the device actually does, and the fix is to
+ * put the table back - NOT to update the expectation until it passes again. The
+ * expected names are written out in full rather than derived from the table
+ * precisely so that they cannot follow it silently: a test derived from the
+ * thing it tests would agree with any edit at all.
  *
- * The expected names below are therefore deliberately written out in full
- * rather than derived. When the device settles the mapping, this file and the
- * table change together, and a mismatch between them is the whole point. */
+ * The two flat cases are the exception, and they are marked where they appear.
+ * The four edges were exercised on the device; screen-up and screen-down were
+ * not, so those two assertions still pin an assumption rather than a reading.
+ *
+ * Around all six, these cases also pin the properties the page rests on: that
+ * the table covers all six half-axes so no attitude falls through it, that the
+ * dominant axis is picked by magnitude rather than by order, that the threshold
+ * below which no edge is named actually holds, that the two flat attitudes are
+ * named but carry no arrow direction, and that every named edge points somewhere
+ * different. Those are exactly what would break if someone "simplified" the
+ * lookup. */
 #include <stdio.h>
 #include <string.h>
 
@@ -71,10 +80,14 @@ static void expect(int32_t x, int32_t y, int32_t z, const char *want_name, int w
 static void test_six_half_axes(void)
 {
     printf("-- the six half-axes, each with a name and an arrow\n");
+    /* These four were read off the device, one turn each. */
     expect(+1000, 0, 0, "bottom edge", 0, +1, "+X up names the bottom edge");
     expect(-1000, 0, 0, "top edge", 0, -1, "-X up names the top edge");
     expect(0, +1000, 0, "left edge", -1, 0, "+Y up names the left edge");
     expect(0, -1000, 0, "right edge", +1, 0, "-Y up names the right edge");
+    /* These two were not. They still encode the assumption that +Z points out
+     * through the glass; laying the device flat each way up and reading the
+     * headline is what would confirm or swap them. */
     expect(0, 0, +1000, "flat, screen up", 0, 0, "+Z up is flat, screen up");
     expect(0, 0, -1000, "flat, screen down", 0, 0, "-Z up is flat, screen down");
 }
