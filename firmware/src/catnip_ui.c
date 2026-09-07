@@ -9,6 +9,33 @@
 /* The ui module. Nodes are tables { kind, props, children, handlers, id };
  * a metatable makes node.text read/write props so apps can say status.text=...
  *
+ * Those names are raw fields, and that is the one thing to hold on to about the
+ * metatable: Lua consults __index and __newindex only for a key the table does
+ * not already have, so neither ever fires for kind, props, children, handlers
+ * or dirty. Reading one gives the field and not the prop, and writing one
+ * replaces the field without reaching props and without marking anything. The
+ * renderer reads them with rawget for that reason, so the two sides agree. What
+ * an app gets from it: `node.children` is the children, `node.text` is a prop,
+ * and a prop that collides with a field name is unreachable through the node.
+ *
+ * `id` is the trap in that list, because it is a raw field only on a node that
+ * was named: `id = props.id` leaves the key absent when the app named nothing.
+ * So `node.id = 'x'` writes the field on a named node - past props, past
+ * `dirty` - and writes props.id on an unnamed one, where the renderer, reading
+ * raw, will still report no name. Neither updates state.by_id, so ui.get keeps
+ * answering to the old name and not to the new one. Rename nothing after it is
+ * built; `id` is the name a node was given, and the renderer treats it as a
+ * label for logs rather than a key precisely because of this.
+ *
+ * Structure is the one thing `dirty` does not cover, and does not need to.
+ * catnip_render.c walks `children` on every pass whatever `dirty` says and
+ * matches each child by table identity, so the traversal is what decides that a
+ * row was added, moved or dropped; `dirty` only says that this node's own props
+ * are worth re-reading. node:set_children() marks anyway, so a caller that
+ * replaces a list's rows does not leave the two disagreeing - but a mutation
+ * made in place through `node.children` still marks nothing, and is still seen,
+ * because the traversal is the authority and not the flag.
+ *
  * The visible screen is the top of a stack rather than a single root, because
  * a confirmation that replaced the whole screen would rebuild the screen
  * underneath it on dismissal - losing the focus and the scroll position that
@@ -31,8 +58,6 @@ static const char CATNIP_UI_LUA[] =
     "  rawget(t, 'props')[k] = v\n"
     "  rawset(t, 'dirty', true)\n"
     "end\n"
-    "\n"
-    "function methods.children(t) return rawget(t, 'children') end\n"
     "\n"
     "local function make(kind, spec)\n"
     "  spec = spec or {}\n"
@@ -62,6 +87,19 @@ static const char CATNIP_UI_LUA[] =
     "local function reindex()\n"
     "  state.by_id = {}\n"
     "  for _, s in ipairs(state.stack) do index_tree(s) end\n"
+    "end\n"
+    "\n"
+    "-- Children are read as node.children. There is no node:children(): a\n"
+    "-- method of that name could never be called, because `children` is a raw\n"
+    "-- field, so __index never fires and the lookup hands back the table.\n"
+    "-- Replacing them is a method for the mirror-image reason - `node.children\n"
+    "-- = rows` cannot fire __newindex either, so this is that assignment with\n"
+    "-- the bookkeeping still attached: the node is marked, and the id index is\n"
+    "-- rebuilt so a row that arrived with a name is one ui.get can find.\n"
+    "function methods.set_children(t, kids)\n"
+    "  rawset(t, 'children', kids)\n"
+    "  rawset(t, 'dirty', true)\n"
+    "  reindex()\n"
     "end\n"
     "\n"
     "function ui.label(spec)  return make('label', spec)  end\n"
