@@ -5,6 +5,8 @@
 #include <dirent.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/stat.h>
 
 #include "catnip_fs_path.h"
@@ -269,6 +271,23 @@ static int l_fs_reset(lua_State *L)
 }
 
 /* fs.list([path]) -> array of { name, is_dir, size }, or nil if not a dir. */
+/* A directory entry, collected so the listing can be sorted before it is
+ * returned. readdir hands entries back in the filesystem's own order, which is
+ * not the same on two machines - an unsorted listing passed the File Browser's
+ * test on macOS and failed it on Linux, and would have shown files in an order
+ * that changed with the card. Sorting by name gives the stable, expected order
+ * a browser wants. */
+struct fs_entry {
+    char name[256];
+    int is_dir;
+    long size;
+};
+
+static int fs_entry_cmp(const void *a, const void *b)
+{
+    return strcmp(((const struct fs_entry *)a)->name, ((const struct fs_entry *)b)->name);
+}
+
 static int l_fs_list(lua_State *L)
 {
     const catnip_hal *h = hal_of(L);
@@ -286,30 +305,54 @@ static int l_fs_list(lua_State *L)
         return 1;
     }
 
-    lua_newtable(L);
-    int i = 0;
+    /* Collect every entry, sort by name, then build the table. The array is
+     * grown as needed rather than capped: the returned Lua table already holds
+     * one row per entry, so the intermediate array is the same order of memory
+     * the function was always going to use, and an arbitrary cap here would
+     * drop files the caller asked to see. On allocation failure the listing is
+     * returned as far as it got, which is the honest partial answer. */
+    struct fs_entry *ents = NULL;
+    int n = 0, cap = 0;
     struct dirent *e;
     while ((e = readdir(d)) != NULL) {
         if (e->d_name[0] == '.') continue;
-        char full[1024];
-        snprintf(full, sizeof(full), "%s/%s", dir, e->d_name);
-        struct stat st;
-        int is_dir = 0;
-        long size = 0;
-        if (stat(full, &st) == 0) {
-            is_dir = S_ISDIR(st.st_mode) ? 1 : 0;
-            size = (long)st.st_size;
+        if (n == cap) {
+            int ncap = cap ? cap * 2 : 32;
+            struct fs_entry *grown =
+                (struct fs_entry *)realloc(ents, (size_t)ncap * sizeof(*ents));
+            if (!grown) break; /* keep what we have; return the partial listing */
+            ents = grown;
+            cap = ncap;
         }
-        lua_newtable(L);
-        lua_pushstring(L, e->d_name);
-        lua_setfield(L, -2, "name");
-        lua_pushboolean(L, is_dir);
-        lua_setfield(L, -2, "is_dir");
-        lua_pushinteger(L, size);
-        lua_setfield(L, -2, "size");
-        lua_rawseti(L, -2, ++i);
+        struct fs_entry *ent = &ents[n];
+        snprintf(ent->name, sizeof(ent->name), "%s", e->d_name);
+        char full[1024];
+        snprintf(full, sizeof(full), "%s/%s", dir, ent->name);
+        struct stat st;
+        ent->is_dir = 0;
+        ent->size = 0;
+        if (stat(full, &st) == 0) {
+            ent->is_dir = S_ISDIR(st.st_mode) ? 1 : 0;
+            ent->size = (long)st.st_size;
+        }
+        n++;
     }
     closedir(d);
+
+    qsort(ents, (size_t)n, sizeof(*ents), fs_entry_cmp);
+
+    lua_newtable(L);
+    for (int i = 0; i < n; i++) {
+        lua_newtable(L);
+        lua_pushstring(L, ents[i].name);
+        lua_setfield(L, -2, "name");
+        lua_pushboolean(L, ents[i].is_dir);
+        lua_setfield(L, -2, "is_dir");
+        lua_pushinteger(L, ents[i].size);
+        lua_setfield(L, -2, "size");
+        lua_rawseti(L, -2, i + 1);
+    }
+    free(ents);
     return 1;
 }
 
