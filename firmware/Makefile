@@ -26,6 +26,13 @@ LIBDIRS := $(wildcard lib/*)
 INC     := $(addprefix -I,$(LIBDIRS)) -I$(SRCDIR)
 LIB_SRC := $(wildcard lib/*/*.c)
 RT_SRC  := $(wildcard $(SRCDIR)/*.c)
+# Most of src/device is Arduino C++ and cannot be built here. The few pieces
+# that are deliberately hardware-free - a driver's logic, lifted out of the
+# driver so a host test can drive it - are listed one by one rather than
+# wildcarded, so that adding a device source cannot quietly break this build.
+RT_SRC  += $(SRCDIR)/device/input_debounce.c
+RT_SRC  += $(SRCDIR)/device/touch_map.c
+RT_SRC  += $(SRCDIR)/device/diag_layout.c
 TEST_SRC := $(wildcard test/native/*.c)
 TESTS   := $(patsubst test/native/%.c,$(BUILD)/%,$(TEST_SRC))
 

@@ -9,6 +9,7 @@
 #define CATNIP_I2CBUS_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -28,6 +29,19 @@ void catnip_i2c_scan(void);
  * return false when the device did not acknowledge. */
 bool catnip_i2c_write_reg(uint8_t addr, uint8_t reg, uint8_t value);
 bool catnip_i2c_read_reg(uint8_t addr, uint8_t reg, uint8_t *out);
+
+/* Read `len` consecutive registers starting at `reg` in one transaction, for
+ * the parts on this bus that auto-increment their register pointer. Returns
+ * false, and writes nothing, when the device did not acknowledge or returned
+ * short.
+ *
+ * This is here rather than in a driver because the saving is the bus's, not
+ * any one chip's. Every catnip_i2c_read_reg() is a write-reg, a repeated
+ * start and a one-byte read; asking for five consecutive registers one at a
+ * time pays that overhead five times on a 400 kHz bus that the PMIC, the I/O
+ * expander, the touch controller, the RTC and the IMU all share. Whoever is
+ * reading a run of registers is taking time from all of them. */
+bool catnip_i2c_read_regs(uint8_t addr, uint8_t reg, uint8_t *out, size_t len);
 
 #ifdef __cplusplus
 }
