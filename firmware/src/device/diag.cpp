@@ -2,7 +2,8 @@
 #include <Arduino.h>
 #include <SD_MMC.h>
 
-#include <LovyanGFX.hpp>
+#include <esp_heap_caps.h>
+#include <lvgl.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -13,56 +14,77 @@
 #include "display.h"
 #include "imu.h"
 #include "input.h"
+#include "lvgl_port.h"
 #include "touch.h"
 #include "touch_debug.h" /* the raw pair, shown beside the mapped one */
 
 /*
- * HOW THIS DRAWS, AND WHY NOT THROUGH display.h.
+ * HOW THIS DRAWS.
+ *
+ * In LVGL objects, one per thing on the screen, through the display that
+ * lvgl_port.cpp bound to the panel. It did not always: this page was written
+ * before LVGL was in the firmware and composed its own frame in an
+ * LGFX_Sprite, which it handed to catnip_display_blit(). What follows is why
+ * that was right then and why this is right now, because the two answers are
+ * different and the difference is worth keeping.
  *
  * display.h offers a raw blit and backlight control and says in its own
  * comment that anything richer belongs to the renderer. A D-pad needs
- * rectangles and text, so there were two ways to get them: widen display.h
- * with primitives, or compose a frame in memory here and hand the finished
- * pixels to the blit that already exists.
+ * rectangles and text, and with no renderer in the firmware yet the choice was
+ * to widen display.h with primitives or to compose a frame here. Widening it
+ * was the worse of the two: rectangles alone do not draw a D-pad, the labels
+ * need text, text needs a font and a size and a colour and an alignment, and
+ * by the time display.h could draw "OK" centred in a box it would have been a
+ * renderer with a different name. So the page composed.
  *
- * This file composes. The reason is not economy of code - a couple of
- * rectangle calls would have been shorter - but that the primitives would not
- * have stayed a couple. Rectangles alone do not draw a D-pad; the labels need
- * text, text needs a font and a size and a colour and an alignment, and by the
- * time display.h can draw "OK" centred in a box it is a renderer with a
- * different name, and issue #30's renderer arrives to find its job already
- * half done by the panel driver. Composing keeps display.h's contract exactly
- * as it is written, and leaves this page's drawing where the page can be
- * deleted with it.
+ * The renderer has now arrived. LVGL is the thing that owns fonts and
+ * alignment and knows which rectangles changed, display.h's contract survived
+ * unwidened - lvgl_port.cpp's flush callback hands whole screens to the same
+ * catnip_display_blit() this page used to call - and the page's second drawing
+ * path, accepted at the time as the price of independence, is no longer being
+ * paid. What the page draws is now the same thing every other screen in this
+ * firmware will draw with.
  *
- * The framebuffer is an LGFX_Sprite in PSRAM, which is what
- * catnip_display_load_frames() already does for the boot animation: same
- * memory, same 16-bit depth, same 150 KB per full-screen frame, and its buffer
- * is laid out exactly as catnip_display_blit() expects. It also means the page
- * gets LovyanGFX's font rather than a hand-rolled one - the library is linked
- * either way, and a bitmap font written here to avoid using it would be a
- * second font in the firmware for no gain.
+ * WHAT THAT COSTS, AND WHAT WAS PUT BACK. The page's whole claim was that it
+ * had nothing in the way: that is how it caught its own colours being
+ * byte-swapped and how it settled the touch rotation. Built out of LVGL
+ * objects it can no longer answer "is the display path itself working",
+ * because a broken LVGL and a dead panel look the same from a chair - both are
+ * a screen with nothing on it. panel_check() below is what answers that
+ * instead, and it is deliberately the smallest thing that can: a loop, a
+ * buffer, and catnip_display_blit().
  *
- * This is a second drawing path alongside the renderer that #30 will bring,
- * and that was accepted when this page was planned: independence from the
- * renderer is the entire value of a diagnostic. The guard against it growing
- * into a rival UI is that it stays feature-free.
+ * The guard against this page growing into a rival UI is unchanged: it stays
+ * feature-free.
+ *
+ * WHY THE GEOMETRY IS STILL diag_layout.c's. Every box is positioned from
+ * catnip_diag_box(), the same table that catnip_diag_box_at() answers taps
+ * from and that test_diag_layout.c pins. Re-expressing the layout in LVGL's
+ * alignment and flex would give the page two descriptions of where the boxes
+ * are, and the one that decides which box a finger is in would be the one
+ * nobody was looking at.
  */
 
 namespace {
 
 /* Green for a switch, cyan for the glass. The status line names the path in
  * words as well; the colour is what makes a press and a tap on the same box
- * distinguishable at a glance, from across a desk. */
-const uint16_t kColBg = 0x0000;     /* black */
-const uint16_t kColEdge = 0xFFFF;   /* white */
-const uint16_t kColDark = 0x2124;   /* an unlit box */
-const uint16_t kColButton = 0x07E0; /* lit by a switch */
-const uint16_t kColTouch = 0x07FF;  /* lit by a finger */
-const uint16_t kColText = 0xFFFF;   /* the text rows */
-const uint16_t kColFaint = 0x7BEF;  /* the footnotes */
-const uint16_t kColMarker = 0xF800; /* the touch marker: red on all of the above */
-const uint16_t kColUp = 0xFFE0;     /* the up arrow: yellow, claimed by nothing else */
+ * distinguishable at a glance, from across a desk.
+ *
+ * These are 24-bit values because that is what LVGL takes, and each one is the
+ * 24-bit form that converts back to exactly the RGB565 this page drew before -
+ * the RGB565 is in the comment so the two can be checked against each other.
+ * LVGL does the conversion at render time and lands on the same sixteen bits
+ * that used to be written here by hand. */
+const uint32_t kColBg = 0x000000;     /* 0x0000 black */
+const uint32_t kColEdge = 0xFFFFFF;   /* 0xFFFF white */
+const uint32_t kColDark = 0x212421;   /* 0x2124 an unlit box */
+const uint32_t kColButton = 0x00FF00; /* 0x07E0 lit by a switch */
+const uint32_t kColTouch = 0x00FFFF;  /* 0x07FF lit by a finger */
+const uint32_t kColText = 0xFFFFFF;   /* 0xFFFF the text rows */
+const uint32_t kColFaint = 0x7B7D7B;  /* 0x7BEF the footnotes */
+const uint32_t kColMarker = 0xFF0000; /* 0xF800 the marker: red on all of the above */
+const uint32_t kColUp = 0xFFFF00;     /* 0xFFE0 the up arrow: yellow, its own */
 
 /* Text rows, chosen around the box block that diag_layout.c lays out between
  * y=40 and y=183.
@@ -94,12 +116,34 @@ const int kColTouchX = 170;
 const int kSwatchW = 14;
 const int kSwatchH = 12;
 
-lgfx::LGFX_Sprite g_fb;
+/* The two sizes the page has always had, in LVGL's fonts. Montserrat 14 stands
+ * in for LovyanGFX's 16-pixel Font2 and Montserrat 10 for its 8-pixel Font0.
+ * They are not the same typeface - no LVGL font is - but the page never
+ * depended on the shapes, only on there being an answer in a size that reads
+ * from a chair and its working in a size that does not compete with it. */
+#define DIAG_FONT_BIG   &lv_font_montserrat_14
+#define DIAG_FONT_SMALL &lv_font_montserrat_10
+
+lv_obj_t *g_screen;
+lv_obj_t *g_box[CATNIP_BTN_COUNT];
+lv_obj_t *g_box_label[CATNIP_BTN_COUNT];
+lv_obj_t *g_lbl_quad;
+lv_obj_t *g_lbl_touch;
+lv_obj_t *g_lbl_up;
+lv_obj_t *g_lbl_event;
+lv_obj_t *g_lbl_imu;
+/* The marker and the arrow, which are not widgets - see build_overlay(). */
+lv_obj_t *g_overlay;
+
 bool g_active = false;
 
-/* What the last redraw drew, so a pass that changed nothing costs nothing. A
- * full-screen blit is 150 KB over SPI; doing it on every loop would make the
- * page's own redraw the slowest thing between a press and its box lighting. */
+/* What the page last put on screen, so a pass that changed nothing costs
+ * nothing. LVGL only repaints what has been invalidated, but setting a label's
+ * text or a box's colour invalidates it whether or not the value differs, and
+ * the display renders whole screens (see lvgl_port.cpp), so a page that told
+ * LVGL about every poll would push a 150 KB frame twenty times a second. That
+ * would show up as buttons lighting late, and would be blamed on the very
+ * switches this page exists to vindicate. */
 struct Shown {
     uint8_t down_mask;
     int touch_box;
@@ -109,19 +153,16 @@ struct Shown {
     uint16_t sx, sy, px, py;
     /* The acceleration, rounded to kMgStep before it is stored. A resting
      * accelerometer's last few milli-g never stop moving, so keeping the raw
-     * value here would make every comparison below differ, and turn a page
-     * that redraws on a change into one that pushes a 150 KB frame twenty
-     * times a second. That would show up as buttons lighting late, and would
-     * be blamed on the very switches this page exists to vindicate. The
-     * rounding is done once, here, so that what is compared and what is
-     * printed are the same numbers and cannot disagree. */
+     * value here would make every comparison below differ. The rounding is
+     * done once, here, so that what is compared and what is printed are the
+     * same numbers and cannot disagree. */
     int32_t mg[3];
     bool have_accel;
     /* What catnip_imu_begin() found, carried here so that the footer says the
      * same thing the arrow does and both come from one snapshot. `imu_ready`
      * is fixed for the run - the driver reports nothing for the rest of it
      * once identification has failed - but it is compared with everything
-     * else rather than read from a global, so that the redraw has exactly one
+     * else rather than read from a global, so that the update has exactly one
      * source of truth to draw from. */
     bool imu_ready;
     bool imu_have_who;
@@ -139,6 +180,14 @@ struct Shown {
     const catnip_imu_up *up;
     char event[48];
 };
+
+/* The one snapshot everything on screen is drawn from. It is a file-scope
+ * variable rather than an argument because LVGL renders later than it is told
+ * to: apply() runs in the main loop and the overlay's draw callback runs
+ * inside lv_timer_handler(), so a pointer handed to apply() would be no use to
+ * the callback. Both read this, and it is updated before either. */
+Shown g_shown;
+Shown g_now;
 
 /* Whether the IMU's INTERNAL_STATUS says its configuration image was accepted.
  * Only the low nibble is the message; the bits above it are separate error
@@ -172,9 +221,6 @@ int32_t round_mg(int32_t mg)
  * exactly as the touch driver does. */
 bool g_imu_ready = false;
 
-Shown g_shown;
-Shown g_now;
-
 /* The most recent event, in the page's own words: which switch, and which of
  * the two paths delivered it. */
 char g_event[48] = "waiting for a press or a tap";
@@ -184,22 +230,115 @@ void note(const char *what, const char *path, bool down)
     snprintf(g_event, sizeof(g_event), "%s (%s) %s", what, path, down ? "down" : "up");
 }
 
-void draw_box(catnip_button b, uint8_t down_mask, int touch_box)
+/* An LVGL object stripped back to a plain rectangle at exact coordinates.
+ *
+ * lv_obj_create() gives its object the default theme's card: rounded corners,
+ * padding, a border, a background and a scrollbar. Every one of those would
+ * move a box away from the pixel diag_layout.c put it on, or draw something
+ * over the edge of it, and the page's whole job is that a box is where the
+ * layout says it is. */
+lv_obj_t *plain_rect(lv_obj_t *parent, int x, int y, int w, int h)
 {
-    const catnip_diag_rect *r = catnip_diag_box(b);
-    bool by_button = (down_mask & (1u << b)) != 0;
-    bool by_touch = touch_box == (int)b;
-    uint16_t fill = by_button ? kColButton : (by_touch ? kColTouch : kColDark);
+    lv_obj_t *o = lv_obj_create(parent);
 
-    g_fb.fillRect(r->x, r->y, r->w, r->h, fill);
-    g_fb.drawRect(r->x, r->y, r->w, r->h, kColEdge);
-    g_fb.setTextDatum(lgfx::middle_center);
-    g_fb.setTextColor(fill == kColDark ? kColText : kColBg);
-    g_fb.drawString(catnip_diag_label(b), r->x + r->w / 2, r->y + r->h / 2);
-    g_fb.setTextDatum(lgfx::top_left);
+    lv_obj_remove_style_all(o);
+    lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_pos(o, x, y);
+    lv_obj_set_size(o, w, h);
+    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
+    return o;
 }
 
-/* A crosshair at the mapped touch position, drawn wherever the finger is and
+/* A text row at a fixed top-left, in one of the page's two sizes.
+ *
+ * The width is clipped to the rest of the screen rather than left to grow with
+ * the text. An LVGL label sized to its content wraps when it runs out of room,
+ * and a row that wrapped would push itself into the row below and rearrange
+ * the page - which on a diagnostic reads as the fault rather than as the
+ * report of it. Clipping loses the end of an over-long line and keeps every
+ * other row where it belongs. */
+lv_obj_t *make_label(int x, int y, const lv_font_t *font, uint32_t colour)
+{
+    lv_obj_t *l = lv_label_create(g_screen);
+
+    lv_obj_remove_style_all(l);
+    lv_obj_set_pos(l, x, y);
+    lv_obj_set_width(l, CATNIP_SCREEN_W - x);
+    lv_label_set_long_mode(l, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_font(l, font, 0);
+    lv_obj_set_style_text_color(l, lv_color_hex(colour), 0);
+    lv_label_set_text(l, "");
+    return l;
+}
+
+void build_boxes(void)
+{
+    for (int b = 0; b < CATNIP_BTN_COUNT; b++) {
+        const catnip_diag_rect *r = catnip_diag_box((catnip_button)b);
+
+        g_box[b] = plain_rect(g_screen, r->x, r->y, r->w, r->h);
+        lv_obj_set_style_border_color(g_box[b], lv_color_hex(kColEdge), 0);
+        lv_obj_set_style_border_width(g_box[b], 1, 0);
+
+        g_box_label[b] = lv_label_create(g_box[b]);
+        lv_obj_remove_style_all(g_box_label[b]);
+        lv_obj_set_style_text_font(g_box_label[b], DIAG_FONT_BIG, 0);
+        lv_label_set_text(g_box_label[b], catnip_diag_label((catnip_button)b));
+        lv_obj_center(g_box_label[b]);
+    }
+}
+
+/* Three named swatches, so that a colour fault is legible on the screen
+ * instead of being deduced from someone describing a crosshair over a cable.
+ *
+ * The page ran with every colour byte-swapped and nobody could say so directly:
+ * what was reported was "the red crosshair looks blue", and the byte order had
+ * to be worked back out from the arithmetic. A swatch labelled "red" that is
+ * not red says it in one glance, and it says it for whatever the next colour
+ * fault turns out to be as well. Making the invisible visible is this page's
+ * entire job and it could not do it for its own pixels.
+ *
+ * It earns its place again on LVGL, which has its own idea of colour depth and
+ * byte order and therefore its own way to get this wrong - see the comment in
+ * src/lv_conf.h. The swatches are built from the same three constants as
+ * before, so they are testing the new path with the old question.
+ *
+ * The horizontal spacing is still six pixels a character, which was the old
+ * font's fixed cell. Montserrat is proportional and narrower than that on
+ * average, so the names sit where they used to with a little more air after
+ * them; the swatches themselves are unmoved. */
+void build_colour_key(void)
+{
+    static const struct {
+        uint32_t colour;
+        const char *name;
+    } kKey[] = {
+        {0xFF0000, "red"},
+        {0x00FF00, "green"},
+        {0x0000FF, "blue"},
+    };
+    int x = 8;
+
+    for (size_t i = 0; i < sizeof(kKey) / sizeof(kKey[0]); i++) {
+        lv_obj_t *swatch = plain_rect(g_screen, x, kRowKey, kSwatchW, kSwatchH);
+        lv_obj_t *name;
+
+        lv_obj_set_style_bg_color(swatch, lv_color_hex(kKey[i].colour), 0);
+        lv_obj_set_style_border_color(swatch, lv_color_hex(kColEdge), 0);
+        lv_obj_set_style_border_width(swatch, 1, 0);
+
+        name = make_label(x + kSwatchW + 4, kRowKey + 2, DIAG_FONT_SMALL, kColText);
+        lv_label_set_text(name, kKey[i].name);
+        x += kSwatchW + 4 + (int)strlen(kKey[i].name) * 6 + 10;
+    }
+
+    /* What the box colours mean, on the same row, since it is the same
+     * question: which colour is that, and what is it telling me. */
+    lv_label_set_text(make_label(164, kRowKey + 2, DIAG_FONT_SMALL, kColFaint),
+                      "switch=green  touch=cyan");
+}
+
+/* The crosshair at the mapped touch position, drawn wherever the finger is and
  * not only inside a box.
  *
  * This is the page's reason for existing, and it has already paid for itself.
@@ -213,23 +352,50 @@ void draw_box(catnip_button b, uint8_t down_mask, int touch_box)
  * read back and no arithmetic afterwards. The same drag re-checks it on
  * another unit.
  *
- * It is drawn last, over the boxes, because a marker hidden behind the thing
- * it is meant to be compared against would answer nothing. */
-void draw_marker(uint16_t x, uint16_t y)
+ * The line from the middle of the screen out to the crosshair is not
+ * decoration. The crosshair alone asks the owner to compare two things - where
+ * the marker is and where their finger is - and asked that question twice they
+ * answered about its colour twice, which says the comparison was not being
+ * made. A line from a fixed point turns it into one thing to look at: it
+ * points away from the fingertip when the rotation is wrong, and the quadrant
+ * printed at the top of the screen says the same in words. */
+void draw_marker(lv_layer_t *layer, int x, int y)
 {
     const int arm = 12;
+    lv_draw_line_dsc_t dsc;
+    lv_draw_arc_dsc_t ring;
 
-    /* A line from the middle of the screen out to the crosshair. The crosshair
-     * alone asks the owner to compare two things - where the marker is and
-     * where their finger is - and asked that question twice they answered
-     * about its colour twice, which says the comparison was not being made. A
-     * line from a fixed point turns it into one thing to look at: it points
-     * away from the fingertip when the rotation is wrong, and the quadrant
-     * printed at the top of the screen says the same in words. */
-    g_fb.drawLine(CATNIP_SCREEN_W / 2, CATNIP_SCREEN_H / 2, x, y, kColMarker);
-    g_fb.drawFastHLine(x - arm, y, arm * 2 + 1, kColMarker);
-    g_fb.drawFastVLine(x, y - arm, arm * 2 + 1, kColMarker);
-    g_fb.drawCircle(x, y, 6, kColMarker);
+    lv_draw_line_dsc_init(&dsc);
+    dsc.color = lv_color_hex(kColMarker);
+    dsc.width = 1;
+
+    dsc.p1.x = CATNIP_SCREEN_W / 2;
+    dsc.p1.y = CATNIP_SCREEN_H / 2;
+    dsc.p2.x = x;
+    dsc.p2.y = y;
+    lv_draw_line(layer, &dsc);
+
+    dsc.p1.x = x - arm;
+    dsc.p1.y = y;
+    dsc.p2.x = x + arm;
+    dsc.p2.y = y;
+    lv_draw_line(layer, &dsc);
+
+    dsc.p1.x = x;
+    dsc.p1.y = y - arm;
+    dsc.p2.x = x;
+    dsc.p2.y = y + arm;
+    lv_draw_line(layer, &dsc);
+
+    lv_draw_arc_dsc_init(&ring);
+    ring.color = lv_color_hex(kColMarker);
+    ring.width = 1;
+    ring.radius = 6;
+    ring.center.x = x;
+    ring.center.y = y;
+    ring.start_angle = 0;
+    ring.end_angle = 360;
+    lv_draw_arc(layer, &ring);
 }
 
 /* The arrow, from the centre of the screen out toward whichever edge the
@@ -252,7 +418,7 @@ void draw_marker(uint16_t x, uint16_t y)
  * arrow and the word cannot disagree. Both components are never zero here: the
  * two flat attitudes have no edge up, and the caller names them in words
  * instead of pointing the arrow somewhere arbitrary. */
-void draw_up_arrow(int dx, int dy)
+void draw_up_arrow(lv_layer_t *layer, int dx, int dy)
 {
     const int len = 60;
     const int head = 18;
@@ -264,16 +430,110 @@ void draw_up_arrow(int dx, int dy)
      * what the head's two base corners are offset along. */
     int px = -dy;
     int py = dx;
+    lv_draw_line_dsc_t shaft;
+    lv_draw_triangle_dsc_t point;
 
-    for (int i = -1; i <= 1; i++) {
-        g_fb.drawLine(cx + px * i, cy + py * i, tx + px * i, ty + py * i, kColUp);
-    }
+    lv_draw_line_dsc_init(&shaft);
+    shaft.color = lv_color_hex(kColUp);
+    shaft.width = 3;
+    shaft.p1.x = cx;
+    shaft.p1.y = cy;
+    shaft.p2.x = tx;
+    shaft.p2.y = ty;
+    lv_draw_line(layer, &shaft);
+
     /* A filled head rather than two strokes. The direction has to survive
      * being looked at from across a desk while the device is turning, and a
      * solid triangle does that where a pair of thin lines does not. */
-    g_fb.fillTriangle(tx, ty, tx - dx * head + px * head / 2,
-                      ty - dy * head + py * head / 2, tx - dx * head - px * head / 2,
-                      ty - dy * head - py * head / 2, kColUp);
+    lv_draw_triangle_dsc_init(&point);
+    point.bg_color = lv_color_hex(kColUp);
+    point.bg_opa = LV_OPA_COVER;
+    point.p[0].x = tx;
+    point.p[0].y = ty;
+    point.p[1].x = tx - dx * head + px * head / 2;
+    point.p[1].y = ty - dy * head + py * head / 2;
+    point.p[2].x = tx - dx * head - px * head / 2;
+    point.p[2].y = ty - dy * head - py * head / 2;
+    lv_draw_triangle(layer, &point);
+}
+
+/* The two figures that are not widgets, drawn into the layer LVGL is already
+ * rendering into.
+ *
+ * A crosshair and an arrowhead have no widget to be: LVGL draws rectangles,
+ * labels and arcs, and a filled triangle is only reachable through the draw
+ * API this callback is handed. Assembling the arrow out of four nested objects
+ * with transforms would be a longer way to say the same six calls, and it
+ * would put the geometry somewhere a reader of draw_up_arrow() could not see
+ * it. So this is one empty, transparent object the size of the screen, created
+ * last so that it sits above the boxes, whose whole content is the two
+ * functions above.
+ *
+ * The arrow goes on before the marker, so that a finger on the glass is never
+ * hidden behind it, and both go over the boxes: a signal hidden behind the
+ * thing it is meant to be compared against would answer nothing. */
+void overlay_draw(lv_event_t *e)
+{
+    lv_layer_t *layer = lv_event_get_layer(e);
+    const Shown *s = &g_shown;
+
+    if (s->up != NULL && (s->up->dx != 0 || s->up->dy != 0))
+        draw_up_arrow(layer, s->up->dx, s->up->dy);
+    if (s->have_screen) draw_marker(layer, s->sx, s->sy);
+}
+
+void build_overlay(void)
+{
+    g_overlay = lv_obj_create(g_screen);
+    lv_obj_remove_style_all(g_overlay);
+    lv_obj_remove_flag(g_overlay, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(g_overlay, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_pos(g_overlay, 0, 0);
+    lv_obj_set_size(g_overlay, CATNIP_SCREEN_W, CATNIP_SCREEN_H);
+    lv_obj_add_event_cb(g_overlay, overlay_draw, LV_EVENT_DRAW_MAIN, nullptr);
+}
+
+void build_page(void)
+{
+    g_screen = lv_screen_active();
+    lv_obj_remove_style_all(g_screen);
+    lv_obj_remove_flag(g_screen, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_color(g_screen, lv_color_hex(kColBg), 0);
+    lv_obj_set_style_bg_opa(g_screen, LV_OPA_COVER, 0);
+
+    /* The headline: where the page believes the finger is, named rather than
+     * drawn. A marker that has gone through the wrong half-turn reads
+     * "bottom-right" under a finger at the top left, and that sentence needs
+     * no interpreting the way a crosshair on a screen apparently did. */
+    g_lbl_quad = make_label(8, kRowQuad, DIAG_FONT_BIG, kColMarker);
+
+    /* Raw beside mapped, so a tap that lands in the wrong place can be
+     * diagnosed from the screen alone: raw that does not move with the finger
+     * is the controller or the bus, and raw that moves while mapped goes the
+     * other way is the rotation in touch_map.c. Without the raw pair the page
+     * could only say that something was wrong. */
+    g_lbl_touch = make_label(kColTouchX, kRowTouch, DIAG_FONT_SMALL, kColFaint);
+
+    /* The second headline: which screen edge the firmware believes is up. */
+    g_lbl_up = make_label(8, kRowUp, DIAG_FONT_BIG, kColUp);
+
+    build_boxes();
+
+    g_lbl_event = make_label(8, kRowEvent, DIAG_FONT_BIG, kColText);
+
+    build_colour_key();
+
+    /* The joystick centre is on GPIO5 and its contact never closes on this
+     * unit, so the OK box only ever lights cyan. That is written on the screen
+     * rather than special-cased away: a diagnostic that hides a broken input
+     * is worse than no diagnostic, and a box staying dark under a press is
+     * precisely the sort of thing this page is for. */
+    lv_label_set_text(make_label(8, kRowNote, DIAG_FONT_SMALL, kColFaint),
+                      "OK is GPIO5: contact never closes, so touch only");
+
+    g_lbl_imu = make_label(8, kRowImu, DIAG_FONT_SMALL, kColFaint);
+
+    build_overlay();
 }
 
 /* Milli-g as a signed decimal, without printf's float support. Whether %f
@@ -288,63 +548,18 @@ void format_g(int32_t mg, char *buf, size_t n)
              (long)((mag % 1000) / 10));
 }
 
-/* Three named swatches, so that a colour fault is legible on the screen
- * instead of being deduced from someone describing a crosshair over a cable.
- *
- * The page ran with every colour byte-swapped and nobody could say so directly:
- * what was reported was "the red crosshair looks blue", and the byte order had
- * to be worked back out from the arithmetic. A swatch labelled "red" that is
- * not red says it in one glance, and it says it for whatever the next colour
- * fault turns out to be as well. Making the invisible visible is this page's
- * entire job and it could not do it for its own pixels. */
-void draw_colour_key(void)
+/* Put g_shown on the page. Callers update g_shown first and then call this;
+ * nothing here reads the drivers, so what the screen says and what the last
+ * poll found cannot drift apart. */
+void apply(void)
 {
-    static const struct {
-        uint16_t colour;
-        const char *name;
-    } kKey[] = {
-        {0xF800, "red"},
-        {0x07E0, "green"},
-        {0x001F, "blue"},
-    };
-    int x = 8;
-
-    for (size_t i = 0; i < sizeof(kKey) / sizeof(kKey[0]); i++) {
-        g_fb.fillRect(x, kRowKey, kSwatchW, kSwatchH, kKey[i].colour);
-        g_fb.drawRect(x, kRowKey, kSwatchW, kSwatchH, kColEdge);
-        g_fb.setTextColor(kColText);
-        g_fb.drawString(kKey[i].name, x + kSwatchW + 4, kRowKey + 2);
-        x += kSwatchW + 4 + (int)strlen(kKey[i].name) * 6 + 10;
-    }
-
-    /* What the box colours mean, on the same row, since it is the same
-     * question: which colour is that, and what is it telling me. */
-    g_fb.setTextColor(kColFaint);
-    g_fb.drawString("switch=green  touch=cyan", 164, kRowKey + 2);
-}
-
-void redraw(const Shown *s)
-{
+    const Shown *s = &g_shown;
     char line[64];
 
-    g_fb.fillScreen(kColBg);
-    g_fb.setFont(&fonts::Font2);
-
-    /* The headline: where the page believes the finger is, named rather than
-     * drawn. A marker that has gone through the wrong half-turn reads
-     * "bottom-right" under a finger at the top left, and that sentence needs
-     * no interpreting the way a crosshair on a screen apparently did. */
-    g_fb.setTextColor(kColMarker);
     snprintf(line, sizeof(line), "MARKER: %s",
              s->have_screen ? catnip_diag_quadrant(s->sx, s->sy) : "no touch yet");
-    g_fb.drawString(line, 8, kRowQuad);
+    lv_label_set_text(g_lbl_quad, line);
 
-    /* Raw beside mapped, so a tap that lands in the wrong place can be
-     * diagnosed from the screen alone: raw that does not move with the finger
-     * is the controller or the bus, and raw that moves while mapped goes the
-     * other way is the rotation in touch_map.c. Without the raw pair the page
-     * could only say that something was wrong. */
-    g_fb.setFont(&fonts::Font0);
     if (s->have_panel && s->have_screen) {
         snprintf(line, sizeof(line), "RAW %3u,%3u MAP %3u,%3u", s->px, s->py, s->sx,
                  s->sy);
@@ -355,15 +570,14 @@ void redraw(const Shown *s)
     } else {
         snprintf(line, sizeof(line), "RAW ---,--- MAP ---,---");
     }
-    g_fb.setTextColor(kColFaint);
-    g_fb.drawString(line, kColTouchX, kRowTouch);
+    lv_label_set_text(g_lbl_touch, line);
 
-    /* The second headline: which screen edge the firmware believes is up. It
-     * is a sentence rather than three numbers for the same reason the quadrant
-     * above it is - asked twice whether a marker followed their finger, the
-     * owner answered about its colour both times - and it is drawn whether or
-     * not there is an arrow to go with it, because the cases where there is no
-     * arrow are the ones that most need saying out loud.
+    /* Which screen edge the firmware believes is up. It is a sentence rather
+     * than three numbers for the same reason the quadrant above it is - asked
+     * twice whether a marker followed their finger, the owner answered about
+     * its colour both times - and it is set whether or not there is an arrow
+     * to go with it, because the cases where there is no arrow are the ones
+     * that most need saying out loud.
      *
      * There are six such cases and they are not the same failure: nothing
      * answering at 0x68 at all, something answering that is not a BMI270, a
@@ -374,17 +588,15 @@ void redraw(const Shown *s)
      * indistinguishable from a page whose arrow is broken, and telling them
      * apart is what this row and the footer are for.
      *
-     * The third of them is new with the BMI270 and is the one most worth
-     * separating out. The part identifies itself before anything is written to
-     * it, so a failed upload leaves a chip that answers every read,
-     * acknowledges every write and produces no data whatsoever - which under
-     * the old wording would have been reported as a refused setup and sent
-     * whoever read it looking at the bus.
+     * The third of them is the one most worth separating out. The part
+     * identifies itself before anything is written to it, so a failed upload
+     * leaves a chip that answers every read, acknowledges every write and
+     * produces no data whatsoever - which under the old wording would have
+     * been reported as a refused setup and sent whoever read it looking at the
+     * bus.
      *
      * The last of them is not a failure at all, which is why it is worded like
      * an attitude rather than an apology. */
-    g_fb.setFont(&fonts::Font2);
-    g_fb.setTextColor(kColUp);
     if (!s->imu_have_who) {
         snprintf(line, sizeof(line), "UP: nothing answered at 0x68");
     } else if (s->imu_who != CATNIP_IMU_CHIP_ID_BMI270) {
@@ -411,24 +623,19 @@ void redraw(const Shown *s)
     } else {
         snprintf(line, sizeof(line), "UP: %s", s->up->name);
     }
-    g_fb.drawString(line, 8, kRowUp);
+    lv_label_set_text(g_lbl_up, line);
 
     for (int b = 0; b < CATNIP_BTN_COUNT; b++) {
-        draw_box((catnip_button)b, s->down_mask, s->touch_box);
+        bool by_button = (s->down_mask & (1u << b)) != 0;
+        bool by_touch = s->touch_box == b;
+        uint32_t fill = by_button ? kColButton : (by_touch ? kColTouch : kColDark);
+
+        lv_obj_set_style_bg_color(g_box[b], lv_color_hex(fill), 0);
+        lv_obj_set_style_text_color(
+            g_box_label[b], lv_color_hex(fill == kColDark ? kColText : kColBg), 0);
     }
 
-    g_fb.setTextColor(kColText);
-    g_fb.drawString(s->event, 8, kRowEvent);
-
-    /* The joystick centre is on GPIO5 and its contact never closes on this
-     * unit, so the OK box only ever lights cyan. That is written on the screen
-     * rather than special-cased away: a diagnostic that hides a broken input
-     * is worse than no diagnostic, and a box staying dark under a press is
-     * precisely the sort of thing this page is for. */
-    g_fb.setFont(&fonts::Font0);
-    draw_colour_key();
-    g_fb.setTextColor(kColFaint);
-    g_fb.drawString("OK is GPIO5: contact never closes, so touch only", 8, kRowNote);
+    lv_label_set_text(g_lbl_event, s->event);
 
     /* The identity, and the axes behind the arrow.
      *
@@ -473,21 +680,65 @@ void redraw(const Shown *s)
         snprintf(line, sizeof(line), "IMU 0x68: who=0x%02X  ax %s  ay %s  az %s g",
                  s->imu_who, ax, ay, az);
     }
-    g_fb.drawString(line, 8, kRowImu);
+    lv_label_set_text(g_lbl_imu, line);
 
-    /* The arrow before the marker, so that a finger on the glass is never
-     * hidden behind it. Both are drawn over the boxes: a signal hidden behind
-     * the thing it is meant to be compared against would answer nothing.
-     *
-     * No arrow for the two flat attitudes, which have no edge up and say so in
-     * the headline instead. Pointing one somewhere anyway would be the page
-     * inventing an answer, which is the one thing it must never do. */
-    if (s->up != NULL && (s->up->dx != 0 || s->up->dy != 0))
-        draw_up_arrow(s->up->dx, s->up->dy);
+    /* The marker and the arrow are drawn from g_shown rather than set from it,
+     * so nothing above has told LVGL that they moved. */
+    lv_obj_invalidate(g_overlay);
+}
 
-    if (s->have_screen) draw_marker(s->sx, s->sy);
+/* THE WAY TO PUT SOMETHING KNOWN ON THE PANEL WITH NOTHING IN THE WAY.
+ *
+ * This page used to be that thing. Its value was that it went straight to
+ * catnip_display_blit(): that is how its own colours were caught byte-swapped,
+ * and it is why a dragged finger could settle the touch rotation. Built out of
+ * LVGL objects it cannot answer that question about itself any more. A screen
+ * with nothing on it is now four faults at once - a dead backlight, a panel
+ * that never came out of reset, an LVGL that failed to start, and a page whose
+ * objects were never built - and from a chair they are the same picture.
+ *
+ * So this is the smallest thing that separates the bottom two from the top
+ * two: a loop that writes four colour bars into a buffer, and one call to
+ * catnip_display_blit(). No LVGL, no LovyanGFX sprite, no font, no layout. If
+ * the bars appear then the panel, the SPI bus, the expander's chip-select and
+ * the backlight are all working and the fault is above them; if they do not,
+ * nothing above them is worth looking at yet.
+ *
+ * They are red, green, blue and white from left to right, which is the colour
+ * key's question asked without the key: bars in the wrong order, or blue where
+ * red belongs, is the byte order again. The values are written as raw RGB565
+ * in the CPU's own order, which is what catnip_display_blit() reads, so
+ * nothing converts them on the way.
+ *
+ * The backlight is raised too, because a dark panel is one of the faults being
+ * ruled out and leaving it where it was would hide the answer.
+ *
+ * The buffer is allocated and freed rather than kept: this runs when someone
+ * asks for it, and 150 KB held for the rest of the run to save one allocation
+ * on a path nobody is timing would be the wrong trade. */
+void panel_check(void)
+{
+    static const uint16_t kBars[] = {0xF800, 0x07E0, 0x001F, 0xFFFF};
+    const int bar_count = (int)(sizeof(kBars) / sizeof(kBars[0]));
+    const size_t bytes = (size_t)CATNIP_SCREEN_W * CATNIP_SCREEN_H * 2;
+    uint16_t *fb = (uint16_t *)heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
 
-    catnip_display_blit(g_fb.getBuffer());
+    if (!fb) {
+        Serial.println("[catnip] panel: no PSRAM for the test frame");
+        return;
+    }
+    for (int y = 0; y < CATNIP_SCREEN_H; y++) {
+        for (int x = 0; x < CATNIP_SCREEN_W; x++) {
+            int bar = x * bar_count / CATNIP_SCREEN_W;
+
+            fb[y * CATNIP_SCREEN_W + x] = kBars[bar];
+        }
+    }
+    catnip_display_blit(fb);
+    catnip_display_backlight(255);
+    heap_caps_free(fb);
+    Serial.println("[catnip] panel: red, green, blue, white bars, left to right, "
+                   "straight through catnip_display_blit()");
 }
 
 } /* namespace */
@@ -509,6 +760,11 @@ bool catnip_diag_serial_request(void)
         if (c == '\r' || c == '\n') {
             line[len] = '\0';
             if (!strcmp(line, "diag")) asked = true;
+            /* Acted on here rather than reported to the caller, because it is
+             * not a request for this page and there is no state for the caller
+             * to change: the bars go on the panel and the page, when it has
+             * one, comes back at the next thing that moves. */
+            if (!strcmp(line, "panel")) panel_check();
             len = 0;
         } else if (len + 1 < sizeof(line)) {
             line[len++] = (char)c;
@@ -524,38 +780,21 @@ bool catnip_diag_begin(void)
 {
     if (g_active) return true;
 
-    g_fb.setPsram(true);
-    /* NOT setColorDepth(16), which is rgb565_2Byte: a LovyanGFX sprite at that
-     * depth stores its pixels byte-swapped, because that is the order the SPI
-     * bus wants them in and pushSprite() hands the buffer straight to the bus.
-     * This page does not push the sprite - it cannot, the panel object is
-     * private to display_st7789.cpp - it takes getBuffer() and passes it to
-     * catnip_display_blit(), which casts to lgfx::rgb565_t, the native
-     * little-endian order.
-     *
-     * Those two orders disagreeing is what put the wrong colours on this page
-     * the first time it ran: the crosshair drawn 0xF800 red arrived as 0x00F8
-     * and read as blue, and the touch highlight drawn 0x07FF cyan arrived as
-     * 0xFF07 and read as yellow. The boot mascot has always been right because
-     * it never goes through a sprite at all - tools/png_to_rgb565.py emits
-     * native-order rgb565 and catnip_display_blit() reads it as exactly that -
-     * so the panel's configuration in board.h is correct and is not what needed
-     * changing. Only the composition step disagreed.
-     *
-     * rgb565_nonswapped is LovyanGFX's own name for "same 16 bits, not
-     * swapped", and it is the right one by the library's own declaration
-     * rather than by experiment: lgfx::rgb565_t - the very type
-     * catnip_display_blit() casts this buffer to - declares
-     * `static constexpr color_depth_t depth = rgb565_nonswapped`. Asking the
-     * sprite for that depth is asking it for a buffer of exactly those pixels. Fixing it here rather than by pre-swapping the colour
-     * constants matters: swapped constants would look right on this page while
-     * leaving the next person to draw on this sprite to rediscover the whole
-     * thing. */
-    g_fb.setColorDepth(lgfx::rgb565_nonswapped);
-    if (!g_fb.createSprite(CATNIP_SCREEN_W, CATNIP_SCREEN_H)) {
-        Serial.println("[catnip] diag: no memory for the page's framebuffer");
+    /* LVGL comes up here rather than at boot, because this is its first
+     * client. An LVGL display with nothing loaded on it is a black screen, and
+     * starting it during setup() would have put that black screen in a fight
+     * with the boot animation, which goes straight through the blit. */
+    if (!catnip_lvgl_begin()) {
+        Serial.println("[catnip] diag: LVGL would not start, so there is no page");
         return false;
     }
+
+    /* Before the page is built, not after: the overlay's draw callback reads
+     * g_shown, and LVGL could render as soon as the objects exist. */
+    memset(&g_shown, 0, sizeof(g_shown));
+    g_shown.touch_box = -1;
+    strcpy(g_shown.event, g_event);
+    build_page();
 
     catnip_input_begin();
     if (!catnip_touch_begin()) {
@@ -579,19 +818,14 @@ bool catnip_diag_begin(void)
     }
 
     g_active = true;
-    memset(&g_shown, 0, sizeof(g_shown));
-    g_shown.touch_box = -1;
-    memcpy(&g_now, &g_shown, sizeof(g_now));
-    strcpy(g_now.event, g_event);
-    /* The first frame is drawn before any poll, so the identity it shows has
-     * to be filled in here. Without this the page opens by reporting that
-     * nothing answered at 0x68 - which would be a lie for the length of one
-     * frame, on the row whose whole job is to be believed. */
-    g_now.imu_ready = g_imu_ready;
-    g_now.imu_have_who = catnip_imu_who_am_i(&g_now.imu_who);
-    g_now.imu_have_status = catnip_imu_internal_status(&g_now.imu_status);
-    redraw(&g_now);
-    memcpy(&g_shown, &g_now, sizeof(g_shown));
+    /* The first frame is set before any poll, so the identity it shows has to
+     * be filled in here. Without this the page opens by reporting that nothing
+     * answered at 0x68 - which would be a lie for the length of one frame, on
+     * the row whose whole job is to be believed. */
+    g_shown.imu_ready = g_imu_ready;
+    g_shown.imu_have_who = catnip_imu_who_am_i(&g_shown.imu_who);
+    g_shown.imu_have_status = catnip_imu_internal_status(&g_shown.imu_status);
+    apply();
     catnip_display_backlight(255);
     Serial.println("[catnip] diag: the input page has the screen");
     return true;
@@ -604,7 +838,12 @@ bool catnip_diag_active(void)
 
 void catnip_diag_redraw(void)
 {
-    if (g_active) redraw(&g_shown);
+    /* Marking the whole page dirty is all this has to do: LVGL still holds
+     * every object, so the next lv_timer_handler() renders them again and
+     * flushes a whole screen. What it is for is a panel that was painted over
+     * from outside LVGL - the power button blanking it, or panel_check()
+     * putting its bars there - which LVGL has no way to know about. */
+    if (g_active) lv_obj_invalidate(g_screen);
 }
 
 void catnip_diag_step(void)
@@ -613,6 +852,12 @@ void catnip_diag_step(void)
     int32_t mg[3];
 
     if (!g_active) return;
+
+    /* Keep reading the console while the page has the screen. loop() stops
+     * calling this once the page is up, and "panel" has to stay reachable
+     * exactly then: the page itself is what will look broken. Whether "diag"
+     * was typed is not worth reporting - it already is what is on screen. */
+    (void)catnip_diag_serial_request();
 
     catnip_input_poll();
     catnip_touch_poll();
@@ -627,7 +872,7 @@ void catnip_diag_step(void)
      * that the arrow, the headline and the footer are all describing the same
      * instant. The acceleration is rounded here and nowhere else, so what the
      * comparison below sees is exactly what the footer prints - otherwise a
-     * still device would redraw a 150 KB frame on every poll. */
+     * still device would repaint on every poll. */
     g_now.imu_ready = g_imu_ready;
     g_now.imu_have_who = catnip_imu_who_am_i(&g_now.imu_who);
     g_now.imu_have_status = catnip_imu_internal_status(&g_now.imu_status);
@@ -666,7 +911,7 @@ void catnip_diag_step(void)
     strncpy(g_now.event, g_event, sizeof(g_now.event) - 1);
 
     if (memcmp(&g_now, &g_shown, sizeof(g_now)) != 0) {
-        redraw(&g_now);
         memcpy(&g_shown, &g_now, sizeof(g_shown));
+        apply();
     }
 }

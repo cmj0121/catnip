@@ -277,6 +277,40 @@ static bool wait_for_init_ok(void)
     }
 }
 
+/* Whether the part is already running Bosch's image.
+ *
+ * WHAT THIS IS DECIDED FROM, and it is deliberately not a flag this driver
+ * kept. Two things, both read out of the part on this call: its CHIP_ID
+ * matched a BMI270's above, and INTERNAL_STATUS's message field reads init_ok
+ * here. A BMI270 reports not_init until an image has been executed and init_ok
+ * only afterwards, so that register is the part's own answer to the question -
+ * which is the only answer worth having, because the alternatives are not
+ * equivalent.
+ *
+ * A remembered "we already did this" would be wrong the moment the part lost
+ * power without the MCU losing it. The sensors sit on the PMIC's LDO2 (see
+ * board.h) and a BMI270 does not retain its image across a power cycle: it
+ * comes back at not_init, silent, answering every read. Idempotent has to mean
+ * "converge on a part that is up", not "only ever once per boot", and those
+ * two differ exactly in the case that would be hardest to diagnose - a driver
+ * reporting success over a part producing nothing.
+ *
+ * WHAT IT COSTS, which is the whole reason to ask rather than assume. This is
+ * one register read. The upload it can avoid is 8192 bytes in 128
+ * transactions, about a quarter of a second, over a 400 kHz bus that the PMIC,
+ * the I/O expander, the RTC and the touch controller are also on. The check
+ * has to be the cheap one of the two, and it is, by three orders of magnitude.
+ *
+ * A part that answers its identity but not this register is treated as not up.
+ * That sends it down the upload path, where it fails loudly at
+ * wait_for_init_ok() with the register named, rather than being quietly
+ * declared ready on the strength of a read that never happened. */
+static bool already_initialised(void)
+{
+    g_have_status = catnip_i2c_read_reg(kAddr, kRegInternalStatus, &g_status);
+    return g_have_status && (g_status & CATNIP_IMU_INIT_MSG_MASK) == CATNIP_IMU_INIT_OK;
+}
+
 bool catnip_imu_begin(void)
 {
     uint8_t range = 0;
@@ -314,54 +348,96 @@ bool catnip_imu_begin(void)
         return false;
     }
 
-    /* The clock has to be running before the part will take the image, and the
-     * datasheet's settling time is in microseconds rather than milliseconds -
-     * delay(1) would do, and says less about why it is there. */
+    /* Cleared on both branches below, because adv_power_save has two separate
+     * jobs to be out of the way of. The part will not take the image at all
+     * with it set, and with it set the data registers stop updating on their
+     * own and every read returns the same stale bytes - which looks exactly
+     * like a device lying perfectly still. So a bring-up that skips the upload
+     * still has to clear it, and this write stays ahead of the branch rather
+     * than inside one. The datasheet's settling time is in microseconds rather
+     * than milliseconds - delay(1) would do, and says less about why it is
+     * there. */
     if (!catnip_i2c_write_reg(kAddr, kRegPwrConf, kPwrConfRun)) {
-        Serial.println("[catnip] imu: PWR_CONF refused, so the upload was not started");
+        Serial.println("[catnip] imu: PWR_CONF refused, so the part was left in "
+                       "advanced power save and cannot be brought up");
         return false;
     }
     delayMicroseconds(kPowerSettleUs);
 
-    if (!catnip_i2c_write_reg(kAddr, kRegInitCtrl, kInitCtrlLoad)) {
-        Serial.println("[catnip] imu: INIT_CTRL would not go low, so the part never "
-                       "entered configuration-load mode");
-        return false;
-    }
-
-    Serial.printf("[catnip] imu: uploading %u bytes of configuration in %u-byte "
-                  "chunks\n",
-                  (unsigned)BMI270_CONFIG_SIZE, (unsigned)kUploadChunk);
-    if (!upload_config_image()) return false;
-
-    if (!catnip_i2c_write_reg(kAddr, kRegInitCtrl, kInitCtrlRun)) {
-        Serial.println("[catnip] imu: the image went in but INIT_CTRL would not go "
-                       "high, so the part was never told to run it");
-        return false;
-    }
-
-    if (!wait_for_init_ok()) {
-        /* The part is a BMI270 - 0x00 said so before a byte was written - and
-         * it did not come up. That is its own outcome and is reported as one:
-         * calling it "not a BMI270" here would contradict the identity, and
-         * calling it a refused write would point at the bus when every
-         * transaction was acknowledged. */
-        if (g_have_status) {
-            Serial.printf("[catnip] imu: INTERNAL_STATUS = 0x%02X after %lu ms, never "
-                          "reached init_ok (0x%02X) - the part is a BMI270 and did not "
-                          "come up\n",
-                          g_status, (unsigned long)kInitTimeoutMs, CATNIP_IMU_INIT_OK);
-        } else {
-            Serial.println("[catnip] imu: INTERNAL_STATUS stopped answering during "
-                           "initialisation");
+    /* The image goes out only when the part is not already running one. Two
+     * callers now want the IMU - the HAL brings it up at boot and the
+     * diagnostic page asks for it when it takes the screen - and before this
+     * branch existed both of them paid the full upload, so 8 KB went over the
+     * shared bus twice and the boot log printed the same success line for two
+     * different things. Neither caller was wrong; a caller should be able to
+     * ask for the IMU without knowing who asked first, and making that true is
+     * this driver's job rather than theirs, because the driver is the only
+     * thing that knows its own state. */
+    if (already_initialised()) {
+        Serial.printf("[catnip] imu: INTERNAL_STATUS = 0x%02X, already init_ok - the "
+                      "image is still in the part from an earlier bring-up, so it is "
+                      "not being sent again\n",
+                      g_status);
+    } else {
+        if (!catnip_i2c_write_reg(kAddr, kRegInitCtrl, kInitCtrlLoad)) {
+            Serial.println("[catnip] imu: INIT_CTRL would not go low, so the part never "
+                           "entered configuration-load mode");
+            return false;
         }
-        return false;
-    }
-    Serial.printf("[catnip] imu: INTERNAL_STATUS = 0x%02X, init_ok - 0x%02X is a "
-                  "BMI270, now confirmed by it accepting Bosch's image rather than by "
-                  "its identity register alone\n",
-                  g_status, kAddr);
 
+        Serial.printf("[catnip] imu: uploading %u bytes of configuration in %u-byte "
+                      "chunks\n",
+                      (unsigned)BMI270_CONFIG_SIZE, (unsigned)kUploadChunk);
+        if (!upload_config_image()) return false;
+
+        if (!catnip_i2c_write_reg(kAddr, kRegInitCtrl, kInitCtrlRun)) {
+            Serial.println("[catnip] imu: the image went in but INIT_CTRL would not go "
+                           "high, so the part was never told to run it");
+            return false;
+        }
+
+        if (!wait_for_init_ok()) {
+            /* The part is a BMI270 - 0x00 said so before a byte was written -
+             * and it did not come up. That is its own outcome and is reported
+             * as one: calling it "not a BMI270" here would contradict the
+             * identity, and calling it a refused write would point at the bus
+             * when every transaction was acknowledged. */
+            if (g_have_status) {
+                Serial.printf("[catnip] imu: INTERNAL_STATUS = 0x%02X after %lu ms, "
+                              "never reached init_ok (0x%02X) - the part is a BMI270 "
+                              "and did not come up\n",
+                              g_status, (unsigned long)kInitTimeoutMs,
+                              CATNIP_IMU_INIT_OK);
+            } else {
+                Serial.println("[catnip] imu: INTERNAL_STATUS stopped answering during "
+                               "initialisation");
+            }
+            return false;
+        }
+        /* Said only on the branch that actually sent the image, because that
+         * is the branch the claim is about: this part has just demonstrated it
+         * is a BMI270 by executing Bosch's firmware, which is a stronger thing
+         * than resembling one at register 0x00. A bring-up that skipped the
+         * upload has not demonstrated it today and says something else above.
+         * Two identical success lines for two different events is how the
+         * duplicate upload stayed invisible until it reached a device. */
+        Serial.printf("[catnip] imu: INTERNAL_STATUS = 0x%02X, init_ok - 0x%02X is a "
+                      "BMI270, now confirmed by it accepting Bosch's image rather than "
+                      "by its identity register alone\n",
+                      g_status, kAddr);
+    }
+
+    /* Written on both branches, including the one that found the part already
+     * up. Three register writes are cheaper than the three reads it would take
+     * to check them and they leave a stronger postcondition: after this
+     * returns true the accelerometer is configured the way this driver wants
+     * it, rather than merely the way whoever got here first left it. That
+     * matters because "already init_ok" says the image is running and says
+     * nothing at all about ACC_CONF, ACC_RANGE or acc_en - a part could be
+     * executing Bosch's firmware with its accelerometer switched off, and this
+     * function would then have reported an accelerometer that produces
+     * nothing. The expensive step is the 8 KB image, and that is the only one
+     * the branch above skips. */
     if (!catnip_i2c_write_reg(kAddr, kRegAccConf, kAccConfValue) ||
         !catnip_i2c_write_reg(kAddr, kRegAccRange, kAccRangeValue) ||
         !catnip_i2c_write_reg(kAddr, kRegPwrCtrl, kPwrCtrlAccOnly)) {

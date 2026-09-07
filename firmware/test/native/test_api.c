@@ -51,6 +51,17 @@ static void m_imu(void *ud, float v[6])
     for (int i = 0; i < 6; i++)
         v[i] = (float)(i + 1);
 }
+/* An accelerometer with no gyroscope, which is the MeowKit's shape: the BMI270
+ * runs its accelerometer with the gyroscope deliberately off. It writes three
+ * axes and leaves the other three exactly as it found them. */
+static void m_imu_accel_only(void *ud, float v[6])
+{
+    (void)ud;
+    v[0] = 0.0f; /* a real reading of zero, which must survive as a number */
+    v[1] = -0.5f;
+    v[2] = 1.0f;
+}
+
 static long m_rtc(void *ud)
 {
     (void)ud;
@@ -189,6 +200,29 @@ int main(void)
     CHECK(strcmp(mk.gpio_mode, "out") == 0, "gpio mode reached the HAL");
 
     catnip_rt_free(rt);
+
+    /* A HAL that measures three of the six axes. The other three must arrive in
+     * Lua as nil, because a script that cannot tell an absent axis from a real
+     * zero will eventually make a decision on one. az proves the reverse too:
+     * a genuine 0.0 is still a number. */
+    catnip_hal partial;
+    memset(&partial, 0, sizeof(partial));
+    partial.imu = m_imu_accel_only;
+    catnip_rt *rt2 = catnip_rt_new_tracked();
+    catnip_api_open(rt2, &partial);
+    int rc2 = catnip_rt_dostring(rt2,
+                                 "local m = sensor.imu()\n"
+                                 "PARTIAL = (m.ax == 0) and (m.az == 1)\n"
+                                 "  and (m.gx == nil) and (m.gy == nil)\n"
+                                 "  and (m.gz == nil)\n",
+                                 "=imu");
+    lua_State *L2 = catnip_rt_lua(rt2);
+    lua_getglobal(L2, "PARTIAL");
+    CHECK(rc2 == 0 && lua_toboolean(L2, -1),
+          "an unmeasured IMU axis is nil, a measured zero is 0");
+    lua_pop(L2, 1);
+    catnip_rt_free(rt2);
+
     printf("%s (%d failures)\n", failures ? "FAILED" : "PASSED", failures);
     return failures ? 1 : 0;
 }

@@ -4,10 +4,20 @@
  * Two jobs, and the second is the one that earns this page a permanent place
  * in the firmware rather than a life as a throwaway sketch.
  *
- * The first is to show that the physical inputs work, on screen, with nothing
- * in the way: no LVGL, no renderer, no ui event model. When a press does not
- * reach an app, this page says whether the switch reached the firmware at all,
- * and that is a different question from whether the layer above dispatched it.
+ * The first is to show that the physical inputs work, on screen, ahead of
+ * anything that could be blamed for losing them: no ui event model, no app,
+ * no dispatch. When a press does not reach an app, this page says whether the
+ * switch reached the firmware at all, and that is a different question from
+ * whether the layer above dispatched it. It reads the switches and the glass
+ * itself, through the drivers and nothing else, which is what makes that
+ * answer worth having.
+ *
+ * The page is drawn with LVGL (#29). It used to compose its own frame and hand
+ * it to catnip_display_blit(), and that independence is what let it catch its
+ * own colours being byte-swapped; on LVGL it can no longer say whether the
+ * display path itself is working, because a page that never rendered and a
+ * panel that never lit look the same. catnip_diag_serial_request() below owns
+ * what replaces that - see the "panel" line there.
  *
  * The second was to settle the touch rotation, which it did. Rotation 3 admits
  * two mappings a half turn apart, and the readings available when
@@ -59,16 +69,31 @@ extern "C" {
  * this is false, which is what the serial command is for. */
 bool catnip_diag_marker_present(void);
 
-/* Consume whatever the host has typed and report whether a line reading
- * "diag" has arrived. Call it from the main loop. It reads the serial input
- * that nothing else in the firmware reads, so a line meant for something else
- * cannot be swallowed here - there is nothing else yet. */
+/* Consume whatever the host has typed and act on the two words this page owns.
+ * Call it from the main loop. It reads the serial input that nothing else in
+ * the firmware reads, so a line meant for something else cannot be swallowed
+ * here - there is nothing else yet.
+ *
+ * "diag" is reported back, because taking the screen is the caller's decision
+ * to make and it stops the boot animation.
+ *
+ * "panel" is acted on here and now, and returns false, because it is not a
+ * request for this page. It puts four colour bars on the screen through
+ * catnip_display_blit() alone - no LVGL, no sprite, no font - which is what is
+ * left of the direct path this page used to be. It exists because a page built
+ * out of LVGL objects cannot tell a broken renderer from a dead panel: both are
+ * a screen with nothing on it. If the bars appear, the panel and everything
+ * under it are fine and the fault is above them.
+ *
+ * catnip_diag_step() calls this too, so "panel" stays reachable once the page
+ * has the screen - which is exactly when it is wanted. */
 bool catnip_diag_serial_request(void);
 
-/* Take the screen. Returns false when the framebuffer could not be allocated,
- * in which case nothing was drawn and the caller should carry on booting -
- * losing the diagnostic is better than leaving a half-drawn page over a device
- * that is otherwise fine. */
+/* Take the screen. This is also where LVGL comes up, since this page is its
+ * first client (see lvgl_port.h). Returns false when LVGL could not be
+ * started, in which case nothing was drawn and the caller should carry on
+ * booting - losing the diagnostic is better than leaving a half-drawn page
+ * over a device that is otherwise fine. */
 bool catnip_diag_begin(void);
 
 /* True once catnip_diag_begin() has succeeded. The page keeps the screen for

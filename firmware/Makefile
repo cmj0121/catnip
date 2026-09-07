@@ -37,6 +37,8 @@ RT_SRC  := $(wildcard $(SRCDIR)/*.c)
 # driver so a host test can drive it - are listed one by one rather than
 # wildcarded, so that adding a device source cannot quietly break this build.
 RT_SRC  += $(SRCDIR)/device/input_debounce.c
+RT_SRC  += $(SRCDIR)/device/input_names.c
+RT_SRC  += $(SRCDIR)/device/battery_gauge.c
 RT_SRC  += $(SRCDIR)/device/touch_map.c
 RT_SRC  += $(SRCDIR)/device/diag_layout.c
 RT_SRC  += $(SRCDIR)/device/imu_map.c

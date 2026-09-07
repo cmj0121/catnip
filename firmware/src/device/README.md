@@ -4,10 +4,48 @@ Everything here talks to the MeowKit's hardware directly. Above it sits the Lua
 runtime, which reaches hardware only through `catnip_hal.h`; below it there is
 nothing but the board.
 
-Most of this is real, built into the firmware, and verified on a device. Three
-files are still scaffolds: `hal_meowkit.cpp`, `lvgl_backend.cpp` and
-`shell_ui.cpp` are guarded by `CATNIP_DEVICE_WIP` and compile to nothing. They
-are waiting on the `ui.*` renderer (#30) and the on-screen shell (#33).
+Most of this is real, built into the firmware, and verified on a device. Two
+files are still scaffolds: `lvgl_backend.cpp` and `shell_ui.cpp` are guarded by
+`CATNIP_DEVICE_WIP` and compile to nothing. They are waiting on the `ui.*`
+renderer (#30) and the on-screen shell (#33).
+
+LVGL is in the build now (#29) and `lvgl_port.cpp` is what binds it to this
+board: a full-screen draw buffer in PSRAM, `millis()` as its clock, and a flush
+callback that hands whole screens to `catnip_display_blit()`. It goes through
+the panel driver rather than around it — nothing in LVGL touches the SPI bus,
+the backlight or the expander — so `display.h`'s contract did not have to widen
+for it. LVGL starts when its first client asks rather than at boot, because an
+LVGL display with nothing loaded on it is a black screen and it would have
+fought the boot animation for the panel.
+
+## What a Lua app can reach
+
+`hal_meowkit.cpp` is the only door between a script and this directory. It fills
+the table in `catnip_hal.h` with the drivers here, and `main.cpp` installs it in
+two lines: `catnip_meowkit_hal_begin()` in `setup()` and
+`catnip_meowkit_hal_poll()` once per pass of `loop()`.
+
+Nothing a script calls polls hardware. The poll above takes one sample of the
+switches, the accelerometer and the battery per pass, and the hooks hand back
+what it found — so a script spinning on `device.button()` cannot spend the I2C
+bus, and every hook it calls within one pass sees the same instant of the
+device.
+
+The hooks that are _not_ wired are as much a decision as the ones that are, and
+each one's reason is written at the top of `hal_meowkit.cpp` where someone
+looking for a missing function will find it. The short version: the vibration
+motor and the expansion header have no drivers yet, and the RTC is not wired
+because nothing has ever read a register from the part at `0x51` — the address
+is conventional for a PCF8563, and on this board that is a guess, not a fact.
+
+One rule this file exists to enforce: **a hook reports what was measured, or it
+reports nothing.** `sensor.imu()` returns `ax`, `ay` and `az` and no `gx`, `gy`
+or `gz` at all, because the BMI270's gyroscope is deliberately off. Zero was not
+available as a way to say "absent" — a device lying flat genuinely reads zero —
+so an unmeasured axis is simply missing from the table, and a script that reads
+`m.gz` gets `nil` rather than a number nothing produced. `device.battery()`
+answers `-1` the same way, including when the voltage it read back is not a
+value a lithium cell can hold.
 
 ## The rule that matters most
 
@@ -47,6 +85,8 @@ Anything that is arithmetic rather than I/O is split into a plain C file with no
 | `touch_map.c`      | `test/native/test_touch_map.c`      | panel coordinates to screen coordinates |
 | `diag_layout.c`    | `test/native/test_diag_layout.c`    | which box a point falls in              |
 | `imu_map.c`        | `test/native/test_imu_map.c`        | which screen edge is pointing up        |
+| `input_names.c`    | `test/native/test_input_names.c`    | which switch `device.button('a')` means |
+| `battery_gauge.c`  | `test/native/test_battery_gauge.c`  | a cell voltage, or that it is not one   |
 
 This is not ceremony. The debounce filter's first design — accept an edge, then
 ignore the pin for a while — was proved wrong on the host by replaying a real
@@ -92,7 +132,9 @@ the arrow alone.
 That check has already paid for itself: 0x68 reports `0x24`, not the `0x05` a
 QMI8658A reports, so the part the vendor's code named was never there. It is a
 Bosch BMI270, which produces no data at all until an 8 KB configuration image
-has been uploaded into it — `catnip_imu_begin()` does that at every boot, and
+has been uploaded into it — `catnip_imu_begin()` does that once per power-up
+of the part, skipping the upload when `INTERNAL_STATUS` already reads `init_ok`
+so that a second caller costs one transaction rather than another 8 KB, and
 `board.h` records the registers that identified it and where the image came
 from. Because the identity register answers whether or not that upload
 succeeded, the page reports `INTERNAL_STATUS` too: a BMI270 that never reached
@@ -115,6 +157,17 @@ drag, after two attempts to infer the same thing from serial output gave
 contradictory answers; and it exposed its own colours being byte-swapped, which
 is how the sprite buffer and the blit path turned out to disagree about byte
 order.
+
+It is drawn in LVGL objects since #29, positioned from the same `diag_layout.c`
+table that decides which box a tap landed in, so the page cannot disagree with
+the geometry its own host test pins. That cost it one thing, and the loss was
+paid for rather than accepted: a page built out of LVGL objects cannot tell a
+renderer that never drew from a panel that never lit, because both are a screen
+with nothing on it. Typing `panel` over the same console is what separates them
+— four colour bars written by a loop and handed straight to
+`catnip_display_blit()`, with no LVGL, no sprite and no font in the way. If the
+bars appear, everything below the renderer is working. It is reachable while
+the page has the screen, which is when it is wanted.
 
 `src/probe_input.cpp` is the other instrument: a standalone `[env:probe]` sketch
 that interrogates pins and parts whose identity is not yet established. It is

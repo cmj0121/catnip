@@ -38,6 +38,12 @@ const uint8_t BRAND_R = 40;
 const uint8_t BRAND_G = 255;
 const uint8_t BRAND_B = 0;
 
+/* The colour the breath is currently drawn in: the brand colour until an app
+ * asks for another one (see catnip_led_colour). */
+uint8_t g_r = BRAND_R;
+uint8_t g_g = BRAND_G;
+uint8_t g_b = BRAND_B;
+
 uint8_t g_level = 0;
 } /* namespace */
 
@@ -62,14 +68,32 @@ void catnip_led_configure(uint8_t peak, float breaths_per_second)
     }
 }
 
+void catnip_led_colour(uint8_t r, uint8_t g, uint8_t b)
+{
+    /* All three zero is the one request that is refused - see led.h. */
+    if (r == 0 && g == 0 && b == 0) {
+        r = BRAND_R;
+        g = BRAND_G;
+        b = BRAND_B;
+    }
+    g_r = r;
+    g_g = g;
+    g_b = b;
+    /* Repaint at the level the breath is already at, so the new colour shows on
+     * this call rather than at the next step of the cycle - which, at the dim
+     * end of a 2.6-second breath, is long enough to read as nothing having
+     * happened. */
+    catnip_led_level(g_level);
+}
+
 void catnip_led_level(uint8_t brightness)
 {
     g_level = brightness;
-    /* Scale the brand colour rather than fading to white: a WS2812 has three
-     * separate emitters, and dimming each in proportion keeps the hue. */
-    neopixelWrite(CATNIP_PIN_LED, (uint8_t)((BRAND_R * brightness) / 255),
-                  (uint8_t)((BRAND_G * brightness) / 255),
-                  (uint8_t)((BRAND_B * brightness) / 255));
+    /* Scale the colour rather than fading to white: a WS2812 has three separate
+     * emitters, and dimming each in proportion keeps the hue. */
+    neopixelWrite(CATNIP_PIN_LED, (uint8_t)((g_r * brightness) / 255),
+                  (uint8_t)((g_g * brightness) / 255),
+                  (uint8_t)((g_b * brightness) / 255));
 }
 
 void catnip_led_breathe(void)

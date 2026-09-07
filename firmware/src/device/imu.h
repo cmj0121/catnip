@@ -64,9 +64,27 @@ extern "C" {
  * read its range back. The I2C bus must already be up (catnip_i2c_begin()),
  * because that is shared and not this driver's to own.
  *
- * Takes roughly a quarter of a second: the image is 8 KB over a 400 kHz bus.
- * It is paid once, at boot, and there is no way to pay less of it - the part
- * does not retain the image across a power cycle.
+ * SAFE TO CALL MORE THAN ONCE, and cheap when it is. The first call that finds
+ * an unconfigured part takes roughly a quarter of a second, because the image
+ * is 8 KB over a 400 kHz bus and there is no way to pay less of it. Every call
+ * after that reads INTERNAL_STATUS, finds init_ok, and skips the upload - a
+ * single transaction instead of a hundred and twenty-eight - while still
+ * asserting the accelerometer configuration, so the postcondition is the same
+ * either way.
+ *
+ * That is decided by asking the part, not by remembering having asked. A
+ * BMI270 does not retain the image across a power cycle and the sensors sit on
+ * a rail the PMIC can switch, so a part that lost power reads not_init again
+ * and is re-uploaded. "Idempotent" here means converging on a working
+ * accelerometer, not doing the work only once per boot.
+ *
+ * This exists because two callers want the IMU - the HAL at boot and the
+ * diagnostic page when it takes the screen - and it belongs here rather than
+ * in either of them: a caller should be able to ask for the IMU without
+ * knowing who asked first, and the driver is the only thing that knows its own
+ * state. The log distinguishes the two outcomes, because two identical success
+ * lines for two different events is how a duplicated 8 KB upload reached a
+ * device unnoticed.
  *
  * Returns true only when 0x68 reported a BMI270's CHIP_ID, accepted the image,
  * reached init_ok and accepted its accelerometer configuration. The identity

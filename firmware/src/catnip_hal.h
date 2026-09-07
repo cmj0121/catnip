@@ -27,8 +27,18 @@ typedef struct {
     int (*button)(void *ud, const char *name); /* 1 pressed, 0 released */
 
     /* sensor.* */
-    void (*imu)(void *ud, float out[6]); /* ax,ay,az,gx,gy,gz */
-    long (*rtc_now)(void *ud);           /* unix epoch seconds */
+    /* Fill `out` with ax, ay, az in g and gx, gy, gz in degrees per second.
+     *
+     * An axis the device does not measure is left as the NaN the caller passed
+     * in, and reaches Lua as a missing field rather than as a number. Writing
+     * zero for an axis nothing read would be indistinguishable from a real
+     * reading of zero, and a script cannot recover the difference afterwards:
+     * a device lying flat genuinely reports gx = 0, so 0.0 is not a value that
+     * can be reserved to mean "absent". The MeowKit needs this - its BMI270
+     * runs the accelerometer with the gyroscope deliberately off (see
+     * device/imu.h), so three of these six have nothing to report. */
+    void (*imu)(void *ud, float out[6]);
+    long (*rtc_now)(void *ud); /* unix epoch seconds */
 
     /* gpio.* */
     void (*gpio_mode)(void *ud, int pin, const char *mode); /* in|out|adc */

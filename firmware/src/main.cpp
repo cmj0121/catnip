@@ -23,6 +23,8 @@
 #include "device/i2cbus.h"
 #include "device/ioexp.h"
 #include "device/led.h"
+#include "device/hal_meowkit.h"
+#include "device/lvgl_port.h"
 #include "device/pmu.h"
 #include "device/sd_mount.h"
 #include "device/power.h"
@@ -37,9 +39,6 @@
 
 static catnip_rt *g_rt;
 static catnip_shell *g_shell;
-
-/* No-op HAL for now; the BSP fills these with real drivers (#35). */
-static catnip_hal g_hal;
 
 static void serial_log(void *ud, const char *msg, size_t len)
 {
@@ -57,8 +56,12 @@ static unsigned long host_now(void *ud)
 static void host_pump(void *ud)
 {
     (void)ud;
-    /* The renderer replaces this with lv_timer_handler() so the display stays
-     * live while a script waits (#30). Until then, just yield. */
+    /* A script that waits must not freeze the screen, so LVGL gets a turn here
+     * as well as in loop(): this is what keeps the display live underneath a
+     * blocking call (#29). It does nothing until something has brought LVGL up,
+     * and the yield stays either way - lv_timer_handler() is work, not sleep,
+     * and the watchdog wants the sleep. */
+    catnip_lvgl_step();
     delay(1);
 }
 
@@ -319,7 +322,10 @@ void setup()
         return;
     }
     catnip_rt_set_log(g_rt, serial_log, nullptr);
-    catnip_api_open(g_rt, &g_hal); /* device/sensor/gpio/service/fs (#3) */
+    /* device/sensor/gpio/service/fs (#3), backed by the real drivers (#35).
+     * What is wired and what is deliberately left as a no-op is listed at the
+     * top of device/hal_meowkit.cpp. */
+    catnip_api_open(g_rt, catnip_meowkit_hal_begin());
 
     g_shell = catnip_shell_new(g_rt, CATNIP_APPS_ROOT, host_now, host_pump, nullptr);
     if (!g_shell) {
@@ -342,6 +348,7 @@ void loop()
          * power button still works, because it arrives from the PMIC rather
          * than from any of the switches the page is testing. */
         catnip_diag_step();
+        catnip_lvgl_step();
         poll_power_button();
         catnip_led_breathe();
         return;
@@ -358,5 +365,16 @@ void loop()
     animate();
     poll_power_button();
     catnip_led_breathe();
+    /* Sample the switches, the accelerometer and the battery once per pass, so
+     * that no Lua call has to - see hal_meowkit.h. Before the shell steps, so a
+     * script reads the device as it was this pass rather than last. */
+    catnip_meowkit_hal_poll();
+
+    /* Nothing has brought LVGL up on this path yet - the boot animation goes
+     * straight through the blit - so this is a no-op until the shell owns the
+     * screen (#33). It is here rather than added then because a renderer that
+     * is only stepped on some passes through the loop is a stall nobody can
+     * see the cause of. */
+    catnip_lvgl_step();
     if (g_shell) catnip_shell_step(g_shell);
 }
