@@ -11,6 +11,7 @@
 #include "diag.h"
 #include "diag_layout.h"
 #include "display.h"
+#include "imu.h"
 #include "input.h"
 #include "touch.h"
 #include "touch_debug.h" /* the raw pair, shown beside the mapped one */
@@ -61,19 +62,33 @@ const uint16_t kColTouch = 0x07FF;  /* lit by a finger */
 const uint16_t kColText = 0xFFFF;   /* the text rows */
 const uint16_t kColFaint = 0x7BEF;  /* the footnotes */
 const uint16_t kColMarker = 0xF800; /* the touch marker: red on all of the above */
+const uint16_t kColUp = 0xFFE0;     /* the up arrow: yellow, claimed by nothing else */
 
 /* Text rows, chosen around the box block that diag_layout.c lays out between
- * y=40 and y=183. */
-/* The quadrant is the headline and gets the big font; the coordinates behind
- * it are the fine print underneath. That is the wrong way round for a page of
- * numbers and the right way round for this one - the question being asked is
- * "is the marker where my finger is", and the quadrant answers it in words,
- * while the coordinates are only how it was arrived at. */
+ * y=40 and y=183.
+ *
+ * The page answers two questions, and each gets a headline in words and its
+ * numbers in fine print. The words are the big font in both cases. That is the
+ * wrong way round for a page of numbers and the right way round for this one:
+ * what is being asked is "is the marker where my finger is" and "does the
+ * arrow point at the ceiling", and a phrase answers each of those outright
+ * while the coordinates and the axes are only how it was arrived at.
+ *
+ * The touch coordinates gave up a row of their own to make space for the
+ * second question, and now sit to the right of their own headline. Nothing was
+ * lost: they were already the fine print by this file's own account. */
 const int kRowQuad = 2;    /* which quarter of the screen the marker is in */
-const int kRowTouch = 22;  /* the raw and mapped coordinates behind it */
+const int kRowTouch = 6;   /* the raw and mapped coordinates behind it */
+const int kRowUp = 22;     /* which screen edge the IMU says is up */
 const int kRowKey = 186;   /* the colour key and the two path colours */
 const int kRowEvent = 202; /* the last event and the path that delivered it */
 const int kRowNote = 222;
+const int kRowImu = 231; /* the identity and the axes behind the up arrow */
+
+/* Where the touch coordinates start, to the right of the MARKER headline. Far
+ * enough that the longest quadrant name does not run into them, and near
+ * enough that the longest coordinate line still ends on the screen. */
+const int kColTouchX = 170;
 
 /* The colour key's swatches. */
 const int kSwatchW = 14;
@@ -92,8 +107,70 @@ struct Shown {
     bool have_screen;
     bool have_panel;
     uint16_t sx, sy, px, py;
+    /* The acceleration, rounded to kMgStep before it is stored. A resting
+     * accelerometer's last few milli-g never stop moving, so keeping the raw
+     * value here would make every comparison below differ, and turn a page
+     * that redraws on a change into one that pushes a 150 KB frame twenty
+     * times a second. That would show up as buttons lighting late, and would
+     * be blamed on the very switches this page exists to vindicate. The
+     * rounding is done once, here, so that what is compared and what is
+     * printed are the same numbers and cannot disagree. */
+    int32_t mg[3];
+    bool have_accel;
+    /* What catnip_imu_begin() found, carried here so that the footer says the
+     * same thing the arrow does and both come from one snapshot. `imu_ready`
+     * is fixed for the run - the driver reports nothing for the rest of it
+     * once identification has failed - but it is compared with everything
+     * else rather than read from a global, so that the redraw has exactly one
+     * source of truth to draw from. */
+    bool imu_ready;
+    bool imu_have_who;
+    uint8_t imu_who;
+    /* INTERNAL_STATUS after the configuration upload, and whether it was read
+     * at all. A BMI270 that never reaches init_ok answers its identity
+     * register perfectly and produces no data, so without this the page could
+     * only say "it refused its setup" about a part whose bus transactions were
+     * all acknowledged - which would send the owner looking at the wiring. */
+    bool imu_have_status;
+    uint8_t imu_status;
+    /* A row in imu_map.c's table, or null when no edge is named. Comparing the
+     * pointer compares the attitude: the rows are static and there is exactly
+     * one of them per half-axis. */
+    const catnip_imu_up *up;
     char event[48];
 };
+
+/* Whether the IMU's INTERNAL_STATUS says its configuration image was accepted.
+ * Only the low nibble is the message; the bits above it are separate error
+ * flags, and comparing the whole byte would call a working part broken the
+ * moment one of them was set. */
+bool imu_init_ok(const Shown *s)
+{
+    return s->imu_have_status &&
+           (s->imu_status & CATNIP_IMU_INIT_MSG_MASK) == CATNIP_IMU_INIT_OK;
+}
+
+/* The step the acceleration is rounded to, in milli-g. 50 mg is far coarser
+ * than the part's noise at rest, so a still device holds a still number, and
+ * far finer than the 500 mg that decides which edge is up, so nothing the
+ * answer depends on is lost. */
+const int32_t kMgStep = 50;
+
+/* Rounded to the nearest step, away from zero on a tie, so that the two signs
+ * are treated alike. C's integer division truncates toward zero, which would
+ * otherwise round -0.99g and +0.99g to different magnitudes and make an axis
+ * appear to change size when the device is turned end for end. */
+int32_t round_mg(int32_t mg)
+{
+    int32_t half = kMgStep / 2;
+
+    return ((mg + (mg < 0 ? -half : half)) / kMgStep) * kMgStep;
+}
+
+/* Whether catnip_imu_begin() identified the part. Fixed for the run: the
+ * driver reports nothing for the rest of it once identification has failed,
+ * exactly as the touch driver does. */
+bool g_imu_ready = false;
 
 Shown g_shown;
 Shown g_now;
@@ -155,6 +232,62 @@ void draw_marker(uint16_t x, uint16_t y)
     g_fb.drawCircle(x, y, 6, kColMarker);
 }
 
+/* The arrow, from the centre of the screen out toward whichever edge the
+ * firmware believes is up.
+ *
+ * This is how the axis mapping was settled, and it is the same move that
+ * settled the touch rotation in one drag after two attempts at inferring it
+ * from serial output had failed. Held with each screen edge in turn toward the
+ * ceiling, the arrow pointed at the ceiling all four times, which is what makes
+ * imu_map.c's four horizontal rows a measurement rather than a prediction - and
+ * it was visible without reading a number, reporting a value, or anyone
+ * interpreting a log line over a link that drops lines. The same four turns
+ * re-check the table on any other unit.
+ *
+ * It cannot settle the two flat attitudes, and that is the limit of the method
+ * rather than an oversight: they have no edge up, so this function is never
+ * called for them. Those are read off the headline instead.
+ *
+ * The direction comes out of the same table row as the edge's name, so the
+ * arrow and the word cannot disagree. Both components are never zero here: the
+ * two flat attitudes have no edge up, and the caller names them in words
+ * instead of pointing the arrow somewhere arbitrary. */
+void draw_up_arrow(int dx, int dy)
+{
+    const int len = 60;
+    const int head = 18;
+    const int cx = CATNIP_SCREEN_W / 2;
+    const int cy = CATNIP_SCREEN_H / 2;
+    int tx = cx + dx * len;
+    int ty = cy + dy * len;
+    /* The perpendicular, which serves twice: it thickens the shaft, and it is
+     * what the head's two base corners are offset along. */
+    int px = -dy;
+    int py = dx;
+
+    for (int i = -1; i <= 1; i++) {
+        g_fb.drawLine(cx + px * i, cy + py * i, tx + px * i, ty + py * i, kColUp);
+    }
+    /* A filled head rather than two strokes. The direction has to survive
+     * being looked at from across a desk while the device is turning, and a
+     * solid triangle does that where a pair of thin lines does not. */
+    g_fb.fillTriangle(tx, ty, tx - dx * head + px * head / 2,
+                      ty - dy * head + py * head / 2, tx - dx * head - px * head / 2,
+                      ty - dy * head - py * head / 2, kColUp);
+}
+
+/* Milli-g as a signed decimal, without printf's float support. Whether %f
+ * prints anything at all depends on how newlib was configured for this build,
+ * and a row that silently comes out useless is exactly the failure this page
+ * exists to prevent. Integer arithmetic cannot have that problem. */
+void format_g(int32_t mg, char *buf, size_t n)
+{
+    int32_t mag = mg < 0 ? -mg : mg;
+
+    snprintf(buf, n, "%c%ld.%02ld", mg < 0 ? '-' : '+', (long)(mag / 1000),
+             (long)((mag % 1000) / 10));
+}
+
 /* Three named swatches, so that a colour fault is legible on the screen
  * instead of being deduced from someone describing a crosshair over a cable.
  *
@@ -213,19 +346,73 @@ void redraw(const Shown *s)
      * could only say that something was wrong. */
     g_fb.setFont(&fonts::Font0);
     if (s->have_panel && s->have_screen) {
-        snprintf(line, sizeof(line), "RAW %3u,%3u   MAP %3u,%3u", s->px, s->py, s->sx,
+        snprintf(line, sizeof(line), "RAW %3u,%3u MAP %3u,%3u", s->px, s->py, s->sx,
                  s->sy);
     } else if (s->have_panel) {
         /* The controller reported a point the rotation refused. Showing the
          * raw pair anyway is the whole reason it is kept when the map fails. */
-        snprintf(line, sizeof(line), "RAW %3u,%3u   MAP rejected", s->px, s->py);
+        snprintf(line, sizeof(line), "RAW %3u,%3u MAP rejected", s->px, s->py);
     } else {
-        snprintf(line, sizeof(line), "RAW ---,---   MAP ---,---");
+        snprintf(line, sizeof(line), "RAW ---,--- MAP ---,---");
     }
     g_fb.setTextColor(kColFaint);
-    g_fb.drawString(line, 8, kRowTouch);
+    g_fb.drawString(line, kColTouchX, kRowTouch);
 
+    /* The second headline: which screen edge the firmware believes is up. It
+     * is a sentence rather than three numbers for the same reason the quadrant
+     * above it is - asked twice whether a marker followed their finger, the
+     * owner answered about its colour both times - and it is drawn whether or
+     * not there is an arrow to go with it, because the cases where there is no
+     * arrow are the ones that most need saying out loud.
+     *
+     * There are six such cases and they are not the same failure: nothing
+     * answering at 0x68 at all, something answering that is not a BMI270, a
+     * BMI270 whose configuration image never took, a BMI270 that came up and
+     * then refused its accelerometer settings, the part configured but not yet
+     * read, and the part working perfectly while lying flat, where no edge is
+     * up. A page that quietly drew nothing in all six would be
+     * indistinguishable from a page whose arrow is broken, and telling them
+     * apart is what this row and the footer are for.
+     *
+     * The third of them is new with the BMI270 and is the one most worth
+     * separating out. The part identifies itself before anything is written to
+     * it, so a failed upload leaves a chip that answers every read,
+     * acknowledges every write and produces no data whatsoever - which under
+     * the old wording would have been reported as a refused setup and sent
+     * whoever read it looking at the bus.
+     *
+     * The last of them is not a failure at all, which is why it is worded like
+     * an attitude rather than an apology. */
     g_fb.setFont(&fonts::Font2);
+    g_fb.setTextColor(kColUp);
+    if (!s->imu_have_who) {
+        snprintf(line, sizeof(line), "UP: nothing answered at 0x68");
+    } else if (s->imu_who != CATNIP_IMU_CHIP_ID_BMI270) {
+        snprintf(line, sizeof(line), "UP: 0x68 is not a BMI270");
+    } else if (!s->imu_ready && s->imu_have_status && !imu_init_ok(s)) {
+        /* It is a BMI270 and its firmware image did not take. Named for what
+         * it is rather than folded into the line below, because the two want
+         * different things done about them. The status is tested by value and
+         * not merely by having been read: it is read on the way to success
+         * too, and a part that reached init_ok and then refused a range write
+         * belongs on the next line, not this one. */
+        snprintf(line, sizeof(line), "UP: the IMU never finished its upload");
+    } else if (!s->imu_ready) {
+        /* The part is the expected one and still would not come up before the
+         * upload was ever reached: a write it did not acknowledge, or a range
+         * field that read back as something this driver has no scale for.
+         * Saying "not a BMI270" here would contradict the identity printed in
+         * the footer two rows down. */
+        snprintf(line, sizeof(line), "UP: the IMU refused its setup");
+    } else if (!s->have_accel) {
+        snprintf(line, sizeof(line), "UP: no reading yet");
+    } else if (s->up == NULL) {
+        snprintf(line, sizeof(line), "UP: unclear - hold it still");
+    } else {
+        snprintf(line, sizeof(line), "UP: %s", s->up->name);
+    }
+    g_fb.drawString(line, 8, kRowUp);
+
     for (int b = 0; b < CATNIP_BTN_COUNT; b++) {
         draw_box((catnip_button)b, s->down_mask, s->touch_box);
     }
@@ -242,6 +429,61 @@ void redraw(const Shown *s)
     draw_colour_key();
     g_fb.setTextColor(kColFaint);
     g_fb.drawString("OK is GPIO5: contact never closes, so touch only", 8, kRowNote);
+
+    /* The identity, and the axes behind the arrow.
+     *
+     * The raw CHIP_ID is here because it is the one number that decides
+     * whether anything else about the arrow means anything: an axis mapping
+     * read out of the wrong chip is not a mapping that needs correcting, it is
+     * a number that means nothing, and the two look identical from the arrow
+     * alone. Printing it beside what a BMI270 is supposed to report settles
+     * the identity in the same glance as the mapping.
+     *
+     * INTERNAL_STATUS joins it when the upload failed, because on a BMI270 the
+     * identity alone no longer settles anything. The part reports 0x24 whether
+     * or not it has firmware in it, and without firmware it reports nothing
+     * else at all - so the raw status byte is what distinguishes a chip that
+     * did not come up from one that is not the right chip, and its value says
+     * which of the part's error codes came back.
+     *
+     * The three axes are here for the same reason the raw touch pair is: they
+     * are what makes a wrong edge name correctable without another run. Read
+     * which axis is carrying gravity, find its row in imu_map.c, and the edit
+     * is that row. */
+    if (!s->imu_have_who) {
+        snprintf(line, sizeof(line), "IMU 0x68: no answer - absent or unpowered");
+    } else if (s->imu_who != CATNIP_IMU_CHIP_ID_BMI270) {
+        snprintf(line, sizeof(line), "IMU 0x68: who=0x%02X, not a BMI270's 0x%02X",
+                 s->imu_who, CATNIP_IMU_CHIP_ID_BMI270);
+    } else if (!s->imu_ready && s->imu_have_status && !imu_init_ok(s)) {
+        snprintf(line, sizeof(line), "IMU 0x68: BMI270, status=0x%02X not init_ok 0x%02X",
+                 s->imu_status, CATNIP_IMU_INIT_OK);
+    } else if (!s->imu_ready) {
+        snprintf(line, sizeof(line), "IMU 0x68: who=0x%02X, but it refused its setup",
+                 s->imu_who);
+    } else if (!s->have_accel) {
+        snprintf(line, sizeof(line), "IMU 0x68: who=0x%02X ok, no reading yet",
+                 s->imu_who);
+    } else {
+        char ax[10], ay[10], az[10];
+
+        format_g(s->mg[0], ax, sizeof(ax));
+        format_g(s->mg[1], ay, sizeof(ay));
+        format_g(s->mg[2], az, sizeof(az));
+        snprintf(line, sizeof(line), "IMU 0x68: who=0x%02X  ax %s  ay %s  az %s g",
+                 s->imu_who, ax, ay, az);
+    }
+    g_fb.drawString(line, 8, kRowImu);
+
+    /* The arrow before the marker, so that a finger on the glass is never
+     * hidden behind it. Both are drawn over the boxes: a signal hidden behind
+     * the thing it is meant to be compared against would answer nothing.
+     *
+     * No arrow for the two flat attitudes, which have no edge up and say so in
+     * the headline instead. Pointing one somewhere anyway would be the page
+     * inventing an answer, which is the one thing it must never do. */
+    if (s->up != NULL && (s->up->dx != 0 || s->up->dy != 0))
+        draw_up_arrow(s->up->dx, s->up->dy);
 
     if (s->have_screen) draw_marker(s->sx, s->sy);
 
@@ -324,11 +566,30 @@ bool catnip_diag_begin(void)
         Serial.println("[catnip] diag: no touch controller, showing the switches only");
     }
 
+    /* The IMU comes up here, with the other two, rather than being left to
+     * whoever wires sensor.imu up later. This page is what settles the axis
+     * mapping, so it has to own the bring-up of the part whose axes it is
+     * mapping; and a failure to identify is not a reason to abandon the page,
+     * only a reason for it to say so. The driver reports nothing for the rest
+     * of the run, and the headline and the footer both name which failure it
+     * was. */
+    g_imu_ready = catnip_imu_begin();
+    if (!g_imu_ready) {
+        Serial.println("[catnip] diag: no IMU, so the page draws no arrow and says why");
+    }
+
     g_active = true;
     memset(&g_shown, 0, sizeof(g_shown));
     g_shown.touch_box = -1;
     memcpy(&g_now, &g_shown, sizeof(g_now));
     strcpy(g_now.event, g_event);
+    /* The first frame is drawn before any poll, so the identity it shows has
+     * to be filled in here. Without this the page opens by reporting that
+     * nothing answered at 0x68 - which would be a lie for the length of one
+     * frame, on the row whose whole job is to be believed. */
+    g_now.imu_ready = g_imu_ready;
+    g_now.imu_have_who = catnip_imu_who_am_i(&g_now.imu_who);
+    g_now.imu_have_status = catnip_imu_internal_status(&g_now.imu_status);
     redraw(&g_now);
     memcpy(&g_shown, &g_now, sizeof(g_shown));
     catnip_display_backlight(255);
@@ -349,16 +610,37 @@ void catnip_diag_redraw(void)
 void catnip_diag_step(void)
 {
     int box = -1;
+    int32_t mg[3];
 
     if (!g_active) return;
 
     catnip_input_poll();
     catnip_touch_poll();
+    catnip_imu_poll();
 
     memset(&g_now, 0, sizeof(g_now));
     g_now.touch_down = catnip_touch_down();
     g_now.have_screen = catnip_touch_position(&g_now.sx, &g_now.sy);
     g_now.have_panel = catnip_touch_panel_position(&g_now.px, &g_now.py);
+
+    /* The whole of what the page knows about the IMU, taken in one place so
+     * that the arrow, the headline and the footer are all describing the same
+     * instant. The acceleration is rounded here and nowhere else, so what the
+     * comparison below sees is exactly what the footer prints - otherwise a
+     * still device would redraw a 150 KB frame on every poll. */
+    g_now.imu_ready = g_imu_ready;
+    g_now.imu_have_who = catnip_imu_who_am_i(&g_now.imu_who);
+    g_now.imu_have_status = catnip_imu_internal_status(&g_now.imu_status);
+    if (catnip_imu_acceleration(mg)) {
+        for (int i = 0; i < 3; i++)
+            g_now.mg[i] = round_mg(mg[i]);
+        g_now.have_accel = true;
+    }
+    /* The edge comes from the driver's own unrounded reading rather than from
+     * the rounded copy above. The driver is what other callers will see, and a
+     * page that named an edge the driver would not name would be diagnosing
+     * itself instead of the device. */
+    g_now.up = catnip_imu_orientation();
 
     /* The box under the last known position, whether or not a finger is on the
      * glass right now. It is what lights a box while the finger is down, and

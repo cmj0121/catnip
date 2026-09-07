@@ -56,3 +56,18 @@ bool catnip_i2c_read_regs(uint8_t addr, uint8_t reg, uint8_t *out, size_t len)
     }
     return true;
 }
+
+bool catnip_i2c_write_regs(uint8_t addr, uint8_t reg, const uint8_t *data, size_t len)
+{
+    Wire.beginTransmission(addr);
+    Wire.write(reg);
+    /* Wire.write() returns short when its buffer fills. Checking it is what
+     * turns "the caller asked for more than this bus can carry in one go" into
+     * a refusal, rather than a partial write the device would acknowledge
+     * quite happily and the caller would read as success. */
+    if (Wire.write(data, len) != len) {
+        Wire.endTransmission();
+        return false;
+    }
+    return Wire.endTransmission() == 0;
+}

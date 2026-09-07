@@ -13,7 +13,8 @@ extern "C" {
 
 // TODO: implement against the BSP:
 //   vibrate (motor), led (WS2812), battery (AXP173), brightness, buttons,
-//   imu (QMI8658A), rtc (PCF8563), gpio header, wifi status/ssid, http_get,
+//   imu (BMI270 - measured, not the QMI8658A this line used to name),
+//   rtc (PCF8563), gpio header, wifi status/ssid, http_get,
 //   sd_reset (reformat the card).
 extern "C" const catnip_hal *catnip_meowkit_hal()
 {

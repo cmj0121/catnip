@@ -18,6 +18,7 @@
  *   [longpress] 12643 A          still held after LONG_PRESS_MS
  *   [release] 12871 A
  *   [touch] 13022 down (118, 205)      the controller's own raw coordinates
+ *   [imu] 13500 ax=-0.02 ...   gravity, and the screen edge it implies
  *   [probe] 13440 gpio7 pullup 1->0    a pin board.h cannot name yet
  *   [tally] 45210                      the running press count, every pin
  *
@@ -38,6 +39,20 @@
  * each print carries the whole truth, so a block that goes missing costs
  * nothing but a wait. Press a button three times and look for the pin that
  * says 3 - no ordering, no timestamps, no single line that has to arrive.
+ *
+ * The second question this sketch is now asked is which way is up, and the
+ * [imu] block answers it under the same rule as the tally. Orientation is a
+ * level rather than an edge: the device is in some attitude for as long as it
+ * is held there, so reprinting the current reading every half second means a
+ * dropped line costs half a second and nothing else. Nothing about the answer
+ * has to be reconstructed from a particular line arriving.
+ *
+ * What the [imu] block cannot do is tell you which screen edge an axis
+ * belongs to. The part is mounted however it was mounted, and no datasheet
+ * says how; the edge name printed at the end of each line is a GUESS, marked
+ * as one, and turning the device four ways is what settles it. The axis
+ * numbers are printed alongside precisely so that a wrong guess is correctable
+ * from the log rather than from another run.
  *
  * The named half is put through the firmware's own input_debounce module
  * rather than a filter written here, so this run doubles as the first field
@@ -60,6 +75,8 @@
  */
 #include <Arduino.h>
 #include <Wire.h>
+
+#include <stdlib.h> /* labs() */
 
 #include "device/board.h"
 #include "device/i2cbus.h"
@@ -162,14 +179,18 @@ const unsigned long TALLY_MS = 3000;
 const uint8_t IOEXP_REG_INPUT = 0x00;
 
 /* AXP173 interrupt status registers 1 through 4, at 0x44 to 0x47. The power
- * key lives in 0x46 (bit 1 short press, bit 0 long press) and is the only
- * button board.h can currently account for; the rest are read too, in case
- * something else on the board reaches the MCU only through the PMIC. Bits
- * are cleared by writing them back, and the probe does so after logging them,
- * or a press would show up once and never again. */
+ * key lives in CATNIP_PMU_REG_IRQ_STATUS_3 and is the only button board.h can
+ * currently account for; the rest are read too, in case something else on the
+ * board reaches the MCU only through the PMIC. Bits are cleared by writing
+ * them back, and the probe does so after logging them, or a press would show
+ * up once and never again.
+ *
+ * That register and its two bits come from pmu.h rather than being spelled out
+ * again here. The probe had its own copy of both, and two copies of one part's
+ * register map are two things that can drift; the AXP173 driver and the probe
+ * now read the same definitions. */
 const uint8_t PMU_IRQ_FIRST = 0x44;
 const uint8_t PMU_IRQ_COUNT = 4;
-const uint8_t PMU_IRQ_PEK = 0x46;
 
 /* Where a touch controller is expected. Not assumed: the scan reports whatever
  * answers, and this address is only read if something is there. An FT6336
@@ -177,7 +198,16 @@ const uint8_t PMU_IRQ_PEK = 0x46;
  * fingers down at 0x02; if the part is something else the identity read says
  * so, and the finger count just never moves. */
 /* board.h owns the address; the registers below are the part's own map and
- * belong to whoever is talking to it. */
+ * belong to whoever is talking to it.
+ *
+ * device/touch.cpp names these same four registers, and that duplication is
+ * deliberate rather than an oversight waiting to be tidied away. Calling
+ * catnip_touch_begin() from here instead would invert what the probe is for:
+ * that function refuses to interpret anything that is not an FT6336, and
+ * interrogating a part whose identity is not yet established is exactly this
+ * sketch's job. 0x38 is only called an FT6336 because the probe read 0xA3 and
+ * 0xA8 first. The risk this leaves - the two maps drifting apart - is real and
+ * is recorded here rather than hidden. */
 const uint8_t TOUCH_ADDR = CATNIP_I2C_ADDR_TOUCH;
 const uint8_t TOUCH_REG_TD_STATUS = 0x02;
 const uint8_t TOUCH_REG_CHIP_ID = 0xA3;
@@ -188,6 +218,121 @@ const uint8_t TOUCH_REG_VENDOR = 0xA8;
  * high byte is coordinate - the bits above it are an event flag on X and a
  * touch id on Y - so they are masked off. */
 const uint8_t TOUCH_REG_P1_XH = 0x03;
+
+/* Where an IMU is expected, and how little that is worth. board.h records
+ * 0x68 as "likely an IMU" and hal_meowkit.cpp names the part a QMI8658A, but
+ * both of those come from the vendor's documentation, which on this board has
+ * now been wrong about the display's chip-select, the display's reset and all
+ * three of the published button pins. So the address is read rather than
+ * assumed, exactly as 0x38 was: it is only called an FT6336 because 0xA3 and
+ * 0xA8 answered 0x64 and 0x11.
+ *
+ * The address is spelled out here rather than added to board.h on purpose.
+ * board.h holds measured facts, and until this probe has been run there is no
+ * measurement of what sits at 0x68 to record.
+ *
+ * A QMI8658A puts its identity at register 0x00 and reports 0x05 there. The
+ * other family that conventionally answers at 0x68 - the MPU-6050 and its
+ * relatives - keeps its identity at 0x75 instead, so that register is read
+ * too. Reading both costs two transactions and is the difference between
+ * "not a QMI8658A" and "not a QMI8658A, and here is what it might be".
+ *
+ * Every register below the identity ones is a QMI8658A's own map, and none of
+ * them is touched unless 0x00 reads 0x05. Writing configuration bytes into an
+ * unidentified chip is how the display was left dark. */
+const uint8_t IMU_ADDR = 0x68;
+const uint8_t IMU_REG_WHO_AM_I = 0x00;
+const uint8_t IMU_REG_REVISION = 0x01;
+const uint8_t IMU_REG_CTRL1 = 0x02;
+const uint8_t IMU_REG_CTRL2 = 0x03;
+const uint8_t IMU_REG_CTRL7 = 0x08;
+const uint8_t IMU_REG_ACC_X_L = 0x35;
+const uint8_t IMU_REG_MPU_WHO_AM_I = 0x75;
+const uint8_t QMI8658A_WHO_AM_I = 0x05;
+
+/* The bring-up, three writes.
+ *
+ * CTRL1 = 0x40 clears SensorDisable, which the part boots with set: in that
+ * state the internal oscillator is off, the data registers never update, and
+ * the chip answers every read with the same stale bytes. That looks exactly
+ * like a device lying perfectly still and is the trap this sequence exists to
+ * avoid. Bit 6 alongside it turns on address auto-increment, which is what
+ * lets imu_read_accel() take all six acceleration bytes in one transaction.
+ *
+ * CTRL2 = 0x16 is the accelerometer's own configuration: aFS = 001 for a
+ * range of +-4g and aODR = 0110 for 125 Hz. +-4g rather than +-2g because
+ * gravity is 1g and a device being turned over by hand swings well past 2g on
+ * the way; a clipped axis would read as the wrong attitude. 125 Hz is far more
+ * than a half-second reprint needs and keeps the part out of its low-rate
+ * modes.
+ *
+ * CTRL7 = 0x01 enables the accelerometer and leaves the gyroscope off. The
+ * question here is which way gravity points, and a gyroscope cannot answer
+ * it. */
+const uint8_t IMU_CTRL1_VALUE = 0x40;
+const uint8_t IMU_CTRL2_VALUE = 0x16;
+const uint8_t IMU_CTRL7_VALUE = 0x01;
+
+/* CTRL2's aFS field, and the counts per g each of its four settings gives.
+ * The scale is read back out of the chip rather than assumed from what was
+ * written, so a write that did not take turns into raw counts in the log
+ * instead of numbers that look like g and are not. */
+const uint8_t IMU_CTRL2_AFS_SHIFT = 4;
+const uint8_t IMU_CTRL2_AFS_MASK = 0x07;
+const int32_t IMU_LSB_PER_G[4] = {16384, 8192, 4096, 2048};
+
+/* Below this, no axis is dominant enough to name an edge: the device is being
+ * moved, or is on a corner. Gravity is 1000 mg, so half of it is a generous
+ * margin for a device merely held in the hand. */
+const int32_t IMU_UP_MIN_MG = 500;
+
+/* How often the current attitude is reprinted. A level, not an edge - see the
+ * comment at the top of the file. */
+const unsigned long IMU_MS = 500;
+
+/* THE AXIS-TO-EDGE MAP BELOW IS A GUESS, in the same sense and for the same
+ * reason as the handedness in touch_map.c: nothing measured supports it yet.
+ *
+ * What it is a guess about: the panel is a 240x320 part driven at
+ * CATNIP_LCD_ROTATION 3 so the user sees a 320x240 landscape screen, and the
+ * IMU is a separate package soldered somewhere on the board. The datasheet
+ * says where the chip's axes are relative to its own package and nothing at
+ * all about where the package is relative to the screen, so the correspondence
+ * cannot be derived - only measured.
+ *
+ * The guess assumes the ordinary case: the part is placed square with the
+ * board outline, its +X running along the panel's X axis (across the panel's
+ * short edge, 0..239) and its +Y along the panel's Y axis (down the long edge,
+ * 0..319), with +Z out through the front of the glass. Rotation 3 maps a panel
+ * point to the screen as screen_x = PANEL_H - 1 - panel_y, screen_y = panel_x
+ * - the same arithmetic touch_map.c does - so increasing panel X walks DOWN
+ * the screen and increasing panel Y walks LEFT across it. Hence +X toward the
+ * ceiling means the bottom edge is up, and +Y toward the ceiling means the
+ * left edge is up.
+ *
+ * The sign convention is the accelerometer's, not gravity's: at rest the part
+ * measures the force holding it up, so the axis reading positive is the one
+ * pointing at the ceiling. No negation is needed anywhere and none should be
+ * added.
+ *
+ * How to correct it: turn the device so each screen edge in turn points at the
+ * ceiling and read the line. If an edge name is wrong, the fix is this table
+ * and only this table - six rows, one per half-axis. Nothing downstream reads
+ * the axes directly, so no sign has to be chased through the reader. */
+struct UpEdge {
+    uint8_t axis;
+    int8_t sign;
+    const char *edge;
+};
+const UpEdge IMU_UP_EDGE[] = {
+    {0, +1, "bottom edge"},
+    {0, -1, "top edge"},
+    {1, +1, "left edge"},
+    {1, -1, "right edge"},
+    {2, +1, "screen face (lying flat, screen up)"},
+    {2, -1, "back (lying flat, screen down)"},
+};
+const size_t IMU_UP_EDGE_COUNT = sizeof(IMU_UP_EDGE) / sizeof(IMU_UP_EDGE[0]);
 
 /* The switches board.h can now name, and the pin each one sits on. These are
  * reported by name and put through the firmware's debounce filter; every other
@@ -227,15 +372,34 @@ Sample g_prev;
 bool g_touch_present = false;
 unsigned long g_last_tally = 0;
 
-/* One filter per allowed pin, not per named switch: the pin a missing button
+/* What the probe established about 0x68 at startup, so the loop does not have
+ * to re-ask it every half second. streaming stays false whenever the part was
+ * not identified: an unknown chip's data registers are not data. */
+struct ImuState {
+    bool streaming;
+    bool scale_known;
+    int32_t lsb_per_g;
+};
+ImuState g_imu = {false, false, 0};
+unsigned long g_last_imu = 0;
+
+/* One of these per allowed pin, not per named switch: the pin a missing button
  * turns out to be on has to be counted too, and it is not known yet which pin
- * that is. Alongside it, what the filter deliberately does not know - when the
- * current press started and whether it has already been called long - and the
- * count that is the point of the whole block. */
-catnip_debounce g_filter[PIN_COUNT];
-unsigned long g_down_at[PIN_COUNT];
-bool g_long[PIN_COUNT];
-unsigned long g_press_count[PIN_COUNT];
+ * that is. Alongside the filter, what the filter deliberately does not know -
+ * when the current press started and whether it has already been called long -
+ * and the count that is the point of the whole block.
+ *
+ * One struct rather than four parallel arrays. They were always indexed
+ * together and they are the state of a single pin, so keeping them apart meant
+ * a new field was four declarations and every initialiser, and a missed one
+ * would have desynchronised the indices with nothing to catch it. */
+struct PinState {
+    catnip_debounce filter;
+    unsigned long down_at;
+    bool long_reported;
+    unsigned long press_count;
+};
+PinState g_pin[PIN_COUNT];
 
 const char *button_name(uint8_t pin)
 {
@@ -272,6 +436,7 @@ const char *bus_name(uint8_t addr)
     case CATNIP_I2C_ADDR_IOEXP: return "PCA9557 expander";
     case 0x18: return "ES8311 codec";
     case TOUCH_ADDR: return "touch controller?";
+    case IMU_ADDR: return "imu?";
     default: return "unknown";
     }
 }
@@ -320,17 +485,156 @@ void print_touch_identity(void)
     }
 }
 
-/* Read the first touch point. Four separate register reads are not one atomic
- * sample - a finger moving between them could pair an old X with a new Y - but
- * the events reported from it are down and up, where that cannot matter. */
+/* Say what answers at 0x68, and decide from that whether anything further may
+ * be read as accelerometer data. Nothing is written to the chip here: this
+ * function only asks who it is. */
+void print_imu_identity(void)
+{
+    uint8_t who = 0, rev = 0, mpu = 0;
+    bool got_who = catnip_i2c_read_reg(IMU_ADDR, IMU_REG_WHO_AM_I, &who);
+    bool got_rev = catnip_i2c_read_reg(IMU_ADDR, IMU_REG_REVISION, &rev);
+    bool got_mpu = catnip_i2c_read_reg(IMU_ADDR, IMU_REG_MPU_WHO_AM_I, &mpu);
+
+    if (!got_who) {
+        Serial.println("[imu] 0x68 answered the scan but not a register read");
+        return;
+    }
+    Serial.printf("[imu] 0x68 who_am_i=0x%02X", who);
+    if (got_rev) Serial.printf(" reg0x01=0x%02X", rev);
+    if (got_mpu) Serial.printf(" reg0x75=0x%02X", mpu);
+    Serial.printf(" (a QMI8658A reports 0x%02X at 0x00)\n", QMI8658A_WHO_AM_I);
+
+    if (who == QMI8658A_WHO_AM_I) {
+        g_imu.streaming = true;
+        return;
+    }
+    Serial.println("[imu] That is NOT what a QMI8658A reports, so this is some other");
+    Serial.println("[imu] part and its registers are not read as if it were one. If");
+    Serial.println("[imu] reg0x75 above reads 0x68 or 0x70 it is an MPU-6050 family");
+    Serial.println("[imu] chip; either way the number is the finding, not a fault.");
+}
+
+/* Bring the accelerometer out of the disabled state it boots in, then read the
+ * range back so counts can be turned into g. A write that is not acknowledged
+ * is reported and not retried: what that means is worth seeing in the log. */
+void imu_begin(void)
+{
+    uint8_t ctrl2 = 0;
+
+    if (!catnip_i2c_write_reg(IMU_ADDR, IMU_REG_CTRL1, IMU_CTRL1_VALUE) ||
+        !catnip_i2c_write_reg(IMU_ADDR, IMU_REG_CTRL2, IMU_CTRL2_VALUE) ||
+        !catnip_i2c_write_reg(IMU_ADDR, IMU_REG_CTRL7, IMU_CTRL7_VALUE)) {
+        Serial.println("[imu] the chip identified itself and then refused a "
+                       "configuration write");
+        return;
+    }
+
+    if (!catnip_i2c_read_reg(IMU_ADDR, IMU_REG_CTRL2, &ctrl2)) {
+        Serial.println("[imu] CTRL2 did not read back, so the range is unknown and "
+                       "the axes below are raw counts");
+        return;
+    }
+
+    uint8_t afs = (uint8_t)((ctrl2 >> IMU_CTRL2_AFS_SHIFT) & IMU_CTRL2_AFS_MASK);
+    if (afs > 3) {
+        Serial.printf("[imu] CTRL2 read back 0x%02X, whose range field is not one this "
+                      "probe knows; the axes below are raw counts\n",
+                      ctrl2);
+        return;
+    }
+    g_imu.scale_known = true;
+    g_imu.lsb_per_g = IMU_LSB_PER_G[afs];
+    Serial.printf("[imu] CTRL2=0x%02X, so the range is +-%dg at %ld counts per g\n",
+                  ctrl2, 2 << afs, (long)g_imu.lsb_per_g);
+}
+
+/* The three acceleration axes, low byte first: six consecutive registers in
+ * one transaction, which is what the address auto-increment enabled in
+ * imu_begin() was for. */
+bool imu_read_accel(int16_t out[3])
+{
+    uint8_t r[6];
+
+    if (!catnip_i2c_read_regs(IMU_ADDR, IMU_REG_ACC_X_L, r, sizeof(r))) return false;
+    for (uint8_t i = 0; i < 3; i++) {
+        out[i] = (int16_t)((uint16_t)r[i * 2] | ((uint16_t)r[i * 2 + 1] << 8));
+    }
+    return true;
+}
+
+/* The screen edge pointing at the ceiling, or NULL when no axis is dominant
+ * enough to name one. The whole mapping is the table this reads; see the
+ * comment on IMU_UP_EDGE, and correct it there. */
+const char *imu_up_edge(const int32_t mg[3])
+{
+    uint8_t axis = 0;
+
+    for (uint8_t i = 1; i < 3; i++) {
+        if (labs(mg[i]) > labs(mg[axis])) axis = i;
+    }
+    if (labs(mg[axis]) < IMU_UP_MIN_MG) return NULL;
+
+    int8_t sign = mg[axis] >= 0 ? (int8_t)1 : (int8_t)-1;
+    for (size_t i = 0; i < IMU_UP_EDGE_COUNT; i++) {
+        if (IMU_UP_EDGE[i].axis == axis && IMU_UP_EDGE[i].sign == sign)
+            return IMU_UP_EDGE[i].edge;
+    }
+    return NULL;
+}
+
+/* Milli-g as a signed decimal, without printf's float support. Whether %f
+ * prints anything depends on how newlib was configured for this build, and a
+ * log line that silently comes out useless is the one failure this whole
+ * sketch is written to avoid. Integer arithmetic cannot have that problem. */
+void imu_format_g(int32_t mg, char *buf, size_t n)
+{
+    int32_t whole = labs(mg) / 1000;
+    int32_t hundredths = (labs(mg) % 1000) / 10;
+
+    snprintf(buf, n, "%c%ld.%02ld", mg < 0 ? '-' : '+', (long)whole, (long)hundredths);
+}
+
+/* One line, reprinted every IMU_MS whether or not anything moved. The raw
+ * counts are printed alongside the g values because they are what makes a
+ * wrong edge name correctable without another run. */
+void print_imu(unsigned long now)
+{
+    int16_t raw[3];
+    int32_t mg[3];
+    char ax[12], ay[12], az[12];
+    const char *edge;
+
+    if (!imu_read_accel(raw)) {
+        Serial.printf("[imu] %lu the acceleration registers did not answer\n", now);
+        return;
+    }
+    if (!g_imu.scale_known) {
+        Serial.printf("[imu] %lu ax=%d ay=%d az=%d (RAW COUNTS, range unknown, so no "
+                      "edge is derived)\n",
+                      now, raw[0], raw[1], raw[2]);
+        return;
+    }
+
+    for (uint8_t i = 0; i < 3; i++) {
+        mg[i] = ((int32_t)raw[i] * 1000) / g_imu.lsb_per_g;
+    }
+    imu_format_g(mg[0], ax, sizeof(ax));
+    imu_format_g(mg[1], ay, sizeof(ay));
+    imu_format_g(mg[2], az, sizeof(az));
+    edge = imu_up_edge(mg);
+    Serial.printf("[imu] %lu ax=%s ay=%s az=%s g (raw %d %d %d)  ->  up = %s (GUESS)\n",
+                  now, ax, ay, az, raw[0], raw[1], raw[2],
+                  edge ? edge : "unclear, no axis dominant (moving?)");
+}
+
+/* Read the first touch point: four consecutive registers in one transaction,
+ * so the X and Y come out of the part at the same instant rather than being
+ * assembled from four separate reads. */
 bool read_touch_point(uint16_t *x, uint16_t *y)
 {
     uint8_t r[4];
 
-    for (uint8_t i = 0; i < 4; i++) {
-        if (!catnip_i2c_read_reg(TOUCH_ADDR, (uint8_t)(TOUCH_REG_P1_XH + i), &r[i]))
-            return false;
-    }
+    if (!catnip_i2c_read_regs(TOUCH_ADDR, TOUCH_REG_P1_XH, r, sizeof(r))) return false;
     *x = (uint16_t)(((r[0] & 0x0F) << 8) | r[1]);
     *y = (uint16_t)(((r[2] & 0x0F) << 8) | r[3]);
     return true;
@@ -418,9 +722,9 @@ void print_snapshot(const Sample *s, unsigned long now)
 
 const char *pek_note(uint8_t reg, uint8_t value)
 {
-    if (reg != PMU_IRQ_PEK) return "";
-    if (value & 0x02) return " (power key short press)";
-    if (value & 0x01) return " (power key long press)";
+    if (reg != CATNIP_PMU_REG_IRQ_STATUS_3) return "";
+    if (value & CATNIP_PMU_IRQ_PEK_SHORT) return " (power key short press)";
+    if (value & CATNIP_PMU_IRQ_PEK_LONG) return " (power key long press)";
     return "";
 }
 
@@ -437,24 +741,24 @@ void report_buttons(const Sample *cur, unsigned long now)
     for (size_t i = 0; i < PIN_COUNT; i++) {
         const char *name = button_name(ALLOWED_PINS[i]);
 
-        catnip_debounce_update(&g_filter[i], cur->pullup[i] == 0, (uint32_t)now);
+        catnip_debounce_update(&g_pin[i].filter, cur->pullup[i] == 0, (uint32_t)now);
 
         /* Every pin is counted; only the ones board.h can name announce
          * themselves as they happen. An unnamed pin still shows its raw
          * transitions below, and its count in the next tally. */
-        if (catnip_debounce_take_pressed(&g_filter[i])) {
-            g_press_count[i]++;
-            g_down_at[i] = now;
-            g_long[i] = false;
+        if (catnip_debounce_take_pressed(&g_pin[i].filter)) {
+            g_pin[i].press_count++;
+            g_pin[i].down_at = now;
+            g_pin[i].long_reported = false;
             if (name) Serial.printf("[press] %lu %s\n", now, name);
         }
-        if (name && !g_long[i] && catnip_debounce_down(&g_filter[i]) &&
-            now - g_down_at[i] >= LONG_PRESS_MS) {
+        if (name && !g_pin[i].long_reported && catnip_debounce_down(&g_pin[i].filter) &&
+            now - g_pin[i].down_at >= LONG_PRESS_MS) {
             Serial.printf("[longpress] %lu %s\n", now, name);
-            g_long[i] = true;
+            g_pin[i].long_reported = true;
         }
-        if (catnip_debounce_take_released(&g_filter[i])) {
-            g_long[i] = false;
+        if (catnip_debounce_take_released(&g_pin[i].filter)) {
+            g_pin[i].long_reported = false;
             if (name) Serial.printf("[release] %lu %s\n", now, name);
         }
     }
@@ -472,17 +776,18 @@ void print_tally(unsigned long now)
     Serial.printf("[tally] %lu\n", now);
     for (size_t i = 0; i < PIN_COUNT; i++) {
         const char *name = button_name(ALLOWED_PINS[i]);
-        if (g_press_count[i] == 0) continue;
+        if (g_pin[i].press_count == 0) continue;
         if (name) {
             Serial.printf("[tally]   %s (gpio%u) = %lu\n", name, ALLOWED_PINS[i],
-                          g_press_count[i]);
+                          g_pin[i].press_count);
         } else {
-            Serial.printf("[tally]   gpio%u = %lu\n", ALLOWED_PINS[i], g_press_count[i]);
+            Serial.printf("[tally]   gpio%u = %lu\n", ALLOWED_PINS[i],
+                          g_pin[i].press_count);
         }
     }
     for (size_t i = 0; i < PIN_COUNT; i++) {
         const char *name = button_name(ALLOWED_PINS[i]);
-        if (g_press_count[i] != 0) continue;
+        if (g_pin[i].press_count != 0) continue;
         if (!any_zero) {
             Serial.print("[tally]   still zero:");
             any_zero = true;
@@ -622,14 +927,24 @@ void setup()
     if (g_touch_present) print_touch_identity();
     else Serial.println("[probe] nothing at 0x38 after bring-up");
 
+    /* A local: whether 0x68 answered the scan is asked once, here, and every
+     * decision after this one keys off streaming or scale_known instead. */
+    bool imu_answered = bus_has(&after_ioexp, IMU_ADDR);
+    if (!imu_answered) {
+        Serial.println("[imu] nothing at 0x68 after bring-up");
+    } else {
+        print_imu_identity();
+        if (g_imu.streaming) imu_begin();
+    }
+
     sample_pins(&g_prev);
     sample_i2c(&g_prev);
     g_last_tally = millis();
     for (size_t i = 0; i < PIN_COUNT; i++) {
-        catnip_debounce_init(&g_filter[i], (uint32_t)g_last_tally);
-        g_down_at[i] = g_last_tally;
-        g_long[i] = false;
-        g_press_count[i] = 0;
+        catnip_debounce_init(&g_pin[i].filter, (uint32_t)g_last_tally);
+        g_pin[i].down_at = g_last_tally;
+        g_pin[i].long_reported = false;
+        g_pin[i].press_count = 0;
     }
     /* The one and only full snapshot: what every pin reads with nothing
      * pressed. From here on the tally carries that state, in a form that
@@ -639,6 +954,14 @@ void setup()
     Serial.println("[probe] next [tally] block and see which pin counted that many.");
     Serial.println("[probe] The link drops lines: trust the totals, not the order.");
     print_tally(g_last_tally);
+    if (g_imu.streaming) {
+        g_last_imu = g_last_tally;
+        Serial.println("[imu] The edge named on each line is a GUESS about how the part");
+        Serial.println("[imu] is mounted, not a measurement. Turn the device so each");
+        Serial.println("[imu] screen edge in turn points at the ceiling, hold it there,");
+        Serial.println("[imu] and read the line. Correcting a wrong name is an edit to");
+        Serial.println("[imu] IMU_UP_EDGE in probe_input.cpp and nothing else.");
+    }
 }
 
 void loop()
@@ -653,6 +976,10 @@ void loop()
     if (now - g_last_tally >= TALLY_MS) {
         print_tally(now);
         g_last_tally = now;
+    }
+    if (g_imu.streaming && now - g_last_imu >= IMU_MS) {
+        print_imu(now);
+        g_last_imu = now;
     }
     g_prev = cur;
 }

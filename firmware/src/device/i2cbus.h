@@ -43,6 +43,24 @@ bool catnip_i2c_read_reg(uint8_t addr, uint8_t reg, uint8_t *out);
  * reading a run of registers is taking time from all of them. */
 bool catnip_i2c_read_regs(uint8_t addr, uint8_t reg, uint8_t *out, size_t len);
 
+/* Write `len` bytes to `reg` in one transaction. Returns false when the device
+ * did not acknowledge.
+ *
+ * `len` must fit the Wire library's transmit buffer alongside the register
+ * byte - 128 bytes on this core, so 127 payload bytes at the very most. There
+ * is no check here because the one caller picks its own chunk size and states
+ * it; a driver that hands this a run longer than the bus can carry has a bug
+ * that a silently short write would hide.
+ *
+ * This exists for the IMU. A BMI270 will not produce a single reading until an
+ * 8192-byte configuration image has been pushed into it, and it takes that
+ * image through one register that is written over and over. Sending it with
+ * catnip_i2c_write_reg() would be 8192 separate start-address-data-stop
+ * transactions on a 400 kHz bus the PMIC, the expander, the RTC and the touch
+ * controller also share - most of a second of the bus held for framing rather
+ * than payload, once per boot. */
+bool catnip_i2c_write_regs(uint8_t addr, uint8_t reg, const uint8_t *data, size_t len);
+
 #ifdef __cplusplus
 }
 #endif

@@ -3,10 +3,14 @@ repos:
     rev: v5.0.0
     hooks:
       - id: check-yaml
+      # Vendored upstream keeps upstream's bytes. The pattern covers the whole
+      # of lib/ and every file in it, not just sources by extension: Bosch's
+      # BMI270 LICENSE has no extension, and a hook that "fixes" a licence file
+      # has modified a document nobody here is entitled to modify.
       - id: end-of-file-fixer
-        exclude: '^firmware/lib/(lua|cjson)/.*\.(c|h|hpp)$'
+        exclude: "^firmware/lib/"
       - id: trailing-whitespace
-        exclude: '^firmware/lib/(lua|cjson)/.*\.(c|h|hpp)$'
+        exclude: "^firmware/lib/"
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.30.0
     hooks:
