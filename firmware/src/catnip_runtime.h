@@ -58,6 +58,13 @@ struct lua_State *catnip_rt_lua(catnip_rt *rt);
  * scheduler when an app coroutine faults. */
 void catnip_rt_report_error(catnip_rt *rt, struct lua_State *L);
 
+/* Write one line to the same log the script's print() reaches. This exists for
+ * the parts of the runtime that have something to say without an error object
+ * to say it about - the renderer refusing to create a widget, for instance.
+ * Going through the script's own print() instead would let an app that
+ * reassigns print swallow the firmware's diagnostics. */
+void catnip_rt_log(catnip_rt *rt, const char *msg);
+
 void catnip_rt_free(catnip_rt *rt);
 
 #ifdef __cplusplus

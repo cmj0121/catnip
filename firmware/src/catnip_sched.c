@@ -181,6 +181,47 @@ int catnip_sched_step(catnip_sched *s)
     return resume_app(s);
 }
 
+int catnip_sched_dispatch(void *ud, catnip_rt *rt, int node_ref, const char *event)
+{
+    catnip_sched *s = (catnip_sched *)ud;
+    lua_State *L = catnip_rt_lua(rt);
+    if (!L || node_ref == LUA_NOREF) return -1;
+
+    lua_State *co = lua_newthread(L);
+    int co_ref = luaL_ref(L, LUA_REGISTRYINDEX); /* pin it for the resume */
+    if (s) {
+        *(catnip_sched **)lua_getextraspace(co) = s;
+        lua_sethook(co, wd_hook, LUA_MASKCOUNT, CATNIP_WD_INSTR_PER_HOOK);
+        s->wd_count = 0; /* a fresh budget, exactly as a resume of the app gets */
+    }
+
+    /* ui.fire(node, event) rather than reaching into the node's handlers here:
+     * one path into the tree, and it is the path ui.fire already documents. */
+    lua_getglobal(co, "ui");
+    lua_getfield(co, -1, "fire");
+    lua_remove(co, -2);
+    lua_rawgeti(co, LUA_REGISTRYINDEX, node_ref);
+    lua_pushstring(co, event);
+
+    int nres = 0;
+    int r = lua_resume(co, L, 2, &nres);
+    int rc = 0;
+    if (r == LUA_YIELD) {
+        rc = -1;
+        lua_pushliteral(co, "catnip: a ui handler cannot yield yet - sys.sleep and "
+                            "anything else that waits is not available inside on_* "
+                            "(the handler runs on a one-shot coroutine; #48)");
+        catnip_rt_report_error(rt, co);
+    } else if (r != LUA_OK) {
+        rc = -1;
+        catnip_rt_report_error(rt, co);
+    }
+
+    luaL_unref(L, LUA_REGISTRYINDEX, node_ref); /* the dispatcher owns this ref */
+    luaL_unref(L, LUA_REGISTRYINDEX, co_ref);
+    return rc;
+}
+
 void catnip_sched_free(catnip_sched *s)
 {
     if (!s) return;

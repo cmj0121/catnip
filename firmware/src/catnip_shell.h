@@ -14,6 +14,7 @@
 #include <stddef.h>
 
 #include "catnip_loader.h"
+#include "catnip_render.h"
 #include "catnip_runtime.h"
 #include "catnip_sched.h"
 
@@ -34,6 +35,13 @@ typedef struct catnip_shell catnip_shell;
  * are the scheduler's host hooks. Opens the ui module. Returns NULL on failure. */
 catnip_shell *catnip_shell_new(catnip_rt *rt, const char *apps_root, catnip_now_fn now,
                                catnip_pump_fn pump, void *ud);
+
+/* The backend the running app's screens are drawn through. The shell keeps it
+ * only so that it can tear a finished app's widgets down through the same
+ * vtable that built them; it does not run render passes itself, because the
+ * pass belongs in the main loop next to the display's own step. `be` must
+ * outlive the shell. */
+void catnip_shell_set_backend(catnip_shell *s, const catnip_render_backend *be);
 
 /* Re-scan the apps root. Returns the number of apps found. */
 int catnip_shell_refresh(catnip_shell *s);

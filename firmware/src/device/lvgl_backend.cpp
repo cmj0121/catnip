@@ -1,8 +1,18 @@
 /*
- * lvgl_backend.cpp - STATUS: scaffold, UNTESTED (needs PlatformIO + hardware).
+ * lvgl_backend.cpp - STATUS: superseded scaffold. Does NOT compile.
+ *
  * Issue #30 (device half): a catnip_render_backend that builds real LVGL
- * widgets from the ui.* tree. The traversal is already host-tested in
+ * widgets from the ui.* tree. The traversal and the diff are host-tested in
  * catnip_render.c; this is the thin shim under its vtable.
+ *
+ * What is below predates that vtable. It was written against LVGL 8 names
+ * (lv_btn_create, lv_scr_load) and against a backend of begin_screen / label /
+ * button / end_screen, which had no notion of identity and could not carry an
+ * update, a move or a destroy. Both are gone: see catnip_render.h for the
+ * contract this file has to be rewritten against, and note that lifting the
+ * #ifdef today would not build. The platformio.ini comment saying both
+ * scaffolds compile the moment their guard is lifted is true of shell_ui.cpp
+ * and no longer true of this one.
  */
 #ifdef CATNIP_DEVICE_WIP
 #include <lvgl.h>

@@ -6,11 +6,13 @@
 #include <string.h>
 
 #include "catnip_manifest.h"
+#include "catnip_render.h"
 #include "catnip_ui.h"
 
 struct catnip_shell {
     catnip_rt *rt;
     catnip_sched *sched;
+    const catnip_render_backend *be; /* only for teardown; see the header */
     char apps_root[256];
     catnip_app_entry apps[CATNIP_SHELL_MAX_APPS];
     int n_apps;
@@ -31,6 +33,10 @@ catnip_shell *catnip_shell_new(catnip_rt *rt, const char *apps_root, catnip_now_
         return NULL;
     }
     catnip_ui_open(rt); /* apps get ui.* */
+    /* Handlers run on their own one-shot coroutine with the watchdog armed.
+     * Installing it here is what makes that true for every app the shell
+     * launches, rather than for whichever caller remembered to. */
+    catnip_render_set_dispatch(rt, catnip_sched_dispatch, s->sched);
     snprintf(s->apps_root, sizeof(s->apps_root), "%s", apps_root);
     s->state = CATNIP_SHELL_MENU;
     s->running = -1;
@@ -69,6 +75,12 @@ int catnip_shell_launch(catnip_shell *s, int index, char *errbuf, size_t errlen)
         if (errbuf && errlen) snprintf(errbuf, errlen, "no such app");
         return -1;
     }
+    /* Whatever the last app left on the glass goes before the next one starts.
+     * The Lua heap is accounted, so a tree that survives here is charged to the
+     * app about to run, and the symptom would be that app failing to allocate -
+     * about as far from the cause as a fault can get. */
+    catnip_render_reset(s->rt, s->be);
+
     catnip_manifest m;
     char *code = NULL;
     int rc = catnip_loader_open(s->apps[index].dir, &m, &code, errbuf, errlen);
@@ -103,15 +115,27 @@ int catnip_shell_step(catnip_shell *s)
 
     int st = catnip_sched_step(s->sched);
     if (st == CATNIP_DONE || st == CATNIP_ERROR) {
+        /* The scheduler drops the coroutine, but that does not collect the
+         * widget tree: it is still rooted in the ui module and in the
+         * renderer's own strong table, and the handlers are closures holding
+         * whatever the app captured. Teardown has to be said out loud. */
+        catnip_render_reset(s->rt, s->be);
         s->state = CATNIP_SHELL_MENU; /* app finished or faulted: back to menu */
         s->running = -1;
     }
     return s->state;
 }
 
+void catnip_shell_set_backend(catnip_shell *s, const catnip_render_backend *be)
+{
+    if (!s) return;
+    s->be = be;
+}
+
 void catnip_shell_exit(catnip_shell *s)
 {
     if (!s) return;
+    catnip_render_reset(s->rt, s->be);
     s->state = CATNIP_SHELL_MENU;
     s->running = -1;
 }
