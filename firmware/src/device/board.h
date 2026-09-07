@@ -214,15 +214,19 @@
  *                                 0xA3 = 0x64 and 0xA8 = 0x11, which is what
  *                                 an FT6336 reports
  *   0x51  likely a PCF8563 / BM8563 RTC
- *   0x68  likely an IMU
+ *   0x68  an IMU, and NOT the QMI8658A the vendor's code names: asked for its
+ *                                 identity it reports 0x24 at register 0x00,
+ *                                 where a QMI8658A reports 0x05. What it is
+ *                                 has not been established; device/imu.cpp
+ *                                 dumps the registers that would say.
  *   0x41  unknown
  *
- * The last three are addresses that were seen answering, nothing more. 0x51
- * and 0x68 are the conventional addresses for an RTC and an IMU, which is
- * consistent with what this bus is supposed to carry, but neither chip has
- * been identified by reading a register, and 0x41 has no guess attached at
- * all. Do not let the plausible names harden into facts the way the vendor's
- * pin map did.
+ * The last three are addresses that were seen answering. 0x51 is the
+ * conventional address for an RTC, which is consistent with what this bus is
+ * supposed to carry, but no chip there has been identified by reading a
+ * register, and 0x41 has no guess attached at all. Do not let the plausible
+ * names harden into facts the way the vendor's pin map did - 0x68 is the third
+ * time it did exactly that, after the display's chip-select and the buttons.
  *
  * All three scans - at reset, after the PMIC bring-up, and after the expander
  * bring-up - returned identical lists. The touch controller was answering

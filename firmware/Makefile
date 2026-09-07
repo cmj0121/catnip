@@ -33,6 +33,7 @@ RT_SRC  := $(wildcard $(SRCDIR)/*.c)
 RT_SRC  += $(SRCDIR)/device/input_debounce.c
 RT_SRC  += $(SRCDIR)/device/touch_map.c
 RT_SRC  += $(SRCDIR)/device/diag_layout.c
+RT_SRC  += $(SRCDIR)/device/imu_map.c
 TEST_SRC := $(wildcard test/native/*.c)
 TESTS   := $(patsubst test/native/%.c,$(BUILD)/%,$(TEST_SRC))
 
