@@ -367,9 +367,16 @@ int main(void)
 
     printf("changing directory reuses the rows\n");
     CHECK(select_row("docs") >= 0, "the listing shows the docs folder");
-    CHECK(press("rows", "click") == 4, "entering it costs the difference, not the list");
-    CHECK_OPS("[~title='SD:/docs'~row1='note.txt'-row2-row3]",
-              "the title and the surviving row update, the surplus rows go");
+    /* Entering a folder legitimately updates the list: the selection was on
+     * "docs" and resets to the top of the new listing, so `rows` carries one
+     * update for that. The list keeps its object and its scroll; only the rows
+     * that have no counterpart in the new directory are destroyed. fs.list
+     * returns a sorted listing, so which row "docs" was on - and therefore that
+     * the selection changed at all - does not depend on the host's readdir. */
+    CHECK(press("rows", "click") == 5, "entering it costs the difference, not the list");
+    CHECK_OPS("[~title='SD:/docs'~rows=''~row1='note.txt'-row2-row3]",
+              "the title, the selection reset and the surviving row update, the surplus "
+              "rows go");
     CHECK(obj_handle("row1") == row1, "the row that stayed kept its very object");
     CHECK(obj_handle("rows") == rows, "and so did the list around it");
 
