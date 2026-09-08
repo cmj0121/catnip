@@ -28,6 +28,7 @@
 #include <unistd.h>
 
 #include "catnip_api.h"
+#include "catnip_icon_map.h"
 #include "catnip_render.h"
 #include "catnip_runtime.h"
 #include "catnip_sched.h"
@@ -36,7 +37,7 @@
 #include "lua.h"
 
 #ifndef APP_MAIN
-#define APP_MAIN "../apps/filebrowser/main.lua"
+#define APP_MAIN "apps/filebrowser/main.lua"
 #endif
 
 static int failures;
@@ -152,7 +153,13 @@ static void b_update(void *ud, catnip_handle h, const catnip_node_desc *d)
 {
     (void)ud;
     if (strcmp(desc_name(d), "rows") == 0) g_rows_sel = d->selected;
-    rec("~%s='%s'", obj_name(h), d->text);
+    /* The icon is appended only when there is one, so every transcript written
+     * before icons existed still reads exactly as it did. By name and not by
+     * id: an expected transcript holding a bare 2 would keep passing while
+     * meaning something else the day the enum grows a member in the middle. */
+    if (d->icon != CATNIP_ICON_NONE)
+        rec("~%s='%s':%s", obj_name(h), d->text, catnip_icon_name(d->icon));
+    else rec("~%s='%s'", obj_name(h), d->text);
 }
 static void b_move(void *ud, catnip_handle h, int index)
 {
@@ -196,8 +203,18 @@ static int pass(void)
 }
 
 /* One press: post the event the input layer would post, let the drain run the
- * handler, then reconcile. Exactly the main loop's order. */
+ * handler, then reconcile. Exactly the main loop's order. The joystick names no
+ * row, which is the only thing that separates it from press_at(). */
+static int press_at(const char *object, const char *event, int index);
 static int press(const char *object, const char *event)
+{
+    return press_at(object, event, CATNIP_INDEX_NONE);
+}
+
+/* The same, for an event that names a row - a tap, or the long press that asks
+ * about the selected one. The index is zero-based here and reaches Lua
+ * one-based, exactly as it does on the device. */
+static int press_at(const char *object, const char *event, int index)
 {
     catnip_handle h = obj_handle(object);
     if (h == CATNIP_HANDLE_NONE) {
@@ -205,9 +222,43 @@ static int press(const char *object, const char *event)
         failures++;
         return -1;
     }
-    catnip_render_post(g_rt, h, event);
+    catnip_render_post(g_rt, h, event, index);
     catnip_render_drain(g_rt);
     return pass();
+}
+
+/* One press of B, and then what the shell would do with the answer. There is no
+ * shell in this test, so its three steps are spelled out - and having to spell
+ * them out is the point: this is the contract the app is written against, and
+ * an app that got it wrong would pass a test that only asked what its on_back
+ * returned. Returns 1 when the platform would have closed the app. */
+static int press_back(void)
+{
+    catnip_handle screen = catnip_render_visible_screen(g_rt);
+    if (screen != CATNIP_HANDLE_NONE)
+        catnip_render_post_claimable(g_rt, screen, "back", CATNIP_INDEX_NONE);
+    catnip_render_drain(g_rt);
+    int exited = 0;
+    if (!catnip_render_take_claim(g_rt)) {
+        if (catnip_ui_depth(g_rt) > 1) catnip_ui_pop(g_rt);
+        else exited = 1;
+    }
+    (void)pass();
+    return exited;
+}
+
+/* How many nodes named <prefix>1, <prefix>2, ... are live. The options menu's
+ * length is the assertion, and its length is what "built for this item" means. */
+static int row_count(const char *prefix)
+{
+    char name[32];
+    int n = 0;
+    for (int i = 1; i <= 16; i++) {
+        snprintf(name, sizeof(name), "%s%d", prefix, i);
+        if (obj_handle(name) == CATNIP_HANDLE_NONE) break;
+        n++;
+    }
+    return n;
 }
 
 static int count_ch(const char *s, char ch)
@@ -339,12 +390,24 @@ int main(void)
     CHECK(catnip_rt_dostring(g_rt, app, "=filebrowser") == 0, "file browser app loads");
 
     printf("the screen is built once\n");
-    CHECK(pass() == 10, "loading the app builds the whole screen and nothing more");
-    CHECK_OPS("[+screen@root[0]+title@screen[0]+rows@screen[1]+row1@rows[0]"
-              "+row2@rows[1]+row3@rows[2]+status@screen[2]+up@screen[3]"
-              "+delete@screen[4]+reset@screen[5]!screen]",
-              "a title, a list of three rows, and the buttons that act on them");
+    CHECK(pass() == 6, "loading the app builds the whole screen and nothing more");
     CHECK(pass() == 0, "and a pass that follows costs nothing");
+    /* No Up, no Delete, no Reset card. They are gestures now: B climbs, and a
+     * long press on a row offers what can be done to it. A button that is on
+     * every screen is chrome an app should not be drawing. */
+    CHECK(obj_handle("up") == CATNIP_HANDLE_NONE, "there is no Up button");
+    CHECK(obj_handle("delete") == CATNIP_HANDLE_NONE, "and no Delete button");
+    CHECK(obj_handle("reset") == CATNIP_HANDLE_NONE, "and no Reset card button");
+    /* Nor a title: the header is the frame's, and the app only names it. */
+    CHECK(obj_handle("title") == CATNIP_HANDLE_NONE, "and no title label");
+    catnip_rt_dostring(g_rt, "T = ui.title()", "=q");
+    {
+        lua_State *L0 = catnip_rt_lua(g_rt);
+        lua_getglobal(L0, "T");
+        CHECK(lua_tostring(L0, -1) && strcmp(lua_tostring(L0, -1), "SD:/") == 0,
+              "it named the header through ui.title instead");
+        lua_pop(L0, 1);
+    }
 
     printf("moving the selection\n");
     catnip_handle row1 = obj_handle("row1");
@@ -365,6 +428,20 @@ int main(void)
     press("rows", "prev");
     CHECK(g_rows_sel == 0, "prev at the top of the list stays put");
 
+    printf("a tap names the row it landed on\n");
+    /* The joystick can only move one step at a time; a finger cannot. The whole
+     * reason an event carries an index is that the list has to be told where
+     * the tap was, because the row itself has no handler to tell it. The
+     * selection is on the first row here, and the tap lands on the second - so
+     * a selection that did not move would mean the index went nowhere. */
+    (void)press_at("rows", "click", 1);
+    CHECK(obj_handle("file_text") != CATNIP_HANDLE_NONE, "the tap activated that row");
+    /* Checked after the viewer is closed, not while it is up: a pass only walks
+     * the visible screen, so the list underneath sends nothing until it is the
+     * visible one again. */
+    (void)press_back();
+    CHECK(g_rows_sel == 1, "and left the selection on the row it landed on");
+
     printf("changing directory reuses the rows\n");
     CHECK(select_row("docs") >= 0, "the listing shows the docs folder");
     /* Entering a folder legitimately updates the list: the selection was on
@@ -373,28 +450,31 @@ int main(void)
      * that have no counterpart in the new directory are destroyed. fs.list
      * returns a sorted listing, so which row "docs" was on - and therefore that
      * the selection changed at all - does not depend on the host's readdir. */
-    CHECK(press("rows", "click") == 5, "entering it costs the difference, not the list");
-    CHECK_OPS("[~title='SD:/docs'~rows=''~row1='note.txt'-row2-row3]",
-              "the title, the selection reset and the surviving row update, the surplus "
-              "rows go");
+    /* One fewer call than before the header moved into the frame: the path is
+     * named now, not drawn, so a directory change no longer updates a widget
+     * of the app's own. */
+    CHECK(press("rows", "click") == 4, "entering it costs the difference, not the list");
+    CHECK_OPS("[~rows=''~row1='note.txt':file-row2-row3]",
+              "the selection reset, the surviving row, and the surplus rows go");
     CHECK(obj_handle("row1") == row1, "the row that stayed kept its very object");
     CHECK(obj_handle("rows") == rows, "and so did the list around it");
 
+    printf("B climbs, and only declines at the top of the card\n");
     /* The other direction, which is the case the app's comment is about: the
      * new directory has more rows than there are row nodes, so the surplus are
      * new nodes and have to be created. Everything that was already there is
      * still reused. */
-    CHECK(press("up", "click") == 4, "going back up creates only the rows it gained");
+    CHECK(press_back() == 0, "B inside a folder does not close the app");
     CHECK(count_ch(g_ops, '+') == 2, "two rows created, for the two it did not have");
     CHECK(count_ch(g_ops, '-') == 0, "and nothing destroyed");
     CHECK(obj_handle("row1") == row1, "the first row is still the same object");
+    CHECK(press_back() == 1, "and at the top of the card it declines, so the app closes");
 
     printf("reading a file\n");
     CHECK(select_row("a.txt") >= 0, "a.txt is on the screen");
     (void)press("rows", "click");
-    CHECK_OPS("[+viewer@root[1]+file_name@viewer[0]+file_text@viewer[1]"
-              "+file_back@viewer[2]!viewer]",
-              "opening a file pushes a screen over the browser");
+    CHECK_OPS("[+viewer@root[1]+file_name@viewer[0]+file_text@viewer[1]!viewer]",
+              "opening a file pushes a screen over the browser, with no Back button");
     CHECK(obj_handle("row1") == row1, "the browser underneath keeps its widgets");
     lua_State *L = catnip_rt_lua(g_rt);
     catnip_rt_dostring(g_rt, "VIEW = ui.get('file_text').text", "=q");
@@ -402,35 +482,55 @@ int main(void)
     CHECK(lua_tostring(L, -1) && strcmp(lua_tostring(L, -1), "hello") == 0,
           "and it shows what the file holds");
     lua_pop(L, 1);
-    (void)press("file_back", "click");
-    CHECK_OPS("[-file_name-file_text-file_back-viewer!screen]",
-              "back pops it and the browser is shown again, never rebuilt");
+    CHECK(press_back() == 0, "B closes the viewer rather than the app");
+    CHECK_OPS("[-file_name-file_text-viewer!screen]",
+              "the platform pops it, and the browser is shown again, never rebuilt");
+
+    printf("a long press offers what can be done to that item\n");
+    CHECK(select_row("b.txt") >= 0, "b.txt is on the screen");
+    (void)press_at("rows", "options", g_rows_sel);
+    CHECK(obj_handle("menu_rows") != CATNIP_HANDLE_NONE, "the options are a pushed list");
+    CHECK(obj_handle("row1") == row1, "and the browser under them keeps its widgets");
+    /* A file offers View, Delete and Reset card; a folder offers Open and Reset
+     * card. The menu is built when it is asked for precisely because of this. */
+    CHECK(row_count("act") == 3, "a file offers three actions");
+    CHECK(press_back() == 0, "B closes the menu, not the app");
+
+    CHECK(select_row("docs") >= 0, "and the folder is selectable");
+    (void)press_at("rows", "options", g_rows_sel);
+    CHECK(row_count("act") == 2, "a folder offers two - it cannot be deleted or viewed");
+    CHECK(press_back() == 0, "B closes that menu too");
 
     printf("deleting a file asks first\n");
-    CHECK(select_row("b.txt") >= 0, "b.txt is on the screen");
-    (void)press("delete", "click");
-    CHECK_OPS("[+confirm@root[1]+confirm_text@confirm[0]+confirm_yes@confirm[1]"
-              "+confirm_no@confirm[2]!confirm]",
-              "the question is a pushed screen, not a mode the browser renders");
+    CHECK(select_row("b.txt") >= 0, "b.txt is still on the screen");
+    (void)press_at("rows", "options", g_rows_sel);
+    (void)press_at("menu_rows", "click", 1); /* Delete */
+    CHECK(obj_handle("confirm_text") != CATNIP_HANDLE_NONE,
+          "the question is a pushed screen, not a mode the browser renders");
+    CHECK(obj_handle("confirm_no") == CATNIP_HANDLE_NONE,
+          "and it carries no Cancel button, because B is cancel");
     CHECK(obj_handle("row1") == row1, "so the list keeps its widgets while it is up");
-    (void)press("confirm_no", "click");
+    (void)press_back(); /* the question */
+    (void)press_back(); /* the menu it was asked from */
     catnip_rt_dostring(g_rt, "GONE = not fs.exists('b.txt')", "=q");
     lua_getglobal(L, "GONE");
-    CHECK(!lua_toboolean(L, -1), "cancel leaves the file alone");
+    CHECK(!lua_toboolean(L, -1), "backing out of the question leaves the file alone");
     lua_pop(L, 1);
 
-    CHECK(select_row("b.txt") >= 0, "b.txt is still on the screen");
-    (void)press("delete", "click");
+    CHECK(select_row("b.txt") >= 0, "b.txt is still there");
+    (void)press_at("rows", "options", g_rows_sel);
+    (void)press_at("menu_rows", "click", 1); /* Delete */
     (void)press("confirm_yes", "click");
     catnip_rt_dostring(g_rt, "GONE = not fs.exists('b.txt')", "=q");
     lua_getglobal(L, "GONE");
-    CHECK(lua_toboolean(L, -1), "confirm deletes it");
+    CHECK(lua_toboolean(L, -1), "confirming deletes it");
     lua_pop(L, 1);
-    CHECK(count_ch(g_ops, '-') == 5,
-          "and the row it held is destroyed with the question");
+    CHECK(catnip_ui_depth(g_rt) == 1,
+          "and confirming closes the question and the menu behind it");
 
     printf("resetting the card\n");
-    (void)press("reset", "click");
+    (void)press_at("rows", "options", g_rows_sel);
+    (void)press_at("menu_rows", "click", row_count("act") - 1); /* Reset card is last */
     (void)press("confirm_yes", "click");
     /* #46: sd_reset is not wired up, so this is the only outcome the app can
      * reach today, and it says so rather than refreshing as though it had
@@ -441,7 +541,8 @@ int main(void)
     /* With a card that can be reset, the call still reaches the HAL. There is
      * nothing to assert after it: #46 reboots the device on success. */
     hal.sd_reset = m_sd_reset;
-    (void)press("reset", "click");
+    (void)press_at("rows", "options", g_rows_sel);
+    (void)press_at("menu_rows", "click", row_count("act") - 1);
     (void)press("confirm_yes", "click");
     CHECK(g_reset_calls == 1, "reset SD reached the HAL");
 
