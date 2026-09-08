@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "catnip_render.h"
+
 #include "lauxlib.h"
 #include "lua.h"
 
@@ -181,7 +183,8 @@ int catnip_sched_step(catnip_sched *s)
     return resume_app(s);
 }
 
-int catnip_sched_dispatch(void *ud, catnip_rt *rt, int node_ref, const char *event)
+int catnip_sched_dispatch(void *ud, catnip_rt *rt, int node_ref, const char *event,
+                          int index)
 {
     catnip_sched *s = (catnip_sched *)ud;
     lua_State *L = catnip_rt_lua(rt);
@@ -195,16 +198,20 @@ int catnip_sched_dispatch(void *ud, catnip_rt *rt, int node_ref, const char *eve
         s->wd_count = 0; /* a fresh budget, exactly as a resume of the app gets */
     }
 
-    /* ui.fire(node, event) rather than reaching into the node's handlers here:
-     * one path into the tree, and it is the path ui.fire already documents. */
+    /* ui.fire(node, event, index) rather than reaching into the node's handlers
+     * here: one path into the tree, and it is the path ui.fire already
+     * documents. The sentinel becomes nil rather than -1, so a handler tests
+     * `if index then` and never has to know what "no row" is spelled as in C. */
     lua_getglobal(co, "ui");
     lua_getfield(co, -1, "fire");
     lua_remove(co, -2);
     lua_rawgeti(co, LUA_REGISTRYINDEX, node_ref);
     lua_pushstring(co, event);
+    if (index == CATNIP_INDEX_NONE) lua_pushnil(co);
+    else lua_pushinteger(co, (lua_Integer)index + 1); /* one-based, like Lua */
 
     int nres = 0;
-    int r = lua_resume(co, L, 2, &nres);
+    int r = lua_resume(co, L, 3, &nres);
     int rc = 0;
     if (r == LUA_YIELD) {
         rc = -1;
@@ -215,6 +222,13 @@ int catnip_sched_dispatch(void *ud, catnip_rt *rt, int node_ref, const char *eve
     } else if (r != LUA_OK) {
         rc = -1;
         catnip_rt_report_error(rt, co);
+    } else {
+        /* ui.fire answers `ran, result`. A handler that ran and returned
+         * something truthy is the claim the shell reads after the drain; a
+         * missing handler is `false` and claims nothing, which is what makes an
+         * app with no on_back the ordinary case rather than an error. */
+        if (nres >= 1 && lua_toboolean(co, 1))
+            rc = (nres >= 2 && lua_toboolean(co, 2)) ? 1 : 0;
     }
 
     luaL_unref(L, LUA_REGISTRYINDEX, node_ref); /* the dispatcher owns this ref */

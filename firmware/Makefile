@@ -43,16 +43,22 @@ RT_SRC  += $(SRCDIR)/device/touch_map.c
 RT_SRC  += $(SRCDIR)/device/diag_layout.c
 RT_SRC  += $(SRCDIR)/device/imu_map.c
 RT_SRC  += $(SRCDIR)/device/ui_input_map.c
+RT_SRC  += $(SRCDIR)/device/press_gesture.c
+RT_SRC  += $(SRCDIR)/device/swipe.c
 TEST_SRC := $(wildcard test/native/*.c)
 TESTS   := $(patsubst test/native/%.c,$(BUILD)/%,$(TEST_SRC))
 
-.PHONY: all build test device clean
+.PHONY: all build test device clean check-icons
 all: build
 
 build: $(TESTS)        # compile the runtime + host tests (no run)
 	@echo "== firmware host build ok =="
 
-test: build            # compile, then run the host tests
+check-icons:           # SVG raster must match catnip_icon_bits.h
+	@echo "== checking icon sources =="
+	@python3 tools/gen_icons.py --check
+
+test: build check-icons  # compile, check icon drift, then run the host tests
 	@echo "== running native tests =="
 	@for t in $(TESTS); do echo "-- $$t"; "$$t" || exit 1; done
 	@echo "== all native tests passed =="

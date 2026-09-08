@@ -43,9 +43,19 @@
  * PSRAM and the display buffers are already there (see lvgl_port.cpp and
  * catnip_display_load_frames), so the widget tree belongs there with them.
  *
- * LV_MEM_SIZE is left at LVGL's 64 KB default: this page is a few dozen
- * objects and has never come close to it, and a number invented here would
- * only be a guess wearing a constant's name. */
+ * LV_MEM_SIZE was left at LVGL's 64 KB default while the only client was a
+ * page of a few dozen objects. Decoding an app's icon does not fit in it: a
+ * 70x70 PNG wants a 32 KB inflate window, a 19 KB scanline buffer and a 19 KB
+ * output at once, and that is one icon. The pool overflowed, lodepng returned
+ * an error, and the image simply did not appear - lv_image_decoder_get_info()
+ * kept saying the picture was fine, because reading a header allocates
+ * nothing and only the decode does.
+ *
+ * 512 KB is chosen to be past that class of problem rather than exactly at it:
+ * it is a sixteenth of the PSRAM this pool is carved from, it costs nothing
+ * until it is used, and the alternative - a number that just fits today's
+ * icons - would be the same bug again at the next size. */
+#define LV_MEM_SIZE             (512 * 1024)
 #define LV_MEM_POOL_INCLUDE     <esp_heap_caps.h>
 #define LV_MEM_POOL_ALLOC(size) heap_caps_malloc(size, MALLOC_CAP_SPIRAM)
 
@@ -68,5 +78,15 @@
  * is the same exception the line above already is: a font has to be compiled
  * in, so the only place to ask for one is here. */
 #define LV_FONT_MONTSERRAT_16 1
+
+/* An app's identity icon is a PNG on the card, or compiled in for a built-in
+ * one, and either way it arrives as bytes rather than as an lv_image_dsc_t
+ * somebody generated. lodepng decodes from memory, so no filesystem driver has
+ * to be registered for LVGL to reach the card - the app loader already knows
+ * how to read a file, and hands over what it read.
+ *
+ * It is the only decoder enabled. The twelve platform glyphs are generated into
+ * flash as raw RGB565A8 precisely so that drawing a row costs no decode. */
+#define LV_USE_LODEPNG 1
 
 #endif /* LV_CONF_H */

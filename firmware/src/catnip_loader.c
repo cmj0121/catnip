@@ -51,6 +51,74 @@ static int is_file(const char *path)
     return stat(path, &st) == 0 && S_ISREG(st.st_mode);
 }
 
+/* Present only in a device build: tools/gen_apps.py writes the header and
+ * defines this, so the host build is not silently changed by whether a
+ * generated file happens to be lying around. Its tests drive an app from its
+ * own directory, which is the source these were made from. */
+#ifdef CATNIP_BUILTIN_APPS
+#include "generated/builtin_apps.h"
+#else
+typedef struct {
+    const char *id;
+    const char *name;
+    const char *icon_name;
+    const char *manifest;
+    const char *lua;
+    const unsigned char *icon;
+    size_t icon_len;
+} catnip_builtin_app;
+static const catnip_builtin_app catnip_builtin_apps[1];
+#define CATNIP_BUILTIN_APP_COUNT 0
+#endif
+
+#define BUILTIN_PREFIX "builtin:"
+
+/* Whether a manifest asks for storage. Read off the permissions it already
+ * declares rather than from a new field: an app that says it reads files has
+ * said everything the launcher needs to know about whether it can run without
+ * a card. */
+static int manifest_needs_fs(const catnip_manifest *m)
+{
+    for (int i = 0; i < m->n_permissions; i++)
+        if (strncmp(m->permissions[i], "fs.", 3) == 0) return 1;
+    return 0;
+}
+
+static const catnip_builtin_app *builtin_by_id(const char *id)
+{
+    for (int i = 0; i < CATNIP_BUILTIN_APP_COUNT; i++)
+        if (strcmp(catnip_builtin_apps[i].id, id) == 0) return &catnip_builtin_apps[i];
+    return NULL;
+}
+
+int catnip_loader_builtin(catnip_app_entry *out, int max)
+{
+    int n = 0;
+    for (int i = 0; i < CATNIP_BUILTIN_APP_COUNT && n < max; i++) {
+        const catnip_builtin_app *b = &catnip_builtin_apps[i];
+        catnip_app_entry *e = &out[n];
+        memset(e, 0, sizeof(*e));
+        snprintf(e->id, sizeof(e->id), "%s", b->id);
+        snprintf(e->name, sizeof(e->name), "%s", b->name);
+        snprintf(e->icon, sizeof(e->icon), "%s", b->icon_name);
+        snprintf(e->dir, sizeof(e->dir), BUILTIN_PREFIX "%s", b->id);
+        catnip_manifest m;
+        e->compatible = (catnip_manifest_parse(b->manifest, &m, NULL, 0) == 0) &&
+                        catnip_manifest_compatible(&m);
+        if (e->compatible) e->needs_fs = manifest_needs_fs(&m);
+        n++;
+    }
+    return n;
+}
+
+const unsigned char *catnip_loader_builtin_icon(const char *id, size_t *len)
+{
+    const catnip_builtin_app *b = id ? builtin_by_id(id) : NULL;
+    if (!b || !b->icon) return NULL;
+    if (len) *len = b->icon_len;
+    return b->icon;
+}
+
 int catnip_loader_discover(const char *apps_root, catnip_app_entry *out, int max)
 {
     DIR *d = opendir(apps_root);
@@ -82,6 +150,7 @@ int catnip_loader_discover(const char *apps_root, catnip_app_entry *out, int max
                 snprintf(entry->name, sizeof(entry->name), "%s", m.name);
                 snprintf(entry->icon, sizeof(entry->icon), "%s", m.icon);
                 entry->compatible = catnip_manifest_compatible(&m);
+                entry->needs_fs = manifest_needs_fs(&m);
             } else {
                 snprintf(entry->name, sizeof(entry->name), "%s", "(invalid manifest)");
                 entry->compatible = 0;
@@ -98,6 +167,23 @@ int catnip_loader_open(const char *dir, catnip_manifest *m, char **code, char *e
                        size_t errlen)
 {
     if (!dir || !m || !code) return fail(errbuf, errlen, "bad arguments");
+
+    /* A built-in app has no directory: its manifest and its source are in
+     * flash. Handled here rather than at the call site so the shell launches
+     * both kinds through one path and cannot treat them differently. */
+    if (strncmp(dir, BUILTIN_PREFIX, sizeof(BUILTIN_PREFIX) - 1) == 0) {
+        const catnip_builtin_app *b = builtin_by_id(dir + sizeof(BUILTIN_PREFIX) - 1);
+        if (!b) return fail(errbuf, errlen, "no such built-in app");
+        if (catnip_manifest_parse(b->manifest, m, errbuf, errlen) != 0) return -1;
+        if (!catnip_manifest_compatible(m))
+            return fail(errbuf, errlen, "the app needs a newer catnip");
+        size_t n = strlen(b->lua);
+        char *buf = (char *)malloc(n + 1);
+        if (!buf) return fail(errbuf, errlen, "out of memory");
+        memcpy(buf, b->lua, n + 1);
+        *code = buf;
+        return 0;
+    }
 
     char mpath[320];
     snprintf(mpath, sizeof(mpath), "%s/manifest.json", dir);

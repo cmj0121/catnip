@@ -1,7 +1,10 @@
 /* catnip_ui.c - see catnip_ui.h. The ui framework is written in Lua (below) and
  * loaded into the runtime; the widget tree is plain Lua tables so the renderer
  * and tests can both walk it. */
+#include <stdbool.h>
 #include "catnip_ui.h"
+
+#include <stdio.h>
 
 #include "lauxlib.h"
 #include "lua.h"
@@ -159,7 +162,22 @@ static const char CATNIP_UI_LUA[] =
     "function ui.reset()\n"
     "  state.stack = {}\n"
     "  state.by_id = {}\n"
+    "  state.title = nil\n"
     "end\n"
+    "\n"
+    "-- The app's name in the frame's header. Called with a string it sets one;\n"
+    "-- called with nothing it reads what is set, which is how the platform asks.\n"
+    "-- An app that never calls it keeps the name from its manifest, so a title\n"
+    "-- is a thing an app changes rather than a thing it has to declare.\n"
+    "function ui.title(s)\n"
+    "  if s ~= nil then state.title = tostring(s) end\n"
+    "  return state.title\n"
+    "end\n"
+    "\n"
+    "-- How many screens are stacked. The platform asks when a short B finds\n"
+    "-- nothing claimed: one means the app is at its root and should leave,\n"
+    "-- more means there is a pushed screen for the platform to close.\n"
+    "function ui.depth() return #state.stack end\n"
     "\n"
     "function ui.get(id)  return state.by_id[id] end\n"
     "-- No argument: the visible screen. With one: the n-th screen from the\n"
@@ -170,6 +188,16 @@ static const char CATNIP_UI_LUA[] =
     "  return state.stack[#state.stack]\n"
     "end\n"
     "\n"
+    "-- Run a node's handler for `event`, and answer two things: whether there\n"
+    "-- was one, and what it returned. The second is what makes `back` a\n"
+    "-- negotiation - the platform reads it to learn whether the app climbed a\n"
+    "-- level of its own - and it is why this returns the call rather than\n"
+    "-- swallowing it.\n"
+    "--\n"
+    "-- The handler is called as fn(node, ...): the node it fired on, so a\n"
+    "-- handler can read and write the list it belongs to without the app\n"
+    "-- capturing it in an upvalue, then whatever the event carries - for a tap,\n"
+    "-- the one-based row that was touched.\n"
     "function ui.fire(target, event, ...)\n"
     "  local node = target\n"
     "  if type(target) == 'string' then node = state.by_id[target] end\n"
@@ -177,11 +205,83 @@ static const char CATNIP_UI_LUA[] =
     "  local h = rawget(node, 'handlers')\n"
     "  local fn = h[event] or h['on_' .. event]\n"
     "  if not fn then return false end\n"
-    "  fn(...)\n"
-    "  return true\n"
+    "  return true, fn(node, ...)\n"
     "end\n"
     "\n"
     "return ui\n";
+
+/* Call ui.<name>() with no arguments and leave its one result on the stack.
+ * Returns false with nothing pushed when the module or the function is missing,
+ * which is the state before catnip_ui_open() has run. */
+static bool ui_call(catnip_rt *rt, const char *name)
+{
+    lua_State *L = catnip_rt_lua(rt);
+    if (!L) return false;
+    lua_getglobal(L, "ui");
+    if (!lua_istable(L, -1)) {
+        lua_pop(L, 1);
+        return false;
+    }
+    lua_getfield(L, -1, name);
+    lua_remove(L, -2); /* ui */
+    if (!lua_isfunction(L, -1)) {
+        lua_pop(L, 1);
+        return false;
+    }
+    if (lua_pcall(L, 0, 1, 0) != LUA_OK) {
+        lua_pop(L, 1);
+        return false;
+    }
+    return true;
+}
+
+/* Whether an app has a screen up. The shell asks this when an app's setup code
+ * returns: a UI app builds its screen and lets its main chunk return, living on
+ * through its handlers (which run in the render drain, not on the main
+ * coroutine), so a clean return with a screen means "resident", not "finished".
+ * A script that returns with no screen is genuinely done and goes back to the
+ * menu. */
+bool catnip_ui_has_screen(catnip_rt *rt)
+{
+    if (!ui_call(rt, "root")) return false;
+    lua_State *L = catnip_rt_lua(rt);
+    bool has = lua_istable(L, -1);
+    lua_pop(L, 1);
+    return has;
+}
+
+const char *catnip_ui_title(catnip_rt *rt)
+{
+    if (!ui_call(rt, "title")) return NULL;
+    lua_State *L = catnip_rt_lua(rt);
+    /* Borrowed for the caller's next call and no longer: it is Lua's string,
+     * and the pop below is what lets Lua collect it. Every caller copies it
+     * into the widget it is drawing, which is the same discipline the render
+     * descriptors follow. */
+    const char *t = lua_tostring(L, -1);
+    static char buf[40];
+    if (t) snprintf(buf, sizeof(buf), "%s", t);
+    lua_pop(L, 1);
+    return t ? buf : NULL;
+}
+
+int catnip_ui_depth(catnip_rt *rt)
+{
+    if (!ui_call(rt, "depth")) return 0;
+    lua_State *L = catnip_rt_lua(rt);
+    int depth = (int)lua_tointeger(L, -1);
+    lua_pop(L, 1);
+    return depth;
+}
+
+bool catnip_ui_pop(catnip_rt *rt)
+{
+    if (!ui_call(rt, "pop")) return false;
+    lua_State *L = catnip_rt_lua(rt);
+    bool popped = lua_istable(L, -1);
+    lua_pop(L, 1);
+    return popped;
+}
 
 int catnip_ui_open(catnip_rt *rt)
 {

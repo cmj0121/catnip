@@ -18,6 +18,7 @@
 #include "catnip_menu.h"
 #include "catnip_runtime.h"
 #include "catnip_shell.h"
+#include "catnip_ui.h"
 #include "device/board.h"
 #include "device/diag.h"
 #include "device/display.h"
@@ -25,6 +26,8 @@
 #include "device/ioexp.h"
 #include "device/led.h"
 #include "device/hal_meowkit.h"
+#include "device/app_icon.h"
+#include "device/frame.h"
 #include "device/lvgl_backend.h"
 #include "device/lvgl_port.h"
 #include "device/pmu.h"
@@ -101,6 +104,12 @@ static void enter_diag(void)
      * run. Nothing hands the screen back afterwards and nothing needs to:
      * loop() stops stepping the shell the moment the page is up. */
     if (g_shell) catnip_shell_exit(g_shell);
+    /* And the frame's bar with it. It lives on lv_layer_top(), which is above
+     * every screen including the page's, and the loop's diag branch returns
+     * before the line that would hide it - so a bar left up here would float
+     * over a page whose whole job is to show what the panel is doing, with the
+     * frame testing itself in the top 26 pixels. */
+    catnip_frame_show(false);
     /* Hand the touch panel back before the page takes it: the input layer's LVGL
      * pointer indev would otherwise keep injecting taps onto the page's own
      * screen (#31/#42). Safe on the boot-marker path, where no indev was made. */
@@ -303,18 +312,14 @@ static void fade_in(void)
  * is rebuilt so the line is never briefly blank. */
 static unsigned long g_status_last;
 
+/* The battery in the frame's bar. Every two seconds rather than every pass: the
+ * gauge does not move faster than that and each write invalidates the area. */
 static void update_status(bool force)
 {
-    if (!g_menu) return;
     unsigned long now = millis();
     if (!force && now - g_status_last < 2000) return;
     g_status_last = now;
-
-    int pct = catnip_pmu_battery_percent();
-    char buf[32];
-    if (pct >= 0) snprintf(buf, sizeof(buf), "Battery %d%%", pct);
-    else snprintf(buf, sizeof(buf), "Battery --");
-    catnip_menu_set_status(g_menu, buf);
+    catnip_frame_set_battery(catnip_pmu_battery_percent());
 }
 
 /* (Re)draw the menu with the apps the shell found. Called at boot and every
@@ -326,7 +331,19 @@ static void rebuild_menu(void)
     if (!g_menu || !g_shell) return;
     int n = catnip_shell_count(g_shell);
     const catnip_app_entry *apps = (n > 0) ? catnip_shell_app(g_shell, 0) : nullptr;
-    catnip_menu_show(g_menu, apps, n);
+    /* Before the tree is built, because building it names these. Once per menu
+     * rebuild rather than per frame: an icon is read off the card, and the card
+     * has no business in a render pass. */
+    catnip_app_icons_load(apps, n);
+    /* Asked fresh every rebuild rather than remembered: a card can leave
+     * between one and the next, and an app that needs it has to grey out when
+     * it does. */
+    catnip_menu_show(g_menu, apps, n, catnip_sd_mounted());
+    /* The launcher does not introduce itself in its own bar: it *is* the frame,
+     * so the header is empty rather than naming the device at a user holding
+     * it. An app that takes over says who it is; the launcher has nothing to
+     * add. */
+    catnip_frame_set_title("");
     update_status(true);
 }
 
@@ -424,8 +441,19 @@ void setup()
     rebuild_menu();
 
     /* Expect zero apps until the SD card is mounted (#32). */
-    Serial.printf("[catnip] shell ready, %d app(s) under %s\n",
-                  catnip_shell_count(g_shell), CATNIP_APPS_ROOT);
+    {
+        /* Said apart, because they come from different places and one of them
+         * is there whether or not a card is: a count "under /sd/..." that
+         * included the built-ins would be a line that is not true. */
+        int total = catnip_shell_count(g_shell);
+        int builtin = 0;
+        for (int i = 0; i < total; i++) {
+            const catnip_app_entry *a = catnip_shell_app(g_shell, i);
+            if (a && strncmp(a->dir, "builtin:", 8) == 0) builtin++;
+        }
+        Serial.printf("[catnip] shell ready, %d built-in app(s), %d under %s\n", builtin,
+                      total - builtin, CATNIP_APPS_ROOT);
+    }
 }
 
 void loop()
@@ -453,6 +481,17 @@ void loop()
         return;
     }
 
+    /* The slot, before anything reads it. A card that arrived brings apps with
+     * it and a card that left takes them away, and either way the list on
+     * screen is wrong until it is rebuilt. */
+    if (catnip_sd_poll()) {
+        catnip_meowkit_hal_set_fs(catnip_sd_mounted());
+        if (g_shell && catnip_shell_state(g_shell) != CATNIP_SHELL_RUNNING) {
+            catnip_shell_refresh(g_shell);
+            rebuild_menu();
+        }
+    }
+
     animate();
     poll_power_button();
     catnip_led_breathe();
@@ -466,8 +505,8 @@ void loop()
      * and the touch panel feeds the LVGL pointer indev so a tap activates the
      * button under it. Before the LVGL step, so the touch read the indev makes
      * there is fresh, and before the drain, so a press is delivered this same
-     * frame. It returns true when B was pressed - the request to leave the app. */
-    bool back = (g_rt && g_shell) ? catnip_ui_input_step(g_rt) : false;
+     * frame. What it returns is what B asked for: nothing, back, or home. */
+    int gesture = (g_rt && g_shell) ? catnip_ui_input_step(g_rt) : CATNIP_UI_GESTURE_NONE;
 
     /* A no-op until something brings LVGL up, which on this path is the first
      * widget the menu or an app draws (#30) - the boot animation goes straight
@@ -480,21 +519,31 @@ void loop()
      * in the drain and nowhere else, so they are outside LVGL's dispatch and on
      * the scheduler's watchdog. The menu's on_click latches its pick here; an
      * app's on_* run here too. */
-    if (g_rt) catnip_render_drain(g_rt);
+    int delivered = g_rt ? catnip_render_drain(g_rt) : 0;
 
     /* The menu and a running app are the same kind of tree; which is up is the
      * shell's state, and the transitions between them are here (#33). */
+    bool stepped = false;
     if (g_shell) {
         if (catnip_shell_state(g_shell) == CATNIP_SHELL_RUNNING) {
-            if (back) {
-                /* B leaves the app. Teardown loads the blank screen, so the menu
-                 * has to be rebuilt before the next pass draws it. */
-                catnip_shell_exit(g_shell);
-                rebuild_menu();
-            } else if (catnip_shell_step(g_shell) == CATNIP_SHELL_MENU) {
-                /* The app finished or faulted on its own: same return. */
-                rebuild_menu();
+            int st = CATNIP_SHELL_RUNNING;
+            stepped = true;
+            /* Home first: a gesture that grew into a long press must not also
+             * be read as the short one it passed through. */
+            if (gesture == CATNIP_UI_GESTURE_HOME) {
+                st = catnip_shell_home(g_shell);
+            } else if (gesture == CATNIP_UI_GESTURE_BACK) {
+                /* Here and not earlier: the drain above has just run the app's
+                 * on_back, and this reads what it answered. The app may have
+                 * climbed a level and stayed, in which case the step below still
+                 * runs and nothing else happened. */
+                st = catnip_shell_back(g_shell);
             }
+            if (st == CATNIP_SHELL_RUNNING) st = catnip_shell_step(g_shell);
+            /* Whichever way it ended - B, home, finished, faulted - teardown
+             * loaded the blank screen, so the menu has to be rebuilt before the
+             * next pass draws it. */
+            if (st == CATNIP_SHELL_MENU) rebuild_menu();
         } else {
             /* In the menu. A click has latched which app to launch; the launch
              * tears the menu tree down, so one that then fails to load must put
@@ -506,11 +555,29 @@ void loop()
                     Serial.printf("[catnip] menu: %s could not launch: %s\n", id, err);
                     rebuild_menu();
                 }
-            } else {
-                update_status(false);
             }
         }
     }
 
     if (g_rt && g_be) catnip_render(g_rt, g_be);
+
+    /* The frame, last: the counter it draws is read off the tree the pass above
+     * has just reconciled, so it can never show the previous frame's numbers.
+     * It is hidden until there is a screen to wrap - a bar over a black panel
+     * would be the only thing on it. */
+    update_status(false);
+    catnip_frame_show(catnip_lvgl_backend_active());
+    /* Running an app, the shell answers what the header reads - a title the app
+     * set, else its manifest name - and only after app code could have run,
+     * since that is the only thing that can change the answer and the question
+     * costs a Lua call. In the menu the carousel answers: its cells are
+     * pictures with no captions, so the bar is the only place a name can be. */
+    if (g_shell) {
+        if (catnip_shell_state(g_shell) == CATNIP_SHELL_RUNNING) {
+            if (delivered || stepped) catnip_frame_set_title(catnip_shell_title(g_shell));
+        } else if (g_menu) {
+            catnip_frame_set_title(catnip_menu_focus_name(g_menu));
+        }
+    }
+    catnip_frame_step(g_rt);
 }

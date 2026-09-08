@@ -189,6 +189,11 @@ const catnip_hal *catnip_meowkit_hal_begin(void)
     return &g_hal;
 }
 
+void catnip_meowkit_hal_set_fs(bool available)
+{
+    g_hal.fs_base = available ? CATNIP_SD_MOUNT_POINT : NULL;
+}
+
 void catnip_meowkit_hal_poll(void)
 {
     catnip_input_poll();

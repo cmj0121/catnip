@@ -46,3 +46,33 @@ bool catnip_sd_mounted(void)
 {
     return g_mounted;
 }
+
+/* A second is far longer than a card swap takes to matter and far shorter than
+ * a person's patience, and it keeps a filesystem open off the loop's back. */
+#define SD_POLL_MS 1000
+
+bool catnip_sd_poll(void)
+{
+    static unsigned long last;
+    unsigned long now = millis();
+
+    if (now - last < SD_POLL_MS) return false;
+    last = now;
+
+    if (!g_mounted) return catnip_sd_mount(); /* true only when it just came up */
+
+    /* Mounted: ask the card something. cardType() and cardSize() answer from
+     * what begin() learned and would go on saying a card is there after it has
+     * been pulled out, so the question has to reach the card itself. */
+    File root = SD_MMC.open("/");
+    if (root) {
+        bool ok = root.isDirectory();
+        root.close();
+        if (ok) return false;
+    }
+
+    Serial.println("[catnip] sd: card gone");
+    SD_MMC.end();
+    g_mounted = false;
+    return true;
+}

@@ -13,6 +13,7 @@
  * accident, and so that catnip_render_post() - which may run inside an input
  * callback - reaches the state without interning a string.
  */
+#include "catnip_icon_map.h"
 #include "catnip_render.h"
 
 #include <stdarg.h>
@@ -62,6 +63,10 @@ typedef struct {
      * backend that acts on it is already using it as a key. */
     catnip_node_kind kind;
     catnip_style_role style;
+    catnip_icon icon;
+    catnip_node_layout layout;
+    char *image; /* owned copy of the last image name sent, or NULL */
+    size_t image_cap;
     int selected;
     unsigned flags;
     char *text;      /* owned copy of the last text sent, or NULL */
@@ -71,6 +76,8 @@ typedef struct {
 typedef struct {
     catnip_handle h;
     char event[EVENT_MAX];
+    int index;     /* the child this is about, or CATNIP_INDEX_NONE */
+    int claimable; /* the platform is waiting on this handler's answer */
 } qentry;
 
 typedef struct {
@@ -85,6 +92,7 @@ typedef struct {
 
     catnip_render_dispatch_fn dispatch;
     void *dispatch_ud;
+    int claim; /* a handler returned truthy; read and cleared by take_claim */
 
     catnip_handle order[SLOTS_MAX]; /* focusable handles, in tree order */
     int n_order;
@@ -168,28 +176,44 @@ static catnip_handle handle_at(render_state *st, int i)
  * budget could not see would be lying about the budget. */
 static void text_free(lua_State *L, slot *s)
 {
-    if (!s->text) return;
     void *ud = NULL;
     lua_Alloc f = lua_getallocf(L, &ud);
-    f(ud, s->text, s->text_cap, 0);
-    s->text = NULL;
-    s->text_cap = 0;
+    if (s->text) {
+        f(ud, s->text, s->text_cap, 0);
+        s->text = NULL;
+        s->text_cap = 0;
+    }
+    if (s->image) {
+        f(ud, s->image, s->image_cap, 0);
+        s->image = NULL;
+        s->image_cap = 0;
+    }
+}
+
+static void str_store(lua_State *L, char **dst, size_t *cap, const char *t)
+{
+    size_t n = strlen(t) + 1;
+    if (*cap < n) {
+        void *ud = NULL;
+        lua_Alloc f = lua_getallocf(L, &ud);
+        char *p = (char *)f(ud, *dst, *cap, n);
+        if (!p) { /* keep the old copy; the next pass will try again */
+            return;
+        }
+        *dst = p;
+        *cap = n;
+    }
+    memcpy(*dst, t, n);
 }
 
 static void text_store(lua_State *L, slot *s, const char *t)
 {
-    size_t n = strlen(t) + 1;
-    if (s->text_cap < n) {
-        void *ud = NULL;
-        lua_Alloc f = lua_getallocf(L, &ud);
-        char *p = (char *)f(ud, s->text, s->text_cap, n);
-        if (!p) { /* keep the old copy; the next pass will try again */
-            return;
-        }
-        s->text = p;
-        s->text_cap = n;
-    }
-    memcpy(s->text, t, n);
+    str_store(L, &s->text, &s->text_cap, t);
+}
+
+static void image_store(lua_State *L, slot *s, const char *t)
+{
+    str_store(L, &s->image, &s->image_cap, t);
 }
 
 /* ---- the node tables ---------------------------------------------------- */
@@ -341,6 +365,7 @@ static void desc_build(ctx *c, int node, catnip_node_desc *d)
     d->selected = -1;
     d->id = "";
     d->text = "";
+    d->image = "";
 
     lua_pushstring(L, "kind");
     lua_rawget(L, node);
@@ -362,6 +387,26 @@ static void desc_build(ctx *c, int node, catnip_node_desc *d)
         lua_rawget(L, props);
         d->style = style_of(lua_tostring(L, -1));
         lua_pop(L, 1);
+
+        lua_pushstring(L, "icon");
+        lua_rawget(L, props);
+        d->icon = catnip_icon_from_name(lua_tostring(L, -1));
+        lua_pop(L, 1);
+
+        const char *image = push_raw_str(L, props, "image"); /* stays for the call */
+        if (image) d->image = image;
+
+        if (d->kind == CATNIP_NODE_LIST) {
+            lua_pushstring(L, "layout");
+            lua_rawget(L, props);
+            const char *lay = lua_tostring(L, -1);
+            /* Unknown names fall back to rows, the same promise style roles and
+             * icon names make: a layout a later firmware knows costs an older
+             * one its arrangement, not the app. */
+            d->layout = (lay && strcmp(lay, "carousel") == 0) ? CATNIP_LAYOUT_CAROUSEL
+                                                              : CATNIP_LAYOUT_ROWS;
+            lua_pop(L, 1);
+        }
 
         if (d->kind == CATNIP_NODE_LIST) {
             lua_pushstring(L, "selected");
@@ -394,17 +439,21 @@ static void desc_build(ctx *c, int node, catnip_node_desc *d)
 
 static int desc_same(const slot *s, const catnip_node_desc *d)
 {
-    return s->kind == d->kind && s->style == d->style && s->selected == d->selected &&
-           s->flags == d->flags && s->text != NULL && strcmp(s->text, d->text) == 0;
+    return s->kind == d->kind && s->style == d->style && s->icon == d->icon &&
+           s->layout == d->layout && s->selected == d->selected && s->flags == d->flags &&
+           s->text != NULL && strcmp(s->text, d->text) == 0;
 }
 
 static void desc_store(lua_State *L, slot *s, const catnip_node_desc *d)
 {
     s->kind = d->kind;
     s->style = d->style;
+    s->icon = d->icon;
+    s->layout = d->layout;
     s->selected = d->selected;
     s->flags = d->flags;
     text_store(L, s, d->text);
+    image_store(L, s, d->image);
 }
 
 static int node_dirty(lua_State *L, int node)
@@ -817,6 +866,9 @@ void catnip_render_reset(catnip_rt *rt, const catnip_render_backend *be)
     st->depth = 0;
     st->shown = CATNIP_HANDLE_NONE;
     st->qhead = st->qcount = st->qdropped = 0;
+    /* An unread claim belongs to the app that just went away. Left standing it
+     * would answer the *next* app's first B. */
+    st->claim = 0;
     st->n_order = 0;
     st->deep_reported = 0;
     failed_clear(&c);
@@ -866,7 +918,91 @@ void catnip_render_set_dispatch(catnip_rt *rt, catnip_render_dispatch_fn fn, voi
     st->dispatch_ud = ud;
 }
 
-int catnip_render_post(catnip_rt *rt, catnip_handle h, const char *event)
+catnip_handle catnip_render_visible_screen(catnip_rt *rt)
+{
+    lua_State *L = catnip_rt_lua(rt);
+    if (!L) return CATNIP_HANDLE_NONE;
+    render_state *st = state_peek(L);
+    if (!st) return CATNIP_HANDLE_NONE;
+    /* `shown` and not screens[depth-1]: what the backend was told to show is
+     * what the user is looking at, and the two differ for exactly one pass
+     * after a push, which is a pass in which a press has nowhere sensible to
+     * go anyway. */
+    return slot_of(st, st->shown) ? st->shown : CATNIP_HANDLE_NONE;
+}
+
+int catnip_render_selected(catnip_rt *rt, catnip_handle h)
+{
+    lua_State *L = catnip_rt_lua(rt);
+    if (!L) return CATNIP_INDEX_NONE;
+    render_state *st = state_peek(L);
+    if (!st) return CATNIP_INDEX_NONE;
+    slot *sl = slot_of(st, h);
+    if (!sl || sl->kind != CATNIP_NODE_LIST) return CATNIP_INDEX_NONE;
+    return (sl->selected < 0) ? CATNIP_INDEX_NONE : sl->selected;
+}
+
+int catnip_render_counter(catnip_rt *rt, catnip_handle focus, int *n, int *total)
+{
+    lua_State *L = catnip_rt_lua(rt);
+    if (!L) return 0;
+    render_state *st = state_peek(L);
+    if (!st || st->shown == CATNIP_HANDLE_NONE) return 0;
+
+    /* The focused list wins; otherwise the visible screen's sole list. Two
+     * lists and nothing focused is genuinely ambiguous, and guessing would put
+     * a number in the bar that answers a question the user did not ask. */
+    slot *list = slot_of(st, focus);
+    if (list && list->kind != CATNIP_NODE_LIST) list = NULL;
+    if (!list) {
+        int found = 0;
+        for (int i = 0; i < SLOTS_MAX; i++) {
+            slot *s = &st->slots[i];
+            if (!s->in_use || s->kind != CATNIP_NODE_LIST) continue;
+            if (s->screen != st->shown) continue;
+            list = s;
+            if (++found > 1) return 0;
+        }
+        if (!found) return 0;
+    }
+    if (list->screen != st->shown) return 0;
+    if (list->selected < 0) return 0; /* an empty directory counts nothing */
+
+    catnip_handle h = handle_make((int)(list - st->slots), list->gen);
+    int rows = 0;
+    for (int i = 0; i < SLOTS_MAX; i++)
+        if (st->slots[i].in_use && st->slots[i].parent == h) rows++;
+    if (rows <= 0) return 0;
+
+    if (n) *n = list->selected + 1; /* one-based for display, converted once */
+    if (total) *total = rows;
+    return 1;
+}
+
+catnip_node_layout catnip_render_layout(catnip_rt *rt, catnip_handle h)
+{
+    lua_State *L = catnip_rt_lua(rt);
+    if (!L) return CATNIP_LAYOUT_ROWS;
+    render_state *st = state_peek(L);
+    if (!st) return CATNIP_LAYOUT_ROWS;
+    slot *sl = slot_of(st, h);
+    if (!sl || sl->kind != CATNIP_NODE_LIST) return CATNIP_LAYOUT_ROWS;
+    return sl->layout;
+}
+
+int catnip_render_take_claim(catnip_rt *rt)
+{
+    lua_State *L = catnip_rt_lua(rt);
+    if (!L) return 0;
+    render_state *st = state_peek(L);
+    if (!st) return 0;
+    int c = st->claim;
+    st->claim = 0;
+    return c;
+}
+
+static int post(catnip_rt *rt, catnip_handle h, const char *event, int index,
+                int claimable)
 {
     lua_State *L = catnip_rt_lua(rt);
     if (!L || !event) return -1;
@@ -881,8 +1017,21 @@ int catnip_render_post(catnip_rt *rt, catnip_handle h, const char *event)
     qentry *e = &st->q[(st->qhead + st->qcount) % QUEUE_MAX];
     e->h = h;
     snprintf(e->event, sizeof(e->event), "%s", event);
+    e->index = index;
+    e->claimable = claimable;
     st->qcount++;
     return 0;
+}
+
+int catnip_render_post(catnip_rt *rt, catnip_handle h, const char *event, int index)
+{
+    return post(rt, h, event, index, 0);
+}
+
+int catnip_render_post_claimable(catnip_rt *rt, catnip_handle h, const char *event,
+                                 int index)
+{
+    return post(rt, h, event, index, 1);
 }
 
 int catnip_render_drain(catnip_rt *rt)
@@ -921,7 +1070,12 @@ int catnip_render_drain(catnip_rt *rt)
         }
         int ref = luaL_ref(L, LUA_REGISTRYINDEX); /* the dispatcher owns this */
         if (st->dispatch) {
-            st->dispatch(st->dispatch_ud, rt, ref, e.event);
+            /* The claim is latched rather than returned, because the caller
+             * that cares about it - the shell, deciding whether B was handled -
+             * is not the caller that drains. Only a post that asked to be
+             * answered can set it. */
+            int r = st->dispatch(st->dispatch_ud, rt, ref, e.event, e.index);
+            if (e.claimable && r > 0) st->claim = 1;
             delivered++;
         } else {
             luaL_unref(L, LUA_REGISTRYINDEX, ref);

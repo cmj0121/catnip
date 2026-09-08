@@ -16,6 +16,11 @@
  * well as the centre on purpose: board.h puts the centre on GPIO5 and issue #49
  * suspects GPIO5 is really IR_RX and the centre does not work on this unit, so
  * nothing may depend on the centre alone.
+ *
+ * A held switch means something else, and the two tables here are that: short A
+ * activates and long A asks for the item's options. B is in neither, because
+ * back and home are not delivered to a node at all - there is no node for
+ * "leave" - so they leave through catnip_ui_input_step()'s return instead.
  */
 #ifndef CATNIP_UI_INPUT_MAP_H
 #define CATNIP_UI_INPUT_MAP_H
@@ -33,6 +38,12 @@ extern "C" {
  * ones ui.fire turns into on_prev / on_next / on_click, which is the contract
  * the app is written against. */
 const char *catnip_ui_input_event(catnip_button button);
+
+/* The render event a *held* switch posts, or NULL when holding it means nothing
+ * to a node. A and CENTRE -> "options", which the focused list receives as
+ * on_options(self, index) with the row that was selected; everything else ->
+ * NULL, B included, because holding B is home and home never reaches an app. */
+const char *catnip_ui_input_long_event(catnip_button button);
 
 /* How a switch moves the focus cursor: -1 for LEFT (the previous focusable),
  * +1 for RIGHT (the next), 0 for a switch that does not move focus. */
