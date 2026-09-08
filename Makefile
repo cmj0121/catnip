@@ -14,6 +14,7 @@ build:				# compile the framework for the host only
 	@$(MAKE) -C firmware build
 
 ci:					# every check there is - run this before touching the device
+	@$(MAKE) -C firmware check-icons
 	@$(MAKE) -C firmware build
 	@$(MAKE) -C firmware test
 	@shellcheck scripts/*.sh

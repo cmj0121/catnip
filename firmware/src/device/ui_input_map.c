@@ -14,6 +14,17 @@ const char *catnip_ui_input_event(catnip_button button)
     }
 }
 
+const char *catnip_ui_input_long_event(catnip_button button)
+{
+    switch (button) {
+    /* The same pair as the short press, for the same reason: whatever a user
+     * can activate, they can also ask about, and the centre may be dead. */
+    case CATNIP_BTN_A:
+    case CATNIP_BTN_CENTRE: return "options";
+    default: return (const char *)0;
+    }
+}
+
 int catnip_ui_input_focus_dir(catnip_button button)
 {
     switch (button) {

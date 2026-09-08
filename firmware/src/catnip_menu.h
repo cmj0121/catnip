@@ -18,6 +18,8 @@
 #ifndef CATNIP_MENU_H
 #define CATNIP_MENU_H
 
+#include <stdbool.h>
+
 #include "catnip_loader.h"
 #include "catnip_runtime.h"
 
@@ -35,7 +37,12 @@ catnip_menu *catnip_menu_new(catnip_rt *rt);
  * control first reaches the menu and again every time an app returns to it,
  * because the renderer's teardown between apps has cleared the tree by then.
  * The rows show each app's `name`; a pick is reported by its `id`. */
-void catnip_menu_show(catnip_menu *m, const catnip_app_entry *apps, int n);
+/* `fs_ready` says whether the device has storage right now. An app that asked
+ * for the filesystem and cannot have it is shown dimmed and refuses to launch:
+ * fs.* raises rather than answering "empty" to a device with no card, so
+ * starting such an app would only fault it back to this screen, which reads as
+ * the device ignoring the press. */
+void catnip_menu_show(catnip_menu *m, const catnip_app_entry *apps, int n, bool fs_ready);
 
 /* The id of the app the user activated since the last call, or NULL when none.
  * Reading it clears the latch, so it reports a pick to exactly one caller. The
@@ -43,9 +50,11 @@ void catnip_menu_show(catnip_menu *m, const catnip_app_entry *apps, int n);
  * catnip_menu_show. */
 const char *catnip_menu_take_pick(catnip_menu *m);
 
-/* Replace the status line's text (battery, and whatever else is honest). Safe
- * before the first catnip_menu_show, when it does nothing. */
-void catnip_menu_set_status(catnip_menu *m, const char *text);
+/* The name of the app the carousel is showing, or "" on home. The frame's
+ * header reads it: a carousel cell is a picture and nothing else, so the only
+ * place its name can be is the bar. Unlike the pick, reading this does not
+ * clear it - it is a state, not an event. */
+const char *catnip_menu_focus_name(const catnip_menu *m);
 
 void catnip_menu_free(catnip_menu *m);
 

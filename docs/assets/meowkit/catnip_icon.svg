@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Catnip built-in identity icon (the mascot).
+
+  Canvas: 512x512. This file is the source of truth for
+  docs/assets/meowkit/catnip_icon_70x70.png.
+
+  Convert (do not redraw the PNG by hand):
+    rsvg-convert -w 70 -h 70 -b none \
+      docs/assets/meowkit/catnip_icon.svg \
+      > docs/assets/meowkit/catnip_icon_70x70.png
+
+  Meaning: the round orange cat, one paw waving — the same character as the
+  boot splash, cropped to an app-icon. Navy rounded square is the chrome.
+  Outside the rounded square is transparent.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- chrome -->
+  <rect width="512" height="512" rx="88" fill="#203145"/>
+
+  <!-- left ear -->
+  <path fill="#D1924F" d="M118 210
+    C108 150 92 78 128 58
+    C168 36 198 88 214 150
+    C190 168 148 192 118 210Z"/>
+  <path fill="#E8A090" d="M132 188
+    C128 148 122 98 146 86
+    C168 74 186 112 196 148
+    C176 162 150 178 132 188Z"/>
+
+  <!-- right ear -->
+  <path fill="#D1924F" d="M394 210
+    C404 150 420 78 384 58
+    C344 36 314 88 298 150
+    C322 168 364 192 394 210Z"/>
+  <path fill="#E8A090" d="M380 188
+    C384 148 390 98 366 86
+    C344 74 326 112 316 148
+    C336 162 362 178 380 188Z"/>
+
+  <!-- head -->
+  <ellipse cx="256" cy="268" rx="178" ry="168" fill="#D1924F"/>
+
+  <!-- forehead stripes -->
+  <path fill="#B46F33" d="M236 128 C232 108 240 96 256 96 C272 96 280 108 276 128 C270 148 262 168 256 168 C250 168 242 148 236 128Z"/>
+  <path fill="#B46F33" d="M196 142 C190 128 198 118 210 122 C222 126 228 142 224 156 C218 168 208 172 200 164 C192 156 200 148 196 142Z"/>
+  <path fill="#B46F33" d="M316 142 C322 128 314 118 302 122 C290 126 284 142 288 156 C294 168 304 172 312 164 C320 156 312 148 316 142Z"/>
+
+  <!-- cheek stripes -->
+  <path fill="#B46F33" d="M96 236 C90 228 96 220 112 224 C148 234 168 252 160 264 C152 272 128 258 96 236Z"/>
+  <path fill="#B46F33" d="M102 276 C96 268 104 260 118 264 C150 274 166 292 156 302 C146 310 122 294 102 276Z"/>
+  <path fill="#B46F33" d="M416 236 C422 228 416 220 400 224 C364 234 344 252 352 264 C360 272 384 258 416 236Z"/>
+  <path fill="#B46F33" d="M410 276 C416 268 408 260 394 264 C362 274 346 292 356 302 C366 310 390 294 410 276Z"/>
+
+  <!-- cream muzzle -->
+  <ellipse cx="256" cy="318" rx="112" ry="86" fill="#E8D4B0"/>
+
+  <!-- eyes -->
+  <ellipse cx="200" cy="244" rx="42" ry="48" fill="#FFF8F0"/>
+  <ellipse cx="312" cy="244" rx="42" ry="48" fill="#FFF8F0"/>
+  <ellipse cx="204" cy="250" rx="26" ry="32" fill="#5C3318"/>
+  <ellipse cx="308" cy="250" rx="26" ry="32" fill="#5C3318"/>
+  <ellipse cx="206" cy="254" rx="14" ry="18" fill="#1A0E08"/>
+  <ellipse cx="306" cy="254" rx="14" ry="18" fill="#1A0E08"/>
+  <circle cx="194" cy="236" r="9" fill="#FFFFFF"/>
+  <circle cx="296" cy="236" r="9" fill="#FFFFFF"/>
+  <circle cx="214" cy="262" r="4" fill="#FFFFFF" opacity="0.65"/>
+  <circle cx="316" cy="262" r="4" fill="#FFFFFF" opacity="0.65"/>
+
+  <!-- nose -->
+  <path fill="#C45C4E" d="M256 292
+    C246 292 238 300 238 308
+    C238 316 246 322 256 322
+    C266 322 274 316 274 308
+    C274 300 266 292 256 292Z"/>
+  <ellipse cx="250" cy="304" rx="5" ry="3" fill="#E8A090" opacity="0.7"/>
+
+  <!-- mouth -->
+  <path fill="none" stroke="#6C3112" stroke-width="6" stroke-linecap="round"
+        d="M256 322 L256 338"/>
+  <path fill="none" stroke="#6C3112" stroke-width="6" stroke-linecap="round"
+        d="M256 338 C240 354 222 354 214 344"/>
+  <path fill="none" stroke="#6C3112" stroke-width="6" stroke-linecap="round"
+        d="M256 338 C272 354 290 354 298 344"/>
+
+  <!-- whisker dots -->
+  <circle cx="168" cy="318" r="6" fill="#6C3112"/>
+  <circle cx="152" cy="338" r="6" fill="#6C3112"/>
+  <circle cx="170" cy="356" r="6" fill="#6C3112"/>
+  <circle cx="344" cy="318" r="6" fill="#6C3112"/>
+  <circle cx="360" cy="338" r="6" fill="#6C3112"/>
+  <circle cx="342" cy="356" r="6" fill="#6C3112"/>
+
+  <!-- waving paw (bottom-right, facing us) -->
+  <g transform="translate(300 318) rotate(-12)">
+    <ellipse cx="64" cy="80" rx="68" ry="62" fill="#D1924F"/>
+    <ellipse cx="64" cy="86" rx="44" ry="38" fill="#E8D4B0"/>
+    <circle cx="8" cy="22" r="24" fill="#D1924F"/>
+    <circle cx="48" cy="4" r="24" fill="#D1924F"/>
+    <circle cx="90" cy="4" r="24" fill="#D1924F"/>
+    <circle cx="126" cy="26" r="24" fill="#D1924F"/>
+    <ellipse cx="64" cy="90" rx="22" ry="18" fill="#E89B8C"/>
+    <circle cx="10" cy="24" r="11" fill="#E89B8C"/>
+    <circle cx="48" cy="8" r="11" fill="#E89B8C"/>
+    <circle cx="90" cy="8" r="11" fill="#E89B8C"/>
+    <circle cx="124" cy="28" r="11" fill="#E89B8C"/>
+  </g>
+</svg>

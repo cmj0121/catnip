@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- Sample only. FA rotate: two clockwise arrows. Round tail, sharp head.
+       Catnip stroke and younger green #4ADE80. -->
+  <rect width="128" height="128" fill="#000000"/>
+  <path fill="none" stroke="#4ADE80" stroke-width="16" stroke-linecap="butt"
+        d="M26.145 60.688 A38.000 38.000 0 0 1 85.796 32.872"/>
+  <circle cx="26.145" cy="60.688" r="8.000" fill="#4ADE80"/>
+  <path fill="#4ADE80" d="M95.301 17.554 L108.732 48.932 L74.652 47.043 Z"/>
+  <path fill="none" stroke="#4ADE80" stroke-width="16" stroke-linecap="butt"
+        d="M101.855 67.312 A38.000 38.000 0 0 1 42.204 95.128"/>
+  <circle cx="101.855" cy="67.312" r="8.000" fill="#4ADE80"/>
+  <path fill="#4ADE80" d="M32.699 110.446 L19.268 79.068 L53.348 80.957 Z"/>
+</svg>

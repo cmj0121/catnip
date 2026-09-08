@@ -31,6 +31,12 @@
 
 #include <stdint.h>
 
+#include "../catnip_icon_map.h"
+#include "app_icon.h"
+#include "catnip_icon_img.h"
+#include "../generated/splash_rgb565.h"
+#include "catnip_mascot_img.h"
+#include "frame.h"
 #include "lvgl_backend.h"
 #include "lvgl_port.h"
 
@@ -45,21 +51,29 @@ const int kMaxObjects = 128;
 /* A dark palette, because this panel is read in a room and a white screen on it
  * is a lamp. The values are the same ones the diagnostic page settled on, so
  * the two pages look like the same device. */
-const uint32_t kColBg = 0x000000;      /* the screen behind everything */
+/* Sampled from the mascot's own background rather than chosen: home is a
+ * full-screen picture and the app plane is icons on the ground behind it, and
+ * if those two grounds differ then stepping between them flashes. Black was
+ * fine while nothing full-screen was drawn on it. */
+const uint32_t kColBg = 0x203048;      /* the screen behind everything */
 const uint32_t kColPanel = 0x212421;   /* a raised surface: an ordinary button */
 const uint32_t kColText = 0xFFFFFF;    /* body and title ink */
 const uint32_t kColFaint = 0x7B7D7B;   /* caption ink, and a list's border */
 const uint32_t kColPrimary = 0x00B0FF; /* the affirmative action */
 const uint32_t kColDanger = 0xFF4B3E;  /* the one that cannot be undone */
-const uint32_t kColSelect = 0xFFFFFF;  /* the selected row's fill */
+
+/* How far the landing mascot sits below centre, so the bar does not cross it. */
+const int kMascotDropPx = 20;
 
 struct Entry {
     catnip_handle h;
     catnip_handle parent;
     lv_obj_t *obj;
     catnip_node_kind kind;
-    int selected;   /* list only: the child to highlight, or -1 */
-    bool sel_dirty; /* list only: the highlight has to be re-applied */
+    int selected;              /* list only: the child to highlight, or -1 */
+    catnip_node_layout layout; /* list only: how its children are arranged */
+    bool sel_dirty;            /* list only: the highlight has to be re-applied */
+    bool row;                  /* list child: internal flex row of image + label */
     bool used;
 };
 
@@ -84,6 +98,8 @@ bool g_up;
 lv_obj_t *g_blank;
 
 /* ---- the map ------------------------------------------------------------ */
+
+void apply_list_layout(Entry *e);
 
 Entry *map_find(catnip_handle h)
 {
@@ -178,16 +194,127 @@ void apply_style(Entry *e, catnip_style_role role)
             label, lv_color_hex(fill == kColPanel ? kColText : kColBg), 0);
         return;
     }
-    lv_obj_set_style_text_font(e->obj, role_font(role), 0);
-    lv_obj_set_style_text_color(e->obj, lv_color_hex(role_ink(role)), 0);
+    lv_obj_t *text = e->row ? lv_obj_get_child(e->obj, 1) : e->obj;
+    if (!text) return;
+    lv_obj_set_style_text_font(text, role_font(role), 0);
+    lv_obj_set_style_text_color(text, lv_color_hex(role_ink(role)), 0);
 }
 
-void apply_text(Entry *e, const char *text)
+void apply_text(Entry *e, const char *text, catnip_icon icon, const char *image)
 {
+    lv_obj_t *label = nullptr;
+    lv_obj_t *img = nullptr;
+
+    bool big = false;
+    if (e->row) {
+        Entry *p = map_find(e->parent);
+        big = p && p->layout == CATNIP_LAYOUT_CAROUSEL;
+        img = lv_obj_get_child(e->obj, 0);
+        label = lv_obj_get_child(e->obj, 1);
+    } else if (e->kind == CATNIP_NODE_LABEL) {
+        label = e->obj;
+    } else if (e->kind == CATNIP_NODE_BUTTON) {
+        label = button_label(e->obj);
+    }
+    if (!label) return;
+
     /* lv_label_set_text() copies, which is why nothing here has to think about
-     * the descriptor's strings dying when this call returns. */
-    if (e->kind == CATNIP_NODE_LABEL) lv_label_set_text(e->obj, text);
-    else if (e->kind == CATNIP_NODE_BUTTON) lv_label_set_text(button_label(e->obj), text);
+     * the descriptor's strings dying when this call returns. Colour icons are
+     * an lv_image beside the label, built only for list rows; the node model
+     * still sees one child. */
+    if (e->row) {
+        /* A carousel cell is the whole region: the picture over its name,
+         * centred. A row is a line: the glyph before its name, ranged left. */
+        lv_obj_set_flex_flow(e->obj, big ? LV_FLEX_FLOW_COLUMN : LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(e->obj, big ? LV_FLEX_ALIGN_CENTER : LV_FLEX_ALIGN_START,
+                              LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        /* A carousel cell is the region, so it carries no padding of its own;
+         * the gap under the picture is there only when there is a name. */
+        lv_obj_set_style_pad_all(e->obj, big ? 0 : 2, 0);
+        if (!big) {
+            lv_obj_set_style_pad_ver(e->obj, 9, 0);
+            lv_obj_set_style_pad_left(e->obj, 6, 0);
+            lv_obj_set_style_pad_right(e->obj, 6, 0);
+        }
+        lv_obj_set_style_pad_row(e->obj, 0, 0);
+        /* A carousel cell shows the picture and nothing else: what it is called
+         * is the header's to say, which is where a name is legible and where it
+         * does not steal room from the thing it names. */
+        if (big) lv_obj_add_flag(label, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_remove_flag(label, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_flex_grow(label, big ? 0 : 1);
+        lv_obj_set_width(label, big ? LV_SIZE_CONTENT : LV_PCT(100));
+        lv_obj_set_style_text_align(label,
+                                    big ? LV_TEXT_ALIGN_CENTER : LV_TEXT_ALIGN_LEFT, 0);
+    }
+    lv_label_set_text(label, text);
+    if (!img) return;
+    /* An app's own icon wins over any glyph: a glyph is a category and this is
+     * an identity, and an identity is the more specific answer. A name that
+     * resolves to nothing falls through to the glyph, which is how an app that
+     * shipped no icon.png still gets a picture.
+     *
+     * Source first, alignment second, and the order is the whole thing:
+     * LV_IMAGE_ALIGN_STRETCH works its factor out from the source it can see
+     * when it is set, so asking for it before there is one scales the picture
+     * by nothing and draws a blank. */
+    const void *app_img = catnip_app_icon_find(image);
+    if (app_img) {
+        lv_anim_delete(img, NULL);
+        lv_obj_set_style_translate_y(img, 0, 0);
+        /* Drawn at the size it was made, not scaled to a box. An app icon is
+         * 70 px and the region has room for it, so scaling buys nothing and
+         * costs a transform on every draw - and a transform is the one thing
+         * between "the decoder accepted it" and "it is on the glass" that has
+         * no way to report that it did nothing. */
+        lv_obj_set_size(img, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_image_set_inner_align(img, LV_IMAGE_ALIGN_DEFAULT);
+        lv_image_set_scale(img, 256);
+        lv_image_set_src(img, app_img);
+        lv_obj_remove_flag(img, LV_OBJ_FLAG_HIDDEN);
+    } else if (icon == CATNIP_ICON_MASCOT) {
+        /* The source is the 320x240 splash and the content region is shorter
+         * than that, so it is drawn at half size in a box that fits. At its
+         * own size LVGL clips it to the row rather than shrinking it, which
+         * is a cat nobody can see. */
+        /* The panel's own size: the mascot is the landing page, not a picture
+         * on it, and the frame's bar sits over it on the top layer.
+         *
+         * Nudged down so the cat clears the bar rather than wearing it. It is a
+         * translation and not padding, so the image keeps its full size and the
+         * layout does not have to make room that is not there; the cost is the
+         * same number of pixels off the bottom, where the picture has margin to
+         * spare and the top does not. */
+        lv_obj_set_size(img, CATNIP_SPLASH_W, CATNIP_SPLASH_H);
+        lv_obj_set_style_translate_y(img, kMascotDropPx, 0);
+        lv_animimg_set_src(img, catnip_mascot_anim, CATNIP_MASCOT_FRAMES);
+        lv_animimg_set_duration(img, CATNIP_MASCOT_FRAME_MS * CATNIP_MASCOT_FRAMES);
+        lv_animimg_set_repeat_count(img, LV_ANIM_REPEAT_INFINITE);
+        lv_animimg_start(img);
+        /* STRETCH rather than a scale factor: lv_image_set_scale() turns about
+         * the pivot, which defaults to the middle of the *source*, so halving a
+         * 320x240 image inside a 160x120 box threw the result outside the box
+         * and it was clipped away entirely. This asks LVGL to fit it instead,
+         * and there is no pivot to get wrong. */
+        lv_image_set_inner_align(img, LV_IMAGE_ALIGN_STRETCH);
+        lv_obj_remove_flag(img, LV_OBJ_FLAG_HIDDEN);
+    } else if (icon >= CATNIP_ICON_FOLDER && icon <= CATNIP_ICON_CLOSE) {
+        /* The same twelve shapes at whichever size the shape on screen calls
+         * for: beside a word in a row, alone in the middle of a carousel. */
+        lv_obj_set_size(img, big ? 64 : 14, big ? 64 : 14);
+        /* The box is the source's own size, so nothing is scaled; said out
+         * loud because the same object may have been the mascot a moment ago -
+         * and if it was, its animation is still running and would keep putting
+         * the cat back. */
+        lv_anim_delete(img, NULL);
+        lv_obj_set_style_translate_y(img, 0, 0);
+        lv_image_set_inner_align(img, LV_IMAGE_ALIGN_DEFAULT);
+        lv_image_set_src(img, big ? &catnip_icon_img_64[icon - CATNIP_ICON_FOLDER]
+                                  : &catnip_icon_img_14[icon - CATNIP_ICON_FOLDER]);
+        lv_obj_remove_flag(img, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(img, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 void apply_flags(Entry *e, unsigned flags)
@@ -198,8 +325,14 @@ void apply_flags(Entry *e, unsigned flags)
     if (flags & CATNIP_NODE_HIDDEN) lv_obj_add_flag(e->obj, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_remove_flag(e->obj, LV_OBJ_FLAG_HIDDEN);
 
-    if (flags & CATNIP_NODE_DISABLED) lv_obj_add_state(e->obj, LV_STATE_DISABLED);
+    bool off = (flags & CATNIP_NODE_DISABLED) != 0;
+    if (off) lv_obj_add_state(e->obj, LV_STATE_DISABLED);
     else lv_obj_remove_state(e->obj, LV_STATE_DISABLED);
+    /* LV_STATE_DISABLED changes nothing about an image on its own, and a row
+     * whose whole content is a picture would look exactly like a usable one.
+     * Said here so every kind dims the same way. */
+    lv_obj_set_style_image_opa(e->obj, off ? LV_OPA_30 : LV_OPA_COVER, 0);
+    lv_obj_set_style_opa(e->obj, off ? LV_OPA_50 : LV_OPA_COVER, 0);
 }
 
 /* The whole descriptor, every time, with no second diff. The renderer only
@@ -209,10 +342,14 @@ void apply_flags(Entry *e, unsigned flags)
  * thing and would eventually disagree. */
 void apply_desc(Entry *e, const catnip_node_desc *d)
 {
-    apply_text(e, d->text);
+    apply_text(e, d->text, d->icon, d->image);
     apply_style(e, d->style);
     apply_flags(e, d->flags);
     if (e->kind == CATNIP_NODE_LIST) {
+        if (e->layout != d->layout) {
+            e->layout = d->layout;
+            apply_list_layout(e);
+        }
         e->selected = d->selected;
         e->sel_dirty = true;
     }
@@ -228,18 +365,82 @@ void apply_desc(Entry *e, const catnip_node_desc *d)
  * The layout is forced first because LVGL lays out at render time and this runs
  * before that: without it a row created in this same pass has no position yet
  * and would be scrolled to the wrong place. */
+/* Bring `child` inside `list`'s content area, moving as little as possible.
+ *
+ * lv_obj_scroll_to_view() would do this, and it is not used: it refuses on a
+ * parent without LV_OBJ_FLAG_SCROLLABLE, and that flag is off precisely so a
+ * finger cannot scroll the list. lv_obj_scroll_by() does not consult it, so
+ * the scroll offset remains the platform's to set while the finger's drag
+ * means something else entirely.
+ *
+ * Moving as little as possible is what keeps the position: a row already on
+ * screen moves nothing, so stepping through the middle of a long list does not
+ * jump the view. */
+void scroll_into_view(lv_obj_t *list, lv_obj_t *child)
+{
+    lv_area_t content, row;
+    lv_obj_get_content_coords(list, &content);
+    lv_obj_get_coords(child, &row);
+
+    int32_t dy = 0;
+    if (row.y1 < content.y1) dy = row.y1 - content.y1;
+    else if (row.y2 > content.y2) dy = row.y2 - content.y2;
+    /* Negated: scrolling by a negative dy moves the content up, which is what
+     * brings a row that is below the window into it. */
+    if (dy) lv_obj_scroll_by(list, 0, -dy, LV_ANIM_OFF);
+}
+
+/* A list's own arrangement. Rows stack and scroll; a carousel centres one child
+ * in the whole region and the others are simply not shown - stepping it is a
+ * change of `selected` and nothing else, which is why it needs no second node
+ * kind and no second event. */
+void apply_list_layout(Entry *e)
+{
+    bool carousel = e->layout == CATNIP_LAYOUT_CAROUSEL;
+
+    lv_obj_set_flex_align(e->obj, carousel ? LV_FLEX_ALIGN_CENTER : LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_border_width(e->obj, carousel ? 0 : 1, 0);
+    lv_obj_set_style_pad_all(e->obj, carousel ? 0 : 2, 0);
+
+    /* A carousel takes the whole panel and the bar floats over it, where a
+     * column starts below the bar. The screen is the platform's either way, so
+     * the layout that knows which shape it is, is the thing that says so:
+     * reserving room for the bar and then centring a full-screen mascot in what
+     * was left would put the cat low and crop it. */
+    Entry *screen = map_find(e->parent);
+    if (screen && screen->kind == CATNIP_NODE_SCREEN) {
+        lv_obj_set_style_pad_top(screen->obj, carousel ? 0 : CATNIP_FRAME_BAR_H + 4, 0);
+        lv_obj_set_style_pad_bottom(screen->obj, carousel ? 0 : 6, 0);
+        lv_obj_set_style_pad_left(screen->obj, carousel ? 0 : 6, 0);
+        lv_obj_set_style_pad_right(screen->obj, carousel ? 0 : 6, 0);
+    }
+    e->sel_dirty = true;
+}
+
 void apply_selection(Entry *e)
 {
     uint32_t n = lv_obj_get_child_count(e->obj);
+
+    bool carousel = e->layout == CATNIP_LAYOUT_CAROUSEL;
 
     e->sel_dirty = false;
     lv_obj_update_layout(e->obj);
     for (uint32_t i = 0; i < n; i++) {
         lv_obj_t *child = lv_obj_get_child(e->obj, i);
+        bool on = ((int)i == e->selected);
 
-        if ((int)i == e->selected) {
+        if (carousel) {
+            /* Nothing to contrast with, so nothing is highlighted: the one
+             * child that is shown is the selection. */
+            if (on) lv_obj_remove_flag(child, LV_OBJ_FLAG_HIDDEN);
+            else lv_obj_add_flag(child, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_remove_state(child, LV_STATE_CHECKED);
+            continue;
+        }
+        if (on) {
             lv_obj_add_state(child, LV_STATE_CHECKED);
-            lv_obj_scroll_to_view(child, LV_ANIM_OFF);
+            scroll_into_view(e->obj, child);
         } else {
             lv_obj_remove_state(child, LV_STATE_CHECKED);
         }
@@ -256,7 +457,25 @@ void on_clicked(lv_event_t *ev)
     /* Safe from inside an LVGL callback by contract: it validates the handle,
      * copies the name and returns, and runs no Lua. The handler itself runs
      * from catnip_render_drain() in the main loop. */
-    if (g_rt) catnip_render_post(g_rt, h, "click");
+    if (g_rt) catnip_render_post(g_rt, h, "click", CATNIP_INDEX_NONE);
+}
+
+/* A tap on a row. The row has no handlers of its own and never gets any - it is
+ * a label, and making forty-five of them focusable is what the design refused -
+ * so the event is addressed to the row's *list*, carrying which row it was. The
+ * list is the thing with a selection and a handler, and the index is the only
+ * thing it cannot work out for itself.
+ *
+ * The row's own handle is not used and does not need to exist: what LVGL
+ * carries here is the parent's, stored on the row when it was styled as one, so
+ * a tap costs no lookup. */
+void on_row_clicked(lv_event_t *ev)
+{
+    lv_obj_t *row = lv_event_get_target_obj(ev);
+    lv_obj_t *list = lv_obj_get_parent(row);
+    if (!list || !g_rt) return;
+    catnip_handle h = (catnip_handle)(intptr_t)lv_obj_get_user_data(list);
+    catnip_render_post(g_rt, h, "click", (int)lv_obj_get_index(row));
 }
 
 /* A vertical stack with room to breathe. Shared by the screen and the list,
@@ -267,6 +486,13 @@ void make_column(lv_obj_t *obj, int pad)
     lv_obj_set_style_pad_row(obj, pad, 0);
     lv_obj_set_flex_flow(obj, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_scroll_dir(obj, LV_DIR_VER);
+    /* Nothing scrolls under a finger. A drag is one of the joystick's four
+     * directions (swipe.h), and if LVGL scrolled the viewport as well, the
+     * selection would be left off-screen behind it - which breaks the one rule
+     * the scrolling model rests on: the selection leads and the view follows.
+     * The scroll offset is still ours to set, because lv_obj_scroll_by() does
+     * not consult this flag; only the indev does. */
+    lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
 }
 
 lv_obj_t *make_screen(void)
@@ -278,6 +504,9 @@ lv_obj_t *make_screen(void)
     lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(obj, 0, 0);
     make_column(obj, 6);
+    /* Room for the frame's bar, which is drawn on the top layer above every
+     * screen. The number is the frame's, so the two cannot drift apart. */
+    lv_obj_set_style_pad_top(obj, CATNIP_FRAME_BAR_H + 4, 0);
     return obj;
 }
 
@@ -310,6 +539,49 @@ lv_obj_t *make_label(lv_obj_t *parent)
     return obj;
 }
 
+/* A list row is one node in the tree and two widgets on the panel: a colour
+ * image and the label. The node model has no horizontal container; this is
+ * only how the backend draws `[icon] [name]`. */
+lv_obj_t *make_row(lv_obj_t *parent)
+{
+    lv_obj_t *row = lv_obj_create(parent);
+    lv_obj_t *img;
+    lv_obj_t *label;
+
+    if (!row) return nullptr;
+    lv_obj_set_width(row, LV_PCT(100));
+    lv_obj_set_height(row, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(row, 8, 0);
+    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(row, 0, 0);
+    lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* An animimg rather than an image: its base class *is* lv_image, so every
+     * static icon still goes through lv_image_set_src() and nothing else here
+     * changes. Only the landing mascot ever asks it to move. */
+    img = lv_animimg_create(row);
+    if (!img) {
+        lv_obj_delete(row);
+        return nullptr;
+    }
+    lv_obj_set_size(img, 14, 14);
+    lv_obj_add_flag(img, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(img, LV_OBJ_FLAG_CLICKABLE);
+
+    label = lv_label_create(row);
+    if (!label) {
+        lv_obj_delete(row);
+        return nullptr;
+    }
+    lv_obj_set_flex_grow(label, 1);
+    lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+    lv_obj_remove_flag(label, LV_OBJ_FLAG_CLICKABLE);
+    return row;
+}
+
 lv_obj_t *make_button(lv_obj_t *parent)
 {
     lv_obj_t *obj = lv_button_create(parent);
@@ -337,10 +609,26 @@ lv_obj_t *make_button(lv_obj_t *parent)
  * state. */
 void style_as_row(lv_obj_t *obj)
 {
-    lv_obj_set_style_pad_all(obj, 2, 0);
-    lv_obj_set_style_bg_color(obj, lv_color_hex(kColSelect), LV_STATE_CHECKED);
-    lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, LV_STATE_CHECKED);
-    lv_obj_set_style_text_color(obj, lv_color_hex(kColBg), LV_STATE_CHECKED);
+    /* Tall enough to hit with a finger rather than tight around the text. It is
+     * padding and not a height so that the row grows with whatever font a style
+     * role picks and the text stays centred in it either way; a fixed height
+     * would pin the text to the top of the box the moment the font changed.
+     * The app cannot ask for a row height - this is geometry, and geometry is
+     * the platform's - so it is decided once, here.
+     *
+     * The full width matters as much as the height: a row only as wide as its
+     * text leaves most of the line a dead zone that looks tappable. */
+    lv_obj_set_width(obj, LV_PCT(100));
+    lv_obj_set_style_pad_ver(obj, 9, 0);
+    lv_obj_set_style_pad_left(obj, 6, 0);
+    lv_obj_set_style_pad_right(obj, 6, 0);
+    lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, LV_STATE_CHECKED);
+    lv_obj_set_style_radius(obj, 8, 0);
+    lv_obj_set_style_border_width(obj, 0, 0);
+    lv_obj_set_style_border_width(obj, 2, LV_STATE_CHECKED);
+    lv_obj_set_style_border_color(obj, lv_color_hex(kColPrimary), LV_STATE_CHECKED);
+    lv_obj_set_style_border_opa(obj, LV_OPA_COVER, LV_STATE_CHECKED);
 }
 
 /* ---- the vtable --------------------------------------------------------- */
@@ -384,7 +672,11 @@ int be_create(void *ud, catnip_handle h, catnip_handle parent, int index,
     case CATNIP_NODE_SCREEN: obj = make_screen(); break;
     case CATNIP_NODE_LIST: obj = make_list(parent_obj); break;
     case CATNIP_NODE_BUTTON: obj = make_button(parent_obj); break;
-    default: obj = make_label(parent_obj); break;
+    default:
+        if (parent_entry && parent_entry->kind == CATNIP_NODE_LIST)
+            obj = make_row(parent_obj);
+        else obj = make_label(parent_obj);
+        break;
     }
     if (!obj) {
         map_release(e);
@@ -399,9 +691,16 @@ int be_create(void *ud, catnip_handle h, catnip_handle parent, int index,
     e->obj = obj;
     e->kind = d->kind;
     e->selected = -1;
+    e->row = parent_entry && parent_entry->kind == CATNIP_NODE_LIST &&
+             d->kind == CATNIP_NODE_LABEL;
 
     if (parent_entry && parent_entry->kind == CATNIP_NODE_LIST) {
         style_as_row(obj);
+        /* A row is a touch target even though it is not focusable: a finger can
+         * name a row directly, where the joystick can only step to it. That
+         * asymmetry is the whole reason an event carries an index. */
+        lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(obj, on_row_clicked, LV_EVENT_CLICKED, nullptr);
         parent_entry->sel_dirty = true;
     }
     apply_desc(e, d);
@@ -537,4 +836,9 @@ void catnip_lvgl_backend_focus(catnip_handle h)
     Entry *now = map_find(h);
     if (now) lv_obj_add_state(now->obj, LV_STATE_FOCUSED);
     g_focused = h;
+}
+
+catnip_handle catnip_lvgl_backend_focused(void)
+{
+    return g_focused;
 }

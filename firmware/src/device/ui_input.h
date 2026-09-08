@@ -37,17 +37,37 @@ extern "C" {
  * catnip_i2c_begin(); the LVGL pointer indev is created later, on the first
  * pass that finds LVGL up, because LVGL comes up on the first widget an app
  * draws and not before. */
+/* What one pass of the switches asked for beyond the events it posted. Both are
+ * B: pressed, it is back; held, it is home. Neither is delivered to a node,
+ * because there is no node for "leave this app" - the caller acts on it.
+ *
+ * They are separate values rather than a flag on back, because they are not the
+ * same request with more urgency. Back is a negotiation the app can win by
+ * returning truthy from on_back; home is not a negotiation at all, and no app
+ * code runs before it takes effect. */
+enum {
+    CATNIP_UI_GESTURE_NONE = 0,
+    CATNIP_UI_GESTURE_BACK,
+    CATNIP_UI_GESTURE_HOME,
+};
+
 void catnip_ui_input_begin(void);
 
 /* One pass of UI input against the tree `rt` is rendering. Reads the switches
  * and the touch panel, moves the focus cursor with the joystick's LEFT/RIGHT,
- * posts prev / next / click to the focused node, and paints the focus ring.
- * Returns true when B was pressed, so the caller can leave the running app.
+ * posts prev / next / click / options to the focused node, and paints the focus
+ * ring. Returns one of the CATNIP_UI_GESTURE_* values above for what B asked.
+ *
+ * A short B posts `back` to the visible screen on its way out, so that the
+ * app's on_back runs in the very next drain and the caller can read the answer
+ * with catnip_render_take_claim() in the same pass. Posting it here rather than
+ * leaving it to the caller is what keeps that one-pass ordering true; the
+ * caller still decides what a declined back means.
  *
  * Call it once per loop, before catnip_render_drain(), so a press is delivered
  * in the same frame it was made. It reads each switch edge exactly once, so
  * nothing else may read the switches in the same pass. */
-bool catnip_ui_input_step(catnip_rt *rt);
+int catnip_ui_input_step(catnip_rt *rt);
 
 /* Give the touch panel back: delete the LVGL pointer indev so nothing here
  * feeds LVGL any more. The diagnostic page (#42) owns the panel and reads the

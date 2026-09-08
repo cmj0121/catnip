@@ -27,6 +27,8 @@ Catnip owns the whole on-device experience and exposes a small, stable API surfa
 ┌──────────────────────────────────────────────────┐
 │  Lua apps on SD:  /catnip/apps/<name>/           │ ← anyone writes this
 ├──────────────────────────────────────────────────┤
+│  Built-in apps:   firmware/apps/<name>/          │ ← ships with catnip
+├──────────────────────────────────────────────────┤
 │  Catnip Lua API:   ui.*   device.*   service.*   │ ← the stable contract
 ├──────────────────────────────────────────────────┤
 │  Lua 5.4 VM  (PSRAM heap, cooperative, guarded)  │

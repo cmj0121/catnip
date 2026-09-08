@@ -14,6 +14,7 @@
 #ifndef CATNIP_UI_H
 #define CATNIP_UI_H
 
+#include <stdbool.h>
 #include "catnip_runtime.h"
 
 #ifdef __cplusplus
@@ -23,6 +24,30 @@ extern "C" {
 /* Load the ui module into the runtime. Returns 0 on success, non-zero on error
  * (reported through the runtime log). */
 int catnip_ui_open(catnip_rt *rt);
+
+/* True when an app has a screen up - see catnip_ui.c. The shell uses it to tell
+ * a resident event-driven app from a script that has finished. */
+bool catnip_ui_has_screen(catnip_rt *rt);
+
+/* The title the app set with ui.title(s), or NULL when it never called it and
+ * the manifest's name still stands. The returned string is valid until the next
+ * call - copy it into whatever draws it.
+ *
+ * A title an app *changes* rather than one it has to declare: the File Browser
+ * shows the directory it is in, which is not a fact the manifest can hold. */
+const char *catnip_ui_title(catnip_rt *rt);
+
+/* How many screens are stacked: 0 for an app that has drawn nothing, 1 for one
+ * showing its root, more for each ui.push above it. It is what tells the
+ * platform whether a short B has a screen to pop or has reached the app's root
+ * and should leave. */
+int catnip_ui_depth(catnip_rt *rt);
+
+/* Discard the visible screen, revealing the one beneath. Returns true if there
+ * was one. This is ui.pop() called from the platform rather than by the app:
+ * the app declined the back, so the pop is the platform's default action and
+ * not something the app asked for. */
+bool catnip_ui_pop(catnip_rt *rt);
 
 #ifdef __cplusplus
 }

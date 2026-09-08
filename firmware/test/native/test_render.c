@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "catnip_icon_map.h"
 #include "catnip_render.h"
 #include "catnip_runtime.h"
 #include "catnip_sched.h"
@@ -158,14 +159,20 @@ static int b_create(void *ud, catnip_handle h, catnip_handle parent, int index,
     watch(d);
     rec("+%s@%s[%d]", desc_name(d), obj_name(parent), index);
     if (g_post_rt && g_post_when && strcmp(desc_name(d), g_post_when) == 0)
-        catnip_render_post(g_post_rt, h, "click");
+        catnip_render_post(g_post_rt, h, "click", CATNIP_INDEX_NONE);
     return 0;
 }
 static void b_update(void *ud, catnip_handle h, const catnip_node_desc *d)
 {
     (void)ud;
     watch(d);
-    rec("~%s='%s'", obj_name(h), d->text);
+    /* The icon is appended only when there is one, so every transcript written
+     * before icons existed still reads exactly as it did. By name and not by
+     * id: an expected transcript holding a bare 2 would keep passing while
+     * meaning something else the day the enum grows a member in the middle. */
+    if (d->icon != CATNIP_ICON_NONE)
+        rec("~%s='%s':%s", obj_name(h), d->text, catnip_icon_name(d->icon));
+    else rec("~%s='%s'", obj_name(h), d->text);
 }
 static void b_move(void *ud, catnip_handle h, int index)
 {
@@ -363,13 +370,14 @@ static void test_handles(void)
             "               ui.label{ id = 'b', text = 'b' } }\n");
     (void)pass(rt);
     catnip_handle hb = obj_handle("b");
-    CHECK(catnip_render_post(rt, hb, "click") == 0, "a live handle takes an event");
+    CHECK(catnip_render_post(rt, hb, "click", CATNIP_INDEX_NONE) == 0,
+          "a live handle takes an event");
     CHECK(catnip_render_drain(rt) == 0, "with no dispatcher installed nothing runs");
 
     run(rt, "local c = S.children; c[2] = nil");
     (void)pass(rt);
     CHECK_OPS("[-b]", "dropping a child destroys exactly that one");
-    CHECK(catnip_render_post(rt, hb, "click") == -1,
+    CHECK(catnip_render_post(rt, hb, "click", CATNIP_INDEX_NONE) == -1,
           "the handle of a destroyed node resolves to nothing");
 
     run(rt, "local c = S.children; c[2] = ui.label{ id = 'c', text = 'c' }");
@@ -377,9 +385,10 @@ static void test_handles(void)
     catnip_handle hc = obj_handle("c");
     CHECK((hc & 0xFFFF) == (hb & 0xFFFF), "the new node did reuse the freed slot");
     CHECK(hc != hb, "but its handle is not the old one");
-    CHECK(catnip_render_post(rt, hb, "click") == -1,
+    CHECK(catnip_render_post(rt, hb, "click", CATNIP_INDEX_NONE) == -1,
           "so the stale handle still resolves to nothing, not to its successor");
-    CHECK(catnip_render_post(rt, hc, "click") == 0, "while the new one works");
+    CHECK(catnip_render_post(rt, hc, "click", CATNIP_INDEX_NONE) == 0,
+          "while the new one works");
 
     catnip_rt_free(rt);
 }
@@ -451,9 +460,10 @@ static void test_screen_stack(void)
 /* ---- the event queue ---------------------------------------------------- */
 
 static char g_fired[512];
-static int t_dispatch(void *ud, catnip_rt *rt, int node_ref, const char *event)
+static int t_dispatch(void *ud, catnip_rt *rt, int node_ref, const char *event, int index)
 {
     (void)ud;
+    (void)index;
     lua_State *L = catnip_rt_lua(rt);
     lua_rawgeti(L, LUA_REGISTRYINDEX, node_ref);
     lua_pushstring(L, "id");
@@ -486,9 +496,9 @@ static void test_events(void)
     CHECK(strcmp(g_fired, "go:click ") == 0, "to the node the handle names");
 
     g_fired[0] = '\0';
-    catnip_render_post(rt, obj_handle("go"), "a");
-    catnip_render_post(rt, obj_handle("no"), "b");
-    catnip_render_post(rt, obj_handle("go"), "c");
+    catnip_render_post(rt, obj_handle("go"), "a", CATNIP_INDEX_NONE);
+    catnip_render_post(rt, obj_handle("no"), "b", CATNIP_INDEX_NONE);
+    catnip_render_post(rt, obj_handle("go"), "c", CATNIP_INDEX_NONE);
     CHECK(catnip_render_drain(rt) == 3, "everything queued is delivered");
     CHECK(strcmp(g_fired, "go:a no:b go:c ") == 0, "in the order it was posted");
 
@@ -501,7 +511,7 @@ static void test_events(void)
     for (int i = 0; i < 24; i++) {
         char ev[8];
         snprintf(ev, sizeof(ev), "e%d", i);
-        if (catnip_render_post(rt, obj_handle("go"), ev) == 0) {
+        if (catnip_render_post(rt, obj_handle("go"), ev, CATNIP_INDEX_NONE) == 0) {
             char line[32];
             snprintf(line, sizeof(line), "go:%s ", ev);
             strncat(want, line, sizeof(want) - strlen(want) - 1);
@@ -518,7 +528,7 @@ static void test_events(void)
     /* Queued, then the node goes away before the drain. This is the generation
      * doing its second job. */
     g_fired[0] = '\0';
-    catnip_render_post(rt, obj_handle("go"), "click");
+    catnip_render_post(rt, obj_handle("go"), "click", CATNIP_INDEX_NONE);
     run(rt, "ui.screen{ ui.label{ id = 'other', text = 'o' } }");
     (void)pass(rt);
     CHECK(catnip_render_drain(rt) == 0, "an event for a destroyed node is dropped");
@@ -539,7 +549,7 @@ static void test_dispatch_on_coroutine(void)
             "ui.screen{ ui.button{ id = 'go', text = 'Go',\n"
             "  on_click = function() FIRED = FIRED + 1 end } }\n");
     (void)pass(rt);
-    catnip_render_post(rt, obj_handle("go"), "click");
+    catnip_render_post(rt, obj_handle("go"), "click", CATNIP_INDEX_NONE);
     CHECK(catnip_render_drain(rt) == 1, "the handler is delivered");
     lua_getglobal(L, "FIRED");
     CHECK(lua_tointeger(L, -1) == 1, "and the app's on_click ran");
@@ -551,7 +561,7 @@ static void test_dispatch_on_coroutine(void)
     run(rt, "ui.screen{ ui.button{ id = 'spin', text = 'S',\n"
             "  on_click = function() while true do end end } }\n");
     (void)pass(rt);
-    catnip_render_post(rt, obj_handle("spin"), "click");
+    catnip_render_post(rt, obj_handle("spin"), "click", CATNIP_INDEX_NONE);
     (void)catnip_render_drain(rt);
     CHECK(strstr(g_log, "ran too long") != NULL, "a runaway handler is stopped");
 
@@ -562,7 +572,7 @@ static void test_dispatch_on_coroutine(void)
     run(rt, "ui.screen{ ui.button{ id = 'nap', text = 'N',\n"
             "  on_click = function() sys.sleep(10) end } }\n");
     (void)pass(rt);
-    catnip_render_post(rt, obj_handle("nap"), "click");
+    catnip_render_post(rt, obj_handle("nap"), "click", CATNIP_INDEX_NONE);
     (void)catnip_render_drain(rt);
     CHECK(strstr(g_log, "cannot yield yet") != NULL, "a handler that yields says why");
 
@@ -574,7 +584,7 @@ static void test_dispatch_on_coroutine(void)
             "    ui.push{ id = 'warn', ui.button{ id = 'yes', text = 'Sure?' } }\n"
             "  end } }\n");
     (void)pass(rt);
-    catnip_render_post(rt, obj_handle("open"), "click");
+    catnip_render_post(rt, obj_handle("open"), "click", CATNIP_INDEX_NONE);
     (void)catnip_render_drain(rt);
     (void)pass(rt);
     CHECK_OPS("[+warn@root[1]+yes@warn[0]!warn]",
@@ -585,6 +595,186 @@ static void test_dispatch_on_coroutine(void)
     CHECK_OPS("[-yes-warn!main]", "and popping it destroys only what it built");
 
     catnip_sched_free(sched);
+    catnip_rt_free(rt);
+}
+
+/* ---- what a handler is handed, and what it may answer -------------------- */
+
+static void test_handler_arguments(void)
+{
+    printf("a handler is handed its node and the row an event names\n");
+    catnip_rt *rt = fresh();
+    catnip_sched *sched = catnip_sched_new(rt, NULL, NULL, NULL);
+    catnip_render_set_dispatch(rt, catnip_sched_dispatch, sched);
+    lua_State *L = catnip_rt_lua(rt);
+
+    run(rt,
+        "SELF, IDX = nil, 'unset'\n"
+        "ui.screen{ ui.list{ id = 'rows',\n"
+        "  on_click = function(self, index) SELF, IDX = self, index end,\n"
+        "  ui.label{ id = 'r1', text = 'a' }, ui.label{ id = 'r2', text = 'b' } } }\n");
+    (void)pass(rt);
+
+    /* The joystick names no row: the sentinel has to reach Lua as nil, not as
+     * -1, or every handler would have to know what C spells "no row" as. */
+    catnip_render_post(rt, obj_handle("rows"), "click", CATNIP_INDEX_NONE);
+    (void)catnip_render_drain(rt);
+    run(rt, "SAME = (SELF == ui.get('rows'))");
+    lua_getglobal(L, "SAME");
+    CHECK(lua_toboolean(L, -1), "the handler's first argument is the node it fired on");
+    lua_pop(L, 1);
+    lua_getglobal(L, "IDX");
+    CHECK(lua_isnil(L, -1), "and an event that names no row passes nil");
+    lua_pop(L, 1);
+
+    /* A tap names one, and it arrives one-based, because every other index an
+     * app touches in Lua is. */
+    catnip_render_post(rt, obj_handle("rows"), "click", 1);
+    (void)catnip_render_drain(rt);
+    lua_getglobal(L, "IDX");
+    CHECK(lua_tointeger(L, -1) == 2, "a tap on the second row arrives as 2, not 1");
+    lua_pop(L, 1);
+
+    catnip_sched_free(sched);
+    catnip_rt_free(rt);
+}
+
+static void test_back_claim(void)
+{
+    printf("a handler's return value is the claim the platform reads\n");
+    catnip_rt *rt = fresh();
+    catnip_sched *sched = catnip_sched_new(rt, NULL, NULL, NULL);
+    catnip_render_set_dispatch(rt, catnip_sched_dispatch, sched);
+
+    /* No on_back at all: the ordinary single-screen app. Nothing is claimed, so
+     * the platform's default - leave the app - is what happens, and the app did
+     * not have to write a line for that to be true. */
+    run(rt, "ui.screen{ id = 'plain', ui.label{ text = 'hi' } }");
+    (void)pass(rt);
+    catnip_handle screen = catnip_render_visible_screen(rt);
+    CHECK(screen != CATNIP_HANDLE_NONE, "the visible screen is addressable");
+    catnip_render_post_claimable(rt, screen, "back", CATNIP_INDEX_NONE);
+    (void)catnip_render_drain(rt);
+    CHECK(catnip_render_take_claim(rt) == 0, "an app with no on_back claims nothing");
+
+    /* At the root the File Browser declines, and the platform is meant to act. */
+    run(rt, "AT_ROOT = true\n"
+            "ui.screen{ id = 'browse',\n"
+            "  on_back = function() if AT_ROOT then return false end return true end,\n"
+            "  ui.label{ text = 'SD:/' } }\n");
+    (void)pass(rt);
+    screen = catnip_render_visible_screen(rt);
+    catnip_render_post_claimable(rt, screen, "back", CATNIP_INDEX_NONE);
+    (void)catnip_render_drain(rt);
+    CHECK(catnip_render_take_claim(rt) == 0, "a falsy on_back declines it too");
+
+    /* Above the root it climbs, and says so. */
+    run(rt, "AT_ROOT = false");
+    catnip_render_post_claimable(rt, screen, "back", CATNIP_INDEX_NONE);
+    (void)catnip_render_drain(rt);
+    CHECK(catnip_render_take_claim(rt) == 1, "a truthy on_back claims it");
+    CHECK(catnip_render_take_claim(rt) == 0, "and the claim is cleared as it is read");
+
+    /* A handler that faults claims nothing. The alternative - treating an error
+     * as "handled" - would strand the user in an app whose on_back is broken,
+     * which is exactly when they most want out. */
+    g_log[0] = '\0';
+    run(rt, "ui.screen{ id = 'bad', on_back = function() error('nope') end }");
+    (void)pass(rt);
+    catnip_render_post_claimable(rt, catnip_render_visible_screen(rt), "back",
+                                 CATNIP_INDEX_NONE);
+    (void)catnip_render_drain(rt);
+    CHECK(catnip_render_take_claim(rt) == 0, "a faulting on_back claims nothing");
+
+    /* An ordinary handler that happens to return true is not answering the
+     * platform's question. Left unguarded it would leave a claim standing for
+     * the next B to find, and that B would do nothing at all. */
+    run(rt, "ui.screen{ id = 'chatty', ui.button{ id = 'go', text = 'Go',\n"
+            "  on_click = function() return true end } }\n");
+    (void)pass(rt);
+    catnip_render_post(rt, obj_handle("go"), "click", CATNIP_INDEX_NONE);
+    (void)catnip_render_drain(rt);
+    CHECK(catnip_render_take_claim(rt) == 0, "a handler nobody asked answers nothing");
+
+    catnip_sched_free(sched);
+    catnip_rt_free(rt);
+}
+
+static void test_icons(void)
+{
+    printf("an icon is a named category, and an unknown name costs only the icon\n");
+    catnip_rt *rt = fresh();
+
+    run(rt, "ui.screen{ ui.label{ id = 'a', text = 'docs', icon = 'folder' },\n"
+            "           ui.label{ id = 'b', text = 'note.txt', icon = 'file' },\n"
+            "           ui.label{ id = 'c', text = 'plain' },\n"
+            "           ui.label{ id = 'd', text = 'later', icon = 'hologram' } }\n");
+    (void)pass(rt);
+    CHECK(strstr(g_ops, "+a") != NULL, "a row with an icon renders");
+
+    /* Changing only the icon is a change: without it in the comparison the row
+     * would keep the glyph of whatever it used to be, which is exactly what a
+     * file browser does to every row when it changes directory. */
+    run(rt, "ui.get('a').icon = 'file'");
+    CHECK(pass(rt) == 1, "changing an icon alone is one update");
+    CHECK_OPS("[~a='docs':file]", "and it carries the new glyph");
+
+    run(rt, "ui.get('d').icon = 'unicorn'");
+    CHECK(pass(rt) == 0, "one unknown name for another changes nothing");
+
+    run(rt, "ui.get('c').icon = 'trash'");
+    CHECK(pass(rt) == 1, "adding an icon to a plain row is an update");
+
+    catnip_rt_free(rt);
+}
+
+static void test_counter(void)
+{
+    printf("the frame's counter is derived, and blank when there is nothing to count\n");
+    catnip_rt *rt = fresh();
+    int n = 0, total = 0;
+
+    /* No list on the screen: blank, and emphatically not 0/0. A zero would read
+     * as a list that is empty rather than as a screen that has no list. */
+    run(rt, "ui.screen{ ui.label{ id = 'just_text', text = 'hello' } }");
+    (void)pass(rt);
+    CHECK(catnip_render_counter(rt, CATNIP_HANDLE_NONE, &n, &total) == 0,
+          "a screen with no list counts nothing");
+
+    run(rt, "ui.screen{ ui.list{ id = 'rows', selected = 2,\n"
+            "  ui.label{ id = 'r1' }, ui.label{ id = 'r2' }, ui.label{ id = 'r3' },\n"
+            "  ui.label{ id = 'r4' } } }\n");
+    (void)pass(rt);
+    CHECK(catnip_render_counter(rt, CATNIP_HANDLE_NONE, &n, &total) == 1,
+          "the sole list is the one counted, with nothing focused");
+    CHECK(n == 2 && total == 4, "and it reads 2/4, one-based for display");
+
+    /* Focus on something that is not a list keeps the count on the list: the
+     * user has not left it, they are still looking at it. */
+    CHECK(catnip_render_counter(rt, obj_handle("r1"), &n, &total) == 1 && n == 2,
+          "a focus that is not a list does not blank the counter");
+
+    run(rt, "ui.get('rows').selected = 4");
+    (void)pass(rt);
+    (void)catnip_render_counter(rt, CATNIP_HANDLE_NONE, &n, &total);
+    CHECK(n == 4 && total == 4, "moving the selection moves the counter");
+
+    /* An empty directory: the list is there and has nothing selected. */
+    run(rt, "local l = ui.get('rows') l:set_children({}) l.selected = 0");
+    (void)pass(rt);
+    CHECK(catnip_render_counter(rt, CATNIP_HANDLE_NONE, &n, &total) == 0,
+          "an empty list counts nothing rather than 0/0");
+
+    /* Two lists and no focus is genuinely ambiguous, and a guess would put a
+     * number in the bar answering a question nobody asked. */
+    run(rt, "ui.screen{ ui.list{ id = 'a', selected = 1, ui.label{ id = 'a1' } },\n"
+            "           ui.list{ id = 'b', selected = 1, ui.label{ id = 'b1' } } }\n");
+    (void)pass(rt);
+    CHECK(catnip_render_counter(rt, CATNIP_HANDLE_NONE, &n, &total) == 0,
+          "two lists and nothing focused counts nothing");
+    CHECK(catnip_render_counter(rt, obj_handle("b"), &n, &total) == 1 && total == 1,
+          "but the focused one settles it");
+
     catnip_rt_free(rt);
 }
 
@@ -751,6 +941,10 @@ int main(void)
     test_screen_stack();
     test_events();
     test_dispatch_on_coroutine();
+    test_handler_arguments();
+    test_back_claim();
+    test_icons();
+    test_counter();
     test_teardown();
     test_ids_and_focus();
     test_string_lifetime();

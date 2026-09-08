@@ -43,4 +43,10 @@ const catnip_hal *catnip_meowkit_hal_begin(void);
  * seconds, and the switches are plain pins that touch no bus at all. */
 void catnip_meowkit_hal_poll(void);
 
+/* Point fs.* at the card, or take it away. Called when the slot changes: an
+ * app's access to storage is exactly as removable as the card is, and leaving
+ * fs_base naming a mount point that is not there is the failure hal_meowkit.cpp
+ * refuses at boot for the same reason. */
+void catnip_meowkit_hal_set_fs(bool available);
+
 #endif /* CATNIP_HAL_MEOWKIT_H */

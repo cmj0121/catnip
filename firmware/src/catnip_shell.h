@@ -59,6 +59,42 @@ int catnip_shell_launch_id(catnip_shell *s, const char *id, char *errbuf, size_t
  * faults. Returns the shell state. */
 int catnip_shell_step(catnip_shell *s);
 
+/* What the frame's header should read: the title the running app set with
+ * ui.title(), else the manifest name of the app that is running, else "" for
+ * the menu - the launcher does not introduce itself in its own bar.
+ *
+ * It lives here because the shell is what knows which app is running. The
+ * caller had to scan the app list by id to answer it, one line before handing
+ * the same id to launch, which then scanned it again; and the precedence
+ * between a manifest name and a title an app set was policy living in a loop
+ * body rather than anywhere a test could reach it. */
+const char *catnip_shell_title(const catnip_shell *s);
+
+/* Act on a short B, after the drain that ran the app's on_back. Returns the
+ * shell state.
+ *
+ * The order is the contract, and it is three steps: an app that claimed the
+ * back has already climbed a level of its own and is left alone; otherwise a
+ * screen pushed above the app's root is popped, so a context menu or a "Delete
+ * this?" is cancelled by B without the app writing anything; otherwise the app
+ * is at its root and it leaves. That last step is what B did unconditionally
+ * before, which is why an app that writes no on_back is unaffected by any of
+ * this.
+ *
+ * It must be called after catnip_render_drain(), because the claim it reads is
+ * what the app's on_back returned in that drain. Called at any other point it
+ * would read the answer to the previous question. */
+int catnip_shell_back(catnip_shell *s);
+
+/* Act on a long B: leave whatever is running, whatever it was doing, and go
+ * home. Returns the shell state.
+ *
+ * No app code runs first and there is no handler to consult - that is the whole
+ * point of it. A user who is lost inside a stack of pushed screens, or in an
+ * app whose on_back is wrong, has one gesture that always works, and it is only
+ * always true because the app is never asked. */
+int catnip_shell_home(catnip_shell *s);
+
 /* Stop the running app and return to the menu. */
 void catnip_shell_exit(catnip_shell *s);
 

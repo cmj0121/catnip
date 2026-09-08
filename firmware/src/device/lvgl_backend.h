@@ -59,6 +59,11 @@ void catnip_lvgl_backend_redraw(void);
  * last call costs nothing, so the caller need not track what it last focused. */
 void catnip_lvgl_backend_focus(catnip_handle h);
 
+/* Which handle the ring is on, or CATNIP_HANDLE_NONE. The frame asks, because
+ * the counter follows the list the user is navigating and the cursor is what
+ * says which that is. */
+catnip_handle catnip_lvgl_backend_focused(void);
+
 #ifdef __cplusplus
 }
 #endif

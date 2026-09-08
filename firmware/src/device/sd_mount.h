@@ -33,6 +33,20 @@ bool catnip_sd_mount(void);
 /* True once the card is mounted. */
 bool catnip_sd_mounted(void);
 
+/* Look at the slot and report whether what is in it changed since the last
+ * look. True means "rescan": a card arrived and its apps should appear, or one
+ * left and they should go.
+ *
+ * There is no card-detect pin on this board - board.h has CLK, CMD and D0 and
+ * nothing else - so presence is asked by transaction rather than read off a
+ * wire: an unmounted slot is offered a mount, and a mounted one is asked to
+ * open its root. Rate-limited inside, so the caller may put it in the loop
+ * without thinking about how often.
+ *
+ * It also moves the HAL's fs_base, because a card that arrives is worth nothing
+ * to an app until fs.* stops answering "fs not available". */
+bool catnip_sd_poll(void);
+
 #ifdef __cplusplus
 }
 #endif

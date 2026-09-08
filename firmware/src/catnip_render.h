@@ -67,6 +67,62 @@ typedef enum {
     CATNIP_STYLE_DANGER,
 } catnip_style_role;
 
+/* A glyph a row or button wears in front of its text. Like a style role it is
+ * a *name from a fixed set*, resolved by the backend with the fonts, and an
+ * unknown name from Lua degrades to NONE rather than raising - so an app
+ * written against a later firmware loses its icon on an older one instead of
+ * failing to open.
+ *
+ * It is an id and not a string on purpose. The set is small, bounded and the
+ * platform's, so it needs no allocation, no lifetime discipline and no cache of
+ * its own in the slot; the app names a *category* here, and the one image an
+ * app supplies is its manifest identity icon, which is a different mechanism.
+ */
+typedef enum {
+    /* Nothing to draw. An icon name this firmware does not know resolves here,
+     * so an app written against a later one loses its icon rather than failing
+     * to open - and it loses it silently, because a row that quietly has no
+     * glyph is better than forty-five rows each wearing a "missing" box.
+     *
+     * That is not the same as CATNIP_ICON_PLACEHOLDER, which is for a slot that
+     * must show something and has nothing to show. */
+    CATNIP_ICON_NONE = 0,
+    CATNIP_ICON_FOLDER,
+    CATNIP_ICON_FILE,
+    /* The slot is filled, but by nothing in particular: an app that shipped no
+     * icon.png, an image that would not decode. It says "something belongs
+     * here" where NONE says "nothing does". */
+    CATNIP_ICON_PLACEHOLDER,
+    CATNIP_ICON_IMAGE,
+    CATNIP_ICON_AUDIO,
+    CATNIP_ICON_SETTINGS,
+    CATNIP_ICON_EDIT,
+    CATNIP_ICON_TRASH,
+    CATNIP_ICON_REFRESH,
+    CATNIP_ICON_WARNING,
+    CATNIP_ICON_OK,
+    CATNIP_ICON_CLOSE,
+
+    /* The mascot, and not one of the twelve drawn glyphs: it is a platform
+     * image rather than a category, it is the only thing here that is a
+     * picture of something, and it is drawn at whatever size the shape on
+     * screen gives it rather than at 14 beside a word. It sits after CLOSE so
+     * the twelve keep their codepoints. */
+    CATNIP_ICON_MASCOT,
+} catnip_icon;
+
+/* How a list arranges its children. The node is the same either way - the same
+ * `selected`, the same events, the same rows underneath - and only the flow
+ * differs, which is why this is a property rather than a second node kind.
+ *
+ * ROWS is a column of `[icon] [name]` lines, the ordinary case. CAROUSEL shows
+ * one child at a time, filling the region, and steps sideways: it is what the
+ * home screen is, and what "one icon" in the spec's main region means. */
+typedef enum {
+    CATNIP_LAYOUT_ROWS = 0, /* the fallback, and therefore value 0 */
+    CATNIP_LAYOUT_CAROUSEL,
+} catnip_node_layout;
+
 enum {
     /* Set on the kinds that can take input - button and list - unless the node
      * is hidden or disabled. The backend builds its input group out of these
@@ -96,7 +152,16 @@ typedef struct {
                        * a key: `id` is optional and nothing enforces that it is
                        * unique, so identity is the node table instead. */
     const char *text; /* "" when absent. */
-    int selected;     /* list only: the selected child, as a zero-based index to
+    catnip_icon icon; /* the glyph in front of the text, or NONE */
+    /* An image to draw instead of that glyph, named rather than pointed at:
+     * "" for none. The platform decides what a name resolves to, the same way
+     * it decides what `folder` looks like - so an app names its own identity
+     * icon and never hands the renderer a pointer to pixels.
+     *
+     * Borrowed for the length of the call, like `text` and `id`. */
+    const char *image;
+    catnip_node_layout layout; /* list only: how its children are arranged */
+    int selected;              /* list only: the selected child, as a zero-based index to
                        * match `index` below, or -1 for none. Lua's `selected`
                        * prop is one-based like every other Lua index; the
                        * renderer converts, so a backend never has to. */
@@ -198,17 +263,38 @@ int catnip_render_focus_order(catnip_rt *rt, catnip_handle *out, int max);
 
 /* --- input --- */
 
+/* The `index` of an event that names no child. It is what every event carried
+ * before rows became touchable, and it is what reaches Lua as `nil`. */
+#define CATNIP_INDEX_NONE (-1)
+
 /*
  * Queue `event` (a short name such as "click") for the node behind `h`. Safe to
  * call from inside an LVGL event callback: it validates the handle, copies the
  * name, and returns. It runs no Lua and cannot re-enter. Returns 0 if queued,
  * -1 for a stale handle, -2 if the queue is full.
  *
+ * `index` is the zero-based child this event is about, or CATNIP_INDEX_NONE.
+ * It exists for one reason: a tap lands on a row, but a row is not focusable
+ * and has no handlers, so the event goes to the row's *list* and the index is
+ * the only way that list can know which row was touched. The joystick's own
+ * prev/next/click name no child and pass the sentinel, which is why a handler
+ * written before this existed still sees exactly what it did.
+ *
  * A full queue drops the *newest* and logs once per drain. Dropping the oldest
  * would reorder a sequence, and a "release" delivered without its "press" is
  * worse than a press that did not register.
  */
-int catnip_render_post(catnip_rt *rt, catnip_handle h, const char *event);
+int catnip_render_post(catnip_rt *rt, catnip_handle h, const char *event, int index);
+
+/* The same, for the one event whose *answer* the platform reads back: `back`.
+ * The handler's return value is latched for catnip_render_take_claim().
+ *
+ * Marking it at the post rather than by name in the drain keeps the renderer
+ * from knowing what "back" is, and it is what stops an unrelated handler from
+ * answering a question it was never asked - an on_click that happens to return
+ * true would otherwise leave a claim standing for the next B to find. */
+int catnip_render_post_claimable(catnip_rt *rt, catnip_handle h, const char *event,
+                                 int index);
 
 /*
  * Deliver everything queued, and return how many were delivered. Call it in the
@@ -232,17 +318,74 @@ int catnip_render_post(catnip_rt *rt, catnip_handle h, const char *event);
 int catnip_render_drain(catnip_rt *rt);
 
 /* What actually runs a handler. It is handed a registry ref to the node, which
- * it owns and must release with luaL_unref. Returns 0 if the handler ran.
+ * it owns and must release with luaL_unref. The handler is called as
+ * `fn(node, index)`, so an app reads the node it was fired on as `self` and the
+ * touched row as the second argument; a handler that declares neither is
+ * unaffected, which is why adding both broke no app.
  *
  * It is a function pointer because where a handler runs is staged: today the
  * device installs catnip_sched_dispatch(), which resumes it once on its own
  * coroutine with the watchdog armed - so a runaway handler is stopped, and a
  * handler that yields fails loudly instead of silently. Making it yieldable
  * needs the scheduler to grow a run queue, which is #9's contract rather than
- * this one's; when it does, one line of wiring changes and no contract does. */
+ * this one's; when it does, one line of wiring changes and no contract does.
+ *
+ * It reports three outcomes rather than two, because one event needs the
+ * handler's answer and not merely the fact that it ran: 0 for a handler that
+ * ran and returned falsy, 1 for one that ran and returned something truthy, and
+ * negative for a handler that faulted or was not there at all. `back` is what
+ * that distinction is for - see catnip_render_take_claim(). */
 typedef int (*catnip_render_dispatch_fn)(void *ud, catnip_rt *rt, int node_ref,
-                                         const char *event);
+                                         const char *event, int index);
 void catnip_render_set_dispatch(catnip_rt *rt, catnip_render_dispatch_fn fn, void *ud);
+
+/* The handle of the screen the backend was last told to show, or
+ * CATNIP_HANDLE_NONE before anything was drawn. It is the node a screen-wide
+ * event - `back` - is posted to, since the visible screen is the only thing the
+ * platform can address without the app naming something. */
+catnip_handle catnip_render_visible_screen(catnip_rt *rt);
+
+/* The list behind `h`'s selected child, as a zero-based index, or
+ * CATNIP_INDEX_NONE for a node that is not a list, has nothing selected, or is
+ * gone. It reads the descriptor the renderer already caches, so it costs no
+ * Lua: the platform needs it to say *which* item a long press was about, and
+ * asking Lua from inside the input layer would run app code on the wrong side
+ * of the drain. */
+int catnip_render_selected(catnip_rt *rt, catnip_handle h);
+
+/* How the list behind `h` arranges its children, or CATNIP_LAYOUT_ROWS for
+ * anything that is not a list. The input layer asks, because a carousel is
+ * stepped with left and right where a column is stepped with up and down -
+ * the same `prev`/`next` either way, reached by whichever direction the shape
+ * on screen makes obvious. */
+catnip_node_layout catnip_render_layout(catnip_rt *rt, catnip_handle h);
+
+/* The `N/total` the frame draws for the list the user is navigating: `n` is the
+ * one-based selected row and `total` the row count. Returns 1 when there is a
+ * counter to draw and 0 when there is not, in which case the frame leaves that
+ * region blank rather than showing `0/0`.
+ *
+ * Which list: the focused one when `focus` names a list, else the only list on
+ * the visible screen, else none. Stepping the focus onto a button therefore
+ * keeps the counter on the list rather than blanking it, because the user has
+ * not left the list - they are still looking at it.
+ *
+ * The frame derives this rather than the app supplying it. An API that set the
+ * counter text would scatter the one-based conversion the renderer already does
+ * once, and would let two apps disagree about what `total` counts. */
+int catnip_render_counter(catnip_rt *rt, catnip_handle focus, int *n, int *total);
+
+/* Whether the handler of a claimable post returned something truthy, cleared as
+ * it is read.
+ *
+ * It exists so that `back` can be a negotiation without the platform having to
+ * run a handler synchronously: B posts `back`, the drain runs on_back on the
+ * watchdogged coroutine like every other handler, and the caller reads the
+ * answer here afterwards - in the same pass, because the drain is upstream of
+ * the shell in the loop. No claim (no handler, a fault, a falsy return) leaves
+ * this 0, which is what makes "an app that wrote no on_back" the default rather
+ * than a special case. */
+int catnip_render_take_claim(catnip_rt *rt);
 
 #ifdef __cplusplus
 }

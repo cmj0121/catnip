@@ -68,7 +68,8 @@ int catnip_sched_step(catnip_sched *s);
  * the scheduler to hold a queue of runnable coroutines instead of one, which is
  * this file's contract to change and not the renderer's; #48 does it, and then
  * the only thing that changes here is which function is installed. */
-int catnip_sched_dispatch(void *ud, catnip_rt *rt, int node_ref, const char *event);
+int catnip_sched_dispatch(void *ud, catnip_rt *rt, int node_ref, const char *event,
+                          int index);
 
 void catnip_sched_free(catnip_sched *s);
 
