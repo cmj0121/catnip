@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <path fill="#A78BFA" fill-rule="nonzero"
+        d="M35.800 58.300 L80.500 8.000 A18.000 18.000 0 0 1 107.500 32.000 L62.800 82.300 Z"/>
+  <path fill="#A78BFA" fill-rule="nonzero"
+        d="M28.500 66.500 L55.500 90.500 L21.000 102.000 Z"/>
+  <path fill="#A78BFA" fill-rule="nonzero"
+        d="M62.000 102.000 H112.000 A7.000 7.000 0 0 1 112.000 116.000 H62.000 A7.000 7.000 0 0 1 62.000 102.000 Z"/>
+</svg>

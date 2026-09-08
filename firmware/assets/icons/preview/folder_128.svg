@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- catnip icon master: folder. Solid single fill, 128x128.
+       #3D9EFF azure — high-tech, distinct from kColPrimary #00B0FF.
+       Stepped tab (no cardboard slope), large body radius. -->
+  <path fill="#3D9EFF"
+        d="M28 22
+           H56
+           A10 10 0 0 1 66 32
+           V36
+           A6 6 0 0 0 72 42
+           H90
+           A20 20 0 0 1 110 62
+           V88
+           A20 20 0 0 1 90 108
+           H38
+           A20 20 0 0 1 18 88
+           V32
+           A10 10 0 0 1 28 22
+           Z"/>
+</svg>
