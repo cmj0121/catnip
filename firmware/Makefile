@@ -64,6 +64,12 @@ TESTS   := $(patsubst test/native/%.c,$(BUILD)/%,$(TEST_SRC))
 # and the device would come to be laid out by different versions. That makes
 # these tests conditional: a clone that has never run `pio` has no LVGL, and
 # `make test` still runs everything else and says which one it skipped.
+# The mascot and splash arrays the backend draws are generated from the
+# committed artwork at build time (tools/gen_assets.py, a PlatformIO pre-script)
+# and are gitignored - so a fresh checkout, which is what CI is, does not have
+# them until something runs the generator. The device build runs it through
+# SCons; the host layout build runs it here, because it pulls the same C in.
+GEN_ASSETS := $(SRCDIR)/generated/splash_rgb565.h
 LVGL_DIR := .pio/libdeps/$(PIO_ENV)/lvgl
 LVGL_SRC := $(shell find $(LVGL_DIR)/src -name '*.c' 2>/dev/null)
 LVGL_LIB := $(BUILD)/liblvgl.a
@@ -133,12 +139,19 @@ LAYOUT_INC    := -Itest/host $(INC) $(LV_INC)
 # -MMD -MP so an edited header rebuilds what included it. Without it these
 # objects went stale silently, and a layout test that answers from a stale
 # object is worse than no layout test - it reports on a build nobody has.
-$(BUILD)/obj/%.c.o: %.c | $(BUILD)
+# The generated asset headers, produced by the same script the device build
+# uses, so the host and the device draw the same arrays. Once - the stamp is one
+# of the headers it writes.
+$(GEN_ASSETS):
+	@echo "== generating asset headers for the host build =="
+	@python3 tools/gen_assets.py
+
+$(BUILD)/obj/%.c.o: %.c $(GEN_ASSETS) | $(BUILD)
 	@mkdir -p $(dir $@)
 	$(CC) $(CSTD) $(WARN) $(OPT) -MMD -MP $(PLAT_DEFS) $(LV_DEFS) $(LAYOUT_INC) \
 		-c $< -o $@
 
-$(BUILD)/obj/%.cpp.o: %.cpp | $(BUILD)
+$(BUILD)/obj/%.cpp.o: %.cpp $(GEN_ASSETS) | $(BUILD)
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXSTD) $(WARN) $(OPT) -MMD -MP $(PLAT_DEFS) $(LV_DEFS) $(LAYOUT_INC) \
 		-c $< -o $@
