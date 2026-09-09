@@ -360,7 +360,10 @@ come back to the middle to change the brightness.
 
 Settings is the platform's own page, in the **Values** shape above, and it is not
 an app: it is not in the grid, it cannot be pinned, and nothing you write can
-replace it. **The grid is the exception to "down is settings"**: inside it, down
+replace it. **Down again** — when no column is live — reaches the device info
+page: the version, the chip, what is free, what is answering on the bus. The
+stack goes down and B climbs back up it one level at a time, while long B
+returns to the cat from any depth. **The grid is the exception to "down is settings"**: inside it, down
 is the next row, because a rule that let a long list fall out of itself while
 being scrolled would cost more than the one gesture it saves.
 
