@@ -135,6 +135,39 @@ optional.
 | Long B           | home — the cat, from any depth                                       | nothing; the platform keeps it         |
 | Hold power       | power off                                                            | nothing; the PMIC keeps it             |
 
+### The device says which of them do anything
+
+Four small arrows in the bottom-left corner, one per direction, **lit when that
+direction does something here and dimmed when it does not**.
+
+```text
+        ▲          up      dimmed on the cat: the grid it opens is not built yet
+      ◄   ►        left/right   lit: they step the ring
+        ▼          down    lit: it reaches the device page
+```
+
+The dimming is the whole point, and it is why the hint exists at all. Several
+directions do nothing depending on where you are — up on the cat has no grid to
+open, a page of two buttons has nothing for up and down to move, and the ring at
+the last stop has nowhere further right to go. On a device with no hint, a
+direction that does nothing is indistinguishable from one that has stopped
+listening, and the second is what a user concludes.
+
+**Nothing declares it.** The answers are derived from the tree: a direction is
+lit when the focused node has a handler for what that direction posts, plus the
+platform's own bindings on top. The same function answers the press, so an arrow
+cannot be lit for something that does nothing — a page that gains an `on_next`
+gains its arrow with no line written anywhere.
+
+**A and B are not on it.** They are the two gestures that mean the same thing
+everywhere — activate, and leave — and a hint is for what changes.
+
+It is drawn by the platform on the top layer, like the bar, so no app can draw
+one, move one, or discover whether one is up. The corner it occupies is reserved
+the way the bar's height is: a canvas's bottom line starts to the right of it, and
+a column leaves room below. **A `frame: "bare"` app reserves neither**, because
+no bar and no hint are drawn over one.
+
 **A swipe is not a new gesture.** It is the joystick, made with a finger: swipe
 up and down where you would push up and down, left and right the same. Touch and
 the joystick are two ways of saying the same small vocabulary, which is already
