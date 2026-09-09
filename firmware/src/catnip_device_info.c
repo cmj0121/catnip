@@ -18,7 +18,7 @@ static const char CATNIP_INFO_LUA[] =
     "function __catnip_info_build(lines, action)\n"
     "  local rows = {}\n"
     "  for i, line in ipairs(lines) do\n"
-    "    rows[i] = ui.label{ id = 'info' .. i, text = line, style = 'caption' }\n"
+    "    rows[i] = ui.label{ id = 'info' .. i, text = line }\n"
     "  end\n"
     "  local act = nil\n"
     "  if action then\n"

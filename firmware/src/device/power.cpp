@@ -1,11 +1,18 @@
 /* power.cpp - see power.h. */
 #include <Arduino.h>
+#include <driver/gpio.h>
+#include <esp_system.h>
 
 #include "board.h"
 #include "power.h"
 
 void catnip_power_hold(void)
 {
+    /* Before the pinMode, because a held pad ignores what is written to it: if
+     * the boot before this one restarted deliberately, the hold is still on and
+     * has been keeping the board alive since. Released now that this boot is
+     * about to take the pin over properly. */
+    gpio_hold_dis((gpio_num_t)CATNIP_PIN_PWR_HOLD);
     pinMode(CATNIP_PIN_PWR_HOLD, OUTPUT);
     digitalWrite(CATNIP_PIN_PWR_HOLD, HIGH);
     /* GPIO10 is the vendor's PWR_ON. Nothing reads it - the button reaches the
@@ -30,4 +37,12 @@ void catnip_power_off(void)
     for (;;) {
         delay(100);
     }
+}
+
+void catnip_power_restart(void)
+{
+    /* The pad keeps driving high through the reset, so the rail is never
+     * interrupted and the board comes back rather than going out. */
+    gpio_hold_en((gpio_num_t)CATNIP_PIN_PWR_HOLD);
+    esp_restart();
 }

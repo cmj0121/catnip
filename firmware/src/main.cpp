@@ -26,6 +26,8 @@
 #include "device/diag.h"
 #include "device/display.h"
 #include "device/i2cbus.h"
+#include "device/input.h"
+#include "device/press_gesture.h"
 #include "device/ioexp.h"
 #include "device/led.h"
 #include "device/hal_meowkit.h"
@@ -119,6 +121,32 @@ static bool g_animating = true;
 /* Hand the screen to the input diagnostic (#42). The boot animation stops the
  * same way it will when the shell takes over (#33): g_animating goes false and
  * stays false, so nothing repaints the mascot over the page. */
+/* Set across a restart and cleared by the boot that honours it.
+ *
+ * RTC memory is exactly the right lifetime for this: it survives a software
+ * reset and not a power cycle, so "skip the diagnostic this once" means this
+ * once. Without it, leaving the page on a device whose card carries the
+ * marker file would come straight back to the page, and the way out would not
+ * be a way out. RTC_NOINIT_ATTR rather than RTC_DATA_ATTR so a cold boot leaves
+ * whatever noise is in the cell rather than being zeroed into a valid-looking
+ * value - which is why the flag is a magic number and not a bool. */
+RTC_NOINIT_ATTR static uint32_t g_skip_diag;
+#define SKIP_DIAG_MAGIC 0xCA7B0075u
+
+/* B's press timer while the diagnostic page is up. Separate from ui_input's,
+ * which is not running then. */
+static catnip_press g_press_diag;
+
+static void catnip_reboot_to_normal(void)
+{
+    Serial.println("[catnip] diag: leaving, restarting into the shell");
+    Serial.flush();
+    g_skip_diag = SKIP_DIAG_MAGIC;
+    /* Not ESP.restart(): this board switches itself off when the rail's hold
+     * pin is let go, and a bare reset lets go of it. See power.h. */
+    catnip_power_restart();
+}
+
 static void enter_diag(void)
 {
     if (catnip_diag_active()) return;
@@ -440,7 +468,7 @@ static void enter_info(void)
      * catnip_diag_begin() takes the screen and keeps it, so there is no way out
      * of that page short of a reboot. Saying so on the row is cheaper than
      * making the page leavable, and much cheaper than not saying so. */
-    catnip_device_info_show(g_info, ptrs, n, "Input diagnostic - reboot to leave");
+    catnip_device_info_show(g_info, ptrs, n, "Input diagnostic - hold B to return");
     catnip_frame_set_title("Device");
 }
 
@@ -532,7 +560,13 @@ void setup()
          * would only delay the page and then compete with it for the screen.
          * The other way in - typing "diag" - is in loop(), because it has to
          * work on a device with no card in the slot. */
-        if (catnip_diag_marker_present()) {
+        if (g_skip_diag == SKIP_DIAG_MAGIC) {
+            /* Left the page on purpose a moment ago. Cleared here so it is one
+             * boot's reprieve and not a mode - the marker file still means what
+             * it says on the boot after this one. */
+            g_skip_diag = 0;
+            Serial.println("[catnip] diag: marker present, skipped once by request");
+        } else if (catnip_diag_marker_present()) {
             Serial.println("[catnip] diag: " CATNIP_DIAG_MARKER_PATH " is on the card");
             enter_diag();
             return;
@@ -605,6 +639,18 @@ void loop()
         catnip_lvgl_step();
         poll_power_button();
         catnip_led_breathe();
+        /* Holding B is the way out, and the way out is a restart: the page took
+         * lv_screen_active() and keeps it, so there is nothing to give back.
+         *
+         * Long B rather than a button on the page, because long B is already
+         * "home, and the platform's alone" everywhere else - and the diagnostic
+         * page's home is a device that has started again. It is read here and
+         * not in diag.cpp so that the page keeps knowing nothing about what is
+         * above it; the switch it is reading is one it also draws, which is its
+         * own confirmation that the press registered. */
+        if (catnip_press_step(&g_press_diag, catnip_input_down(CATNIP_BTN_B),
+                              (unsigned)millis()) == CATNIP_PRESS_LONG)
+            catnip_reboot_to_normal();
         return;
     }
 
