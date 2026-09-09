@@ -56,6 +56,11 @@ enum {
      * down is still the next row, which is why a long list cannot fall into
      * the settings page by being scrolled too far. */
     CATNIP_UI_GESTURE_SETTINGS,
+    /* Down again, on the preference page: the device info page (#69). Produced
+     * whenever a mixer is focused, and the platform decides whether it means
+     * anything - the same down is also how a live column's value is lowered,
+     * and only the page knows whether one is live. */
+    CATNIP_UI_GESTURE_INFO,
 };
 
 void catnip_ui_input_begin(void);

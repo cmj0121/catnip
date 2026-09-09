@@ -12,18 +12,32 @@ void catnip_i2c_begin(void)
     delay(200);
 }
 
-void catnip_i2c_scan(void)
+int catnip_i2c_present(uint8_t *out, int max)
 {
-    Serial.print("[catnip] i2c:");
     int found = 0;
+
     for (uint8_t addr = 0x08; addr < 0x78; addr++) {
         Wire.beginTransmission(addr);
-        if (Wire.endTransmission() == 0) {
-            Serial.printf(" 0x%02X", addr);
-            found++;
-        }
+        if (Wire.endTransmission() != 0) continue;
+        if (out && found < max) out[found] = addr;
+        found++;
     }
+    return found;
+}
+
+void catnip_i2c_scan(void)
+{
+    uint8_t addrs[16];
+    int found = catnip_i2c_present(addrs, (int)(sizeof(addrs) / sizeof(addrs[0])));
+    int shown = found < (int)(sizeof(addrs) / sizeof(addrs[0]))
+                    ? found
+                    : (int)(sizeof(addrs) / sizeof(addrs[0]));
+
+    Serial.print("[catnip] i2c:");
+    for (int i = 0; i < shown; i++)
+        Serial.printf(" 0x%02X", addrs[i]);
     if (!found) Serial.print(" (nothing responded)");
+    else if (shown < found) Serial.printf(" and %d more", found - shown);
     Serial.println();
 }
 

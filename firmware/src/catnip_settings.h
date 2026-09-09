@@ -46,6 +46,15 @@ void catnip_settings_show(catnip_settings *s, const catnip_config *cfg);
  * shown. Owned by the page; valid until the next catnip_settings_show. */
 const catnip_config *catnip_settings_config(const catnip_settings *s);
 
+/* Whether a column is live - chosen with A or a tap, and therefore the thing up
+ * and down are currently the value of.
+ *
+ * The platform asks because down means two things on this page: the value of a
+ * live column, or - when none is - the way on to the device info page. One
+ * gesture, two meanings, and the state the page is already in decides which.
+ * Not a state, so reading it changes nothing. */
+bool catnip_settings_editing(const catnip_settings *s);
+
 /* Whether anything has been stepped since this was last asked. Reading clears
  * it, so a caller that saves on the way out saves once, and a page nobody
  * touched costs no flash write at all. */

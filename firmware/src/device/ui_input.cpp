@@ -277,6 +277,12 @@ int catnip_ui_input_step(catnip_rt *rt)
      * out is the gesture that must never be the one that loses. */
     if (carousel && dpad_down) return CATNIP_UI_GESTURE_SETTINGS;
 
+    /* And down on a mixer offers the page below it. Offered rather than
+     * decided: the same press has already been posted as "lower", and whether
+     * that meant anything is the page's to say. A drag is not this - a finger
+     * travelling down a column is setting it, not leaving. */
+    if (mixer && !dragged && dpad_down) return CATNIP_UI_GESTURE_INFO;
+
     return CATNIP_UI_GESTURE_NONE;
 }
 

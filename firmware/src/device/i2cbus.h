@@ -25,6 +25,13 @@ void catnip_i2c_begin(void);
  * dead bus from a device on a rail that is still off. */
 void catnip_i2c_scan(void);
 
+/* The same sweep, answered rather than printed: fills `out` with the addresses
+ * that acknowledged, up to `max`, and returns how many. The device info page
+ * asks it again rather than reading what the boot scan found, because a bus is
+ * a live thing - a part that has stopped answering since boot is exactly what
+ * somebody reading that page is looking for. */
+int catnip_i2c_present(uint8_t *out, int max);
+
 /* One-byte register access, the shape every chip on this bus speaks. Both
  * return false when the device did not acknowledge. */
 bool catnip_i2c_write_reg(uint8_t addr, uint8_t reg, uint8_t value);

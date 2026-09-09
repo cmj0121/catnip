@@ -16,6 +16,8 @@
 #include "catnip_api.h"
 #include "catnip_config.h"
 #include "catnip_menu.h"
+#include "catnip_device_info.h"
+#include "generated/version.h"
 #include "catnip_settings.h"
 #include "catnip_runtime.h"
 #include "catnip_shell.h"
@@ -34,6 +36,7 @@
 #include "device/pmu.h"
 #include "device/sd_mount.h"
 #include "device/power.h"
+#include "device/i2cbus.h"
 #include "device/prefs.h"
 #include "device/ui_input.h"
 #include "generated/anim_f01_rgb565.h"
@@ -60,7 +63,17 @@ static catnip_menu *g_menu;
  * about running an app, and this runs nothing - it is another platform screen
  * beside the menu, reached from the home section by pushing down. */
 static catnip_settings *g_settings;
-static bool g_in_settings;
+static catnip_device_info *g_info;
+/* Which platform screen is up. Three values rather than a flag each, because
+ * two flags can be true at once and this cannot: the launcher, the preference
+ * page and the device info page are one stack, and each is reached by going
+ * down from the one before it. */
+enum catnip_page {
+    PAGE_HOME = 0, /* the launcher carousel */
+    PAGE_PREF,
+    PAGE_INFO,
+};
+static catnip_page g_page;
 /* Something was stepped and has not been written down yet. Kept here rather
  * than read off the page, because the page's own dirty flag is consumed every
  * pass to apply the change to the hardware, and saving happens once, later. */
@@ -337,8 +350,8 @@ static void rebuild_menu(void);
  * on the same renderer, and neither is an app. */
 static void enter_settings(void)
 {
-    if (!g_settings || g_in_settings) return;
-    g_in_settings = true;
+    if (!g_settings || g_page != PAGE_HOME) return;
+    g_page = PAGE_PREF;
     g_settings_unsaved = false;
     catnip_settings_show(g_settings, &g_cfg);
     catnip_frame_set_title("Preference");
@@ -348,8 +361,8 @@ static void enter_settings(void)
  * rather than on every step: see prefs.h. */
 static void leave_settings(void)
 {
-    if (!g_in_settings) return;
-    g_in_settings = false;
+    if (g_page != PAGE_PREF) return;
+    g_page = PAGE_HOME;
     if (g_settings_unsaved) {
         const catnip_config *cfg = catnip_settings_config(g_settings);
         if (cfg) {
@@ -359,6 +372,76 @@ static void leave_settings(void)
         g_settings_unsaved = false;
     }
     rebuild_menu();
+}
+
+/* What this device is, written out. Asked afresh every time the page is opened
+ * rather than kept: half of it moves (the battery, the free heap, what is
+ * answering on the bus) and a page of facts that were true a while ago is
+ * worse than no page at all.
+ *
+ * The strings are built here and not in catnip_device_info.c because every one
+ * of these questions is the device's to answer, and that file has no business
+ * knowing what a PSRAM is. */
+static void enter_info(void)
+{
+    static char rows[CATNIP_INFO_MAX_ROWS][CATNIP_INFO_ROW_MAX];
+    const char *ptrs[CATNIP_INFO_MAX_ROWS];
+    uint8_t addrs[8];
+    int n = 0;
+    int i;
+
+    if (!g_info) return;
+    g_page = PAGE_INFO;
+
+    snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "catnip %s", CATNIP_VERSION);
+    snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "built %s", CATNIP_BUILD_DATE);
+    snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "%s rev %d, %d MHz", ESP.getChipModel(),
+             ESP.getChipRevision(), (int)ESP.getCpuFreqMHz());
+    snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "flash %u MB",
+             (unsigned)(ESP.getFlashChipSize() / (1024U * 1024U)));
+    snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "psram %u KB free of %u MB",
+             (unsigned)(ESP.getFreePsram() / 1024U),
+             (unsigned)(ESP.getPsramSize() / (1024U * 1024U)));
+    snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "heap %u KB free",
+             (unsigned)(ESP.getFreeHeap() / 1024U));
+    snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "battery %d%%",
+             catnip_pmu_battery_percent());
+    if (catnip_sd_mounted())
+        snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "card %llu MB",
+                 (unsigned long long)(SD_MMC.cardSize() / (1024ULL * 1024ULL)));
+    else snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "card none");
+
+    {
+        uint64_t mac = ESP.getEfuseMac();
+        /* getEfuseMac() returns the six bytes least-significant first, which is
+         * the reverse of how a MAC is written down. */
+        snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "mac %02X:%02X:%02X:%02X:%02X:%02X",
+                 (unsigned)(mac & 0xFF), (unsigned)((mac >> 8) & 0xFF),
+                 (unsigned)((mac >> 16) & 0xFF), (unsigned)((mac >> 24) & 0xFF),
+                 (unsigned)((mac >> 32) & 0xFF), (unsigned)((mac >> 40) & 0xFF));
+    }
+
+    {
+        int found = catnip_i2c_present(addrs, (int)(sizeof(addrs) / sizeof(addrs[0])));
+        int shown = found < (int)(sizeof(addrs) / sizeof(addrs[0]))
+                        ? found
+                        : (int)(sizeof(addrs) / sizeof(addrs[0]));
+        int off = snprintf(rows[n], CATNIP_INFO_ROW_MAX, "i2c");
+        for (i = 0; i < shown && off > 0 && off < CATNIP_INFO_ROW_MAX; i++)
+            off += snprintf(rows[n] + off, (size_t)(CATNIP_INFO_ROW_MAX - off), " %02X",
+                            addrs[i]);
+        if (!found) snprintf(rows[n], CATNIP_INFO_ROW_MAX, "i2c nothing responded");
+        n++;
+    }
+
+    for (i = 0; i < n; i++)
+        ptrs[i] = rows[i];
+    /* The one row that acts rather than reports, and it says what it costs:
+     * catnip_diag_begin() takes the screen and keeps it, so there is no way out
+     * of that page short of a reboot. Saying so on the row is cheaper than
+     * making the page leavable, and much cheaper than not saying so. */
+    catnip_device_info_show(g_info, ptrs, n, "Input diagnostic - reboot to leave");
+    catnip_frame_set_title("Device");
 }
 
 /* (Re)draw the menu with the apps the shell found. Called at boot and every
@@ -489,6 +572,7 @@ void setup()
      * turns true, and animate() stands down. */
     g_menu = catnip_menu_new(g_rt);
     g_settings = catnip_settings_new(g_rt);
+    g_info = catnip_device_info_new(g_rt);
     rebuild_menu();
 
     /* Expect zero apps until the SD card is mounted (#32). */
@@ -578,7 +662,24 @@ void loop()
     /* The settings page, before the shell's own states: it is not one of them.
      * While it is up the menu's pick is not read and no app can start, because
      * the tree on screen is this page's and there is nothing on it to launch. */
-    if (g_in_settings) {
+    if (g_page == PAGE_INFO) {
+        /* Nothing on this page changes anything, so there is nothing to apply
+         * and nothing to save. It answers a click in one place only. */
+        if (catnip_device_info_take_action(g_info)) {
+            enter_diag();
+            return;
+        }
+        if (gesture == CATNIP_UI_GESTURE_HOME) {
+            g_page = PAGE_HOME;
+            rebuild_menu();
+        } else if (gesture == CATNIP_UI_GESTURE_BACK) {
+            /* One level, not all of them: back climbs to the page this one was
+             * opened from. */
+            g_page = PAGE_PREF;
+            catnip_settings_show(g_settings, &g_cfg);
+            catnip_frame_set_title("Preference");
+        }
+    } else if (g_page == PAGE_PREF) {
         if (catnip_settings_take_dirty(g_settings)) {
             /* Applied on the pass it changed, which is the whole argument for
              * stepping a value in place: a brightness nobody can see while
@@ -600,6 +701,12 @@ void loop()
         if (gesture == CATNIP_UI_GESTURE_HOME) leave_settings();
         else if (gesture == CATNIP_UI_GESTURE_BACK && !catnip_render_take_claim(g_rt))
             leave_settings();
+        /* Down again goes further down, but only when it was not the value of a
+         * live column - which is the page's own two-state model doing the work,
+         * not a second rule bolted on. */
+        else if (gesture == CATNIP_UI_GESTURE_INFO &&
+                 !catnip_settings_editing(g_settings))
+            enter_info();
     } else if (g_shell) {
         if (catnip_shell_state(g_shell) == CATNIP_SHELL_RUNNING) {
             int st = CATNIP_SHELL_RUNNING;
@@ -658,7 +765,9 @@ void loop()
     if (g_shell) {
         if (catnip_shell_state(g_shell) == CATNIP_SHELL_RUNNING) {
             if (delivered || stepped) catnip_frame_set_title(catnip_shell_title(g_shell));
-        } else if (g_in_settings) {
+        } else if (g_page == PAGE_INFO) {
+            catnip_frame_set_title("Device");
+        } else if (g_page == PAGE_PREF) {
             catnip_frame_set_title("Preference");
         } else if (g_menu) {
             catnip_frame_set_title(catnip_menu_focus_name(g_menu));

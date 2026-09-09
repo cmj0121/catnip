@@ -51,6 +51,7 @@ static const char CATNIP_SETTINGS_LUA[] =
     "  end\n"
     "  local function paint()\n"
     "    list.selected = sel\n"
+    "    __catnip_settings_live(active)\n"
     "    for i, row in ipairs(rows) do\n"
     /* `primary` is how the backend is told which column is live - the style
      * roles are already the vocabulary for "this one matters more than its
@@ -237,6 +238,7 @@ struct catnip_settings {
     catnip_config cfg;   /* the settings as they now stand */
     int step[SET_COUNT]; /* the rung each column is on, zero-based */
     bool dirty;
+    bool editing; /* a column is live; see catnip_settings_editing() */
 };
 
 /* The rung whose value is closest to `v`. Distance rather than a match, because
@@ -305,6 +307,16 @@ static int settings_set_cb(lua_State *L)
     return 0;
 }
 
+/* Lua telling C what the page is showing. Pushed rather than pulled because the
+ * answer lives in the closure that moves the selection, and nothing in C is in
+ * a position to read it. */
+static int settings_live_cb(lua_State *L)
+{
+    catnip_settings *s = (catnip_settings *)lua_touserdata(L, lua_upvalueindex(1));
+    if (s) s->editing = lua_toboolean(L, 1) != 0;
+    return 0;
+}
+
 catnip_settings *catnip_settings_new(catnip_rt *rt)
 {
     lua_State *L;
@@ -330,6 +342,9 @@ catnip_settings *catnip_settings_new(catnip_rt *rt)
     lua_pushlightuserdata(L, s);
     lua_pushcclosure(L, settings_set_cb, 1);
     lua_setglobal(L, "__catnip_settings_set");
+    lua_pushlightuserdata(L, s);
+    lua_pushcclosure(L, settings_live_cb, 1);
+    lua_setglobal(L, "__catnip_settings_live");
     return s;
 }
 
@@ -345,6 +360,7 @@ void catnip_settings_show(catnip_settings *s, const catnip_config *cfg)
 
     if (cfg) s->cfg = *cfg;
     s->dirty = false;
+    s->editing = false; /* every rebuild opens with nothing live */
     s->step[SET_SCREEN] = nearest(&kDefs[SET_SCREEN], s->cfg.screen_brightness);
     /* nearest() gives a rung for a ladder and the value itself for a range, and
      * `step[]` holds whichever of the two that column deals in. */
@@ -438,6 +454,11 @@ void catnip_settings_show(catnip_settings *s, const catnip_config *cfg)
 const catnip_config *catnip_settings_config(const catnip_settings *s)
 {
     return s ? &s->cfg : NULL;
+}
+
+bool catnip_settings_editing(const catnip_settings *s)
+{
+    return s && s->editing;
 }
 
 bool catnip_settings_take_dirty(catnip_settings *s)
