@@ -750,7 +750,15 @@ void relayout_canvas(Entry *screen)
         } else if ((int32_t)i > centre) {
             uint32_t k = i - (uint32_t)centre - 1; /* position on the bottom line */
             uint32_t bottom_n = n - (uint32_t)centre - 1;
-            if (k == 0 && bottom_n > 1) lv_obj_align(obj, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+            /* The bottom-left corner is not free: the control hint is drawn
+             * there, on the top layer, over whatever this screen puts in it
+             * (#80). So the bottom line starts to the right of it - the clock's
+             * date otherwise sat under four arrows. A bare screen reserves
+             * nothing, because no hint is drawn over one, for the same reason
+             * it reserves no room for the bar. */
+            if (k == 0 && bottom_n > 1)
+                lv_obj_align(obj, LV_ALIGN_BOTTOM_LEFT, g_bare ? 0 : CATNIP_FRAME_HINT_W,
+                             0);
             else if (k + 1 == bottom_n && bottom_n > 1)
                 lv_obj_align(obj, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
             else lv_obj_align(obj, LV_ALIGN_BOTTOM_MID, 0, 0);
@@ -903,7 +911,13 @@ void apply_list_layout(Entry *e)
     Entry *screen = map_find(e->parent);
     if (screen && screen->kind == CATNIP_NODE_SCREEN && !g_bare) {
         lv_obj_set_style_pad_top(screen->obj, carousel ? 0 : CATNIP_FRAME_BAR_H + 4, 0);
-        lv_obj_set_style_pad_bottom(screen->obj, carousel ? 0 : 6, 0);
+        /* And room at the bottom for the hint, for the same reason as the bar
+         * at the top: it is drawn over every screen, so a column that ran to
+         * the bottom edge would have its last row under it. A carousel reserves
+         * nothing - it is the whole panel by design, and the hint floats over
+         * it exactly as the bar does. */
+        lv_obj_set_style_pad_bottom(screen->obj, carousel ? 0 : CATNIP_FRAME_HINT_H + 4,
+                                    0);
         lv_obj_set_style_pad_left(screen->obj, carousel ? 0 : 6, 0);
         lv_obj_set_style_pad_right(screen->obj, carousel ? 0 : 6, 0);
     }

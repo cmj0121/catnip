@@ -16,6 +16,7 @@
 #include "catnip_api.h"
 #include "catnip_config.h"
 #include "catnip_menu.h"
+#include "catnip_pages.h"
 #include "catnip_device_info.h"
 #include "generated/version.h"
 #include "catnip_settings.h"
@@ -44,6 +45,7 @@
 #include "device/toast.h"
 #include "device/rtc_time.h"
 #include "device/ui_input.h"
+#include "device/ui_input_core.h"
 #include "generated/anim_f01_rgb565.h"
 #include "generated/anim_f02_rgb565.h"
 #include "generated/splash_rgb565.h"
@@ -59,35 +61,15 @@ static catnip_shell *g_shell;
  * that the shell's teardown and the main loop's pass are visibly drawing
  * through the same one. */
 static const catnip_render_backend *g_be;
-/* The launcher menu (#33): itself a ui.* screen drawn through g_be, so the same
- * renderer and input layer that run an app run the menu. It is what finally
- * exercises the whole path end to end. */
-static catnip_menu *g_menu;
-/* The preferences page (#67), and whether it is what is on screen. It is a
+/* The three screens the platform owns - the launcher, the device page and the
+ * preference page - and the rules for moving between them (#81). They are a
  * mode of the launcher rather than a state of the shell: the shell's states are
- * about running an app, and this runs nothing - it is another platform screen
- * beside the menu, reached from the home section by pushing down. */
-static catnip_settings *g_settings;
-static catnip_device_info *g_info;
-/* Which platform screen is up. Three values rather than a flag each, because
- * two flags can be true at once and this cannot: the launcher, the preference
- * page and the device info page are one stack, and each is reached by going
- * down from the one before it. */
-enum catnip_page {
-    PAGE_HOME = 0, /* the launcher carousel */
-    PAGE_PREF,
-    PAGE_INFO,
-};
-static catnip_page g_page;
-/* Something was stepped and has not been written down yet. Kept here rather
- * than read off the page, because the page's own dirty flag is consumed every
- * pass to apply the change to the hardware, and saving happens once, later. */
-static bool g_settings_unsaved;
-/* What the settings were when the page opened, so B can put them back. Applying
- * as the owner steps is what makes a brightness visible while it is being
- * chosen; being able to undo that is what lets B mean "leave without saving"
- * rather than "leave, having already changed everything". */
-static catnip_config g_settings_was;
+ * about running an app, and none of these runs anything.
+ *
+ * In catnip_pages.c with no Arduino in it, so a host test can press buttons at
+ * them; what is left here is the board they ask for what a chip is called, what
+ * the clock says, and what a brightness does. */
+static catnip_pages *g_pages;
 /* The settings as they now stand. The one copy the rest of this file reads. */
 static catnip_config g_cfg;
 
@@ -169,8 +151,6 @@ static void enter_diag(void)
     if (!catnip_diag_begin()) g_animating = true;
 }
 
-static void rebuild_menu(void);
-
 /* And out of it, back to the cat. The page hands the screen back; what is on
  * the other side is whatever was there before it - which is the launcher,
  * because entering tore any running app down. The touch panel comes back with
@@ -181,8 +161,7 @@ static void leave_diag(void)
     if (!catnip_diag_active()) return;
     catnip_diag_end();
     catnip_ui_input_begin();
-    g_page = PAGE_HOME;
-    rebuild_menu();
+    catnip_pages_rebuild(g_pages);
 }
 
 static const uint16_t *const g_anim_frames[] = {
@@ -373,102 +352,25 @@ static void fade_in(void)
  * is rebuilt so the line is never briefly blank. */
 static unsigned long g_status_last;
 
-/* The battery in the frame's bar. Every two seconds rather than every pass: the
- * gauge does not move faster than that and each write invalidates the area. */
-static void update_status(bool force)
-{
-    unsigned long now = millis();
-    if (!force && now - g_status_last < 2000) return;
-    g_status_last = now;
-    catnip_frame_set_battery(catnip_pmu_battery_percent());
-
-    /* And the launcher's value cells (#75). Only while the ring is what is on
-     * screen: `g_menu` outlives the menu's tree, so testing it asked "does a
-     * launcher exist" - which is always - and answered by going to the I2C bus
-     * for a clock nobody could see, thirty times a minute, for as long as the
-     * device was on. The menu writes only what differs, so of the reads that
-     * remain one in thirty changes anything. */
-    if (g_menu && g_page == PAGE_HOME && g_shell &&
-        catnip_shell_state(g_shell) != CATNIP_SHELL_RUNNING) {
-        uint32_t t = catnip_rtc_now();
-        if (t) {
-            static const char *const kDay[7] = {"Sun", "Mon", "Tue", "Wed",
-                                                "Thu", "Fri", "Sat"};
-            char hm[8];
-            char date[16];
-            int32_t y;
-            uint32_t mo, d, h, mi, wd;
-
-            catnip_rtc_split(t, &y, &mo, &d, &h, &mi, &wd);
-            snprintf(hm, sizeof(hm), "%02u:%02u", (unsigned)h, (unsigned)mi);
-            snprintf(date, sizeof(date), "%04d-%02u-%02u", (int)y, (unsigned)mo,
-                     (unsigned)d);
-            catnip_menu_set_glance(g_menu, hm, date, kDay[wd]);
-        } else {
-            /* The same admission the clock's own face makes. */
-            catnip_menu_set_glance(g_menu, NULL, "----------", "");
-        }
-    }
-}
-
-static void rebuild_menu(void);
-static void enter_info(void);
-
-/* Down from the home section: the settings plane. It replaces the menu's tree
- * with its own, which is all "entering" means here - both are platform screens
- * on the same renderer, and neither is an app. */
-static void enter_settings(void)
-{
-    if (!g_settings || (g_page != PAGE_HOME && g_page != PAGE_INFO)) return;
-    g_page = PAGE_PREF;
-    g_settings_unsaved = false;
-    g_settings_was = g_cfg;
-    catnip_settings_show(g_settings, &g_cfg);
-    catnip_frame_set_title("Preference");
-}
-
-/* And back out of it, saving on the way if anything was stepped. Once, here,
- * rather than on every step: see prefs.h. */
-static void leave_settings(bool keep, bool home)
-{
-    if (g_page != PAGE_PREF) return;
-    if (keep) {
-        if (g_settings_unsaved) catnip_prefs_save(&g_cfg);
-    } else {
-        /* Put back what was applied on the way in. Nothing is written, so a
-         * page left with B costs no flash even if every column was moved. */
-        g_cfg = g_settings_was;
-        apply_settings(&g_cfg);
-    }
-    g_settings_unsaved = false;
-    /* Back to the hub it was opened from. Long B is the one that goes all the
-     * way to the cat, and says so by passing PAGE_HOME. */
-    if (home) {
-        g_page = PAGE_HOME;
-        rebuild_menu();
-    } else {
-        enter_info();
-    }
-}
-
-/* What this device is, written out. Asked afresh every time the page is opened
- * rather than kept: half of it moves (the battery, the free heap, what is
- * answering on the bus) and a page of facts that were true a while ago is
- * worse than no page at all.
+/* ---- what the pages ask of the board ------------------------------------
  *
- * The strings are built here and not in catnip_device_info.c because every one
- * of these questions is the device's to answer, and that file has no business
- * knowing what a PSRAM is. */
-static void enter_info(void)
+ * Eight small functions, and every one of them is a question catnip_pages.c
+ * must not be able to answer: what a chip is called, what is on the bus, what a
+ * brightness does, where a setting is written down. That file owns the rules;
+ * this one owns the device. */
+
+/* What this device is, written out. Asked afresh every time the page opens
+ * rather than kept: half of it moves - the battery, the free heap, what is
+ * answering on the bus - and a page of facts that were true a while ago is
+ * worse than no page at all. */
+static int env_info_rows(void *ud, char (*rows)[CATNIP_INFO_ROW_MAX], int max)
 {
-    static char rows[CATNIP_INFO_MAX_ROWS][CATNIP_INFO_ROW_MAX];
-    const char *ptrs[CATNIP_INFO_MAX_ROWS];
     uint8_t addrs[8];
     int n = 0;
     int i;
 
-    if (!g_info) return;
-    g_page = PAGE_INFO;
+    (void)ud;
+    if (max < 12) return 0;
 
     snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "catnip %s", CATNIP_VERSION);
     snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "built %s", CATNIP_BUILD_DATE);
@@ -525,42 +427,68 @@ static void enter_info(void)
         if (!found) snprintf(rows[n], CATNIP_INFO_ROW_MAX, "i2c nothing responded");
         n++;
     }
-
-    for (i = 0; i < n; i++)
-        ptrs[i] = rows[i];
-    /* The two places you would go having read this, each with the icon it is
-     * known by: the gear the preference page is reached by, and the warning
-     * triangle for a page that takes the screen and only gives it back through
-     * a restart. */
-    static const catnip_info_key kPref = {"Preference", "settings"};
-    static const catnip_info_key kDiag = {"Diagnostic", "warning"};
-    catnip_device_info_show(g_info, ptrs, n, &kPref, &kDiag);
-    catnip_frame_set_title("Device");
+    return n;
 }
 
-/* (Re)draw the menu with the apps the shell found. Called at boot and every
- * time an app returns, because the renderer's teardown between apps has cleared
- * the tree by then. catnip_shell_app(,0) is the base of the shell's contiguous
- * app array, which is what the menu reads. */
-static void rebuild_menu(void)
+static void env_apply(void *ud, const catnip_config *cfg)
 {
-    if (!g_menu || !g_shell) return;
-    int n = catnip_shell_count(g_shell);
-    const catnip_app_entry *apps = (n > 0) ? catnip_shell_app(g_shell, 0) : nullptr;
-    /* Before the tree is built, because building it names these. Once per menu
-     * rebuild rather than per frame: an icon is read off the card, and the card
-     * has no business in a render pass. */
+    (void)ud;
+    apply_settings(cfg);
+}
+
+static void env_save(void *ud, const catnip_config *cfg)
+{
+    (void)ud;
+    catnip_prefs_save(cfg);
+}
+
+static void env_title(void *ud, const char *title)
+{
+    (void)ud;
+    catnip_frame_set_title(title);
+}
+
+static void env_icons_load(void *ud, const catnip_app_entry *apps, int n)
+{
+    (void)ud;
     catnip_app_icons_load(apps, n);
-    /* Asked fresh every rebuild rather than remembered: a card can leave
-     * between one and the next, and an app that needs it has to grey out when
-     * it does. */
-    catnip_menu_show(g_menu, apps, n, catnip_sd_mounted());
-    /* The launcher does not introduce itself in its own bar: it *is* the frame,
-     * so the header is empty rather than naming the device at a user holding
-     * it. An app that takes over says who it is; the launcher has nothing to
-     * add. */
-    catnip_frame_set_title("");
-    update_status(true);
+}
+
+static bool env_card_present(void *ud)
+{
+    (void)ud;
+    return catnip_sd_mounted();
+}
+
+static uint32_t env_now_epoch(void *ud)
+{
+    (void)ud;
+    return catnip_rtc_now();
+}
+
+static void env_enter_diag(void *ud)
+{
+    (void)ud;
+    enter_diag();
+}
+
+static const catnip_pages_env kPagesEnv = {
+    env_info_rows,    env_apply,     env_save,       env_title, env_icons_load,
+    env_card_present, env_now_epoch, env_enter_diag, nullptr,
+};
+
+/* The battery in the frame's bar. Every two seconds rather than every pass: the
+ * gauge does not move faster than that and each write invalidates the area.
+ * The launcher's own live cells (#75) ride along on the same cadence, for the
+ * same reason: a clock that changes once a minute has no business on the I2C
+ * bus thirty times a second. */
+static void update_status(bool force)
+{
+    unsigned long now = millis();
+    if (!force && now - g_status_last < 2000) return;
+    g_status_last = now;
+    catnip_frame_set_battery(catnip_pmu_battery_percent());
+    catnip_pages_glance(g_pages);
 }
 
 void setup()
@@ -656,10 +584,12 @@ void setup()
     /* The launcher menu (#33). Building it here is what takes the screen from
      * the boot animation: the first pass draws it, catnip_lvgl_backend_active()
      * turns true, and animate() stands down. */
-    g_menu = catnip_menu_new(g_rt);
-    g_settings = catnip_settings_new(g_rt);
-    g_info = catnip_device_info_new(g_rt);
-    rebuild_menu();
+    g_pages = catnip_pages_new(g_rt, g_shell, &g_cfg, &kPagesEnv);
+    if (!g_pages) {
+        Serial.println("[catnip] FATAL: platform screens could not be built");
+        return;
+    }
+    catnip_pages_rebuild(g_pages);
 
     /* Expect zero apps until the SD card is mounted (#32). */
     {
@@ -734,7 +664,7 @@ void loop()
         catnip_meowkit_hal_set_fs(catnip_sd_mounted());
         if (g_shell && catnip_shell_state(g_shell) != CATNIP_SHELL_RUNNING) {
             catnip_shell_refresh(g_shell);
-            rebuild_menu();
+            catnip_pages_rebuild(g_pages);
         }
     }
 
@@ -770,103 +700,59 @@ void loop()
     /* The menu and a running app are the same kind of tree; which is up is the
      * shell's state, and the transitions between them are here (#33). */
     bool stepped = false;
-    /* The settings page, before the shell's own states: it is not one of them.
-     * While it is up the menu's pick is not read and no app can start, because
-     * the tree on screen is this page's and there is nothing on it to launch. */
-    if (g_page == PAGE_INFO) {
-        /* Nothing on this page changes anything, so there is nothing to apply
-         * and nothing to save. It answers a click in one place only. */
-        int act = catnip_device_info_take_action(g_info);
-        if (act == CATNIP_INFO_LEFT) {
-            enter_settings();
-            return;
+    /* The platform's own screens, before the shell's states: none of them is
+     * one. While one is up the menu's pick is not read and no app can start,
+     * because the tree on screen is that page's and there is nothing on it to
+     * launch.
+     *
+     * The rules are catnip_pages.c's; what is left here is the shell, which is
+     * the one thing on this path that genuinely needs the board - it launches
+     * code off a card and tears it down through the backend. */
+    if (catnip_pages_step(g_pages, gesture)) {
+        /* A page was entered or left, and the tree on screen is now a different
+         * one. Nothing else this pass, so the render below draws it whole. */
+    } else if (g_shell && catnip_shell_state(g_shell) == CATNIP_SHELL_RUNNING) {
+        int st = CATNIP_SHELL_RUNNING;
+        stepped = true;
+        /* Home first: a gesture that grew into a long press must not also be
+         * read as the short one it passed through. */
+        if (gesture == CATNIP_UI_GESTURE_HOME) {
+            /* Home is the cat, so the ring opens there rather than where this
+             * app was launched from. Short B is the one that returns you to
+             * where you came from. */
+            catnip_menu_home(catnip_pages_menu(g_pages));
+            st = catnip_shell_home(g_shell);
+        } else if (gesture == CATNIP_UI_GESTURE_BACK) {
+            /* Here and not earlier: the drain above has just run the app's
+             * on_back, and this reads what it answered. The app may have climbed
+             * a level and stayed, in which case the step below still runs and
+             * nothing else happened. */
+            st = catnip_shell_back(g_shell);
         }
-        if (act == CATNIP_INFO_RIGHT) {
-            enter_diag();
-            return;
+        if (st == CATNIP_SHELL_RUNNING) st = catnip_shell_step(g_shell);
+        /* Whichever way it ended - B, home, finished, faulted - teardown loaded
+         * the blank screen, so the menu has to be rebuilt before the next pass
+         * draws it. */
+        if (st == CATNIP_SHELL_MENU) {
+            /* The launcher's own screens are never bare, and this has to be
+             * cleared before the menu is rebuilt rather than after. */
+            catnip_lvgl_backend_set_bare(false);
+            catnip_pages_rebuild(g_pages);
         }
-        /* Either way out of here is the cat: this page is one step down from
-         * the ring, not a stack of its own. */
-        if (gesture == CATNIP_UI_GESTURE_HOME || gesture == CATNIP_UI_GESTURE_BACK) {
-            g_page = PAGE_HOME;
-            rebuild_menu();
-        }
-    } else if (g_page == PAGE_PREF) {
-        if (catnip_settings_take_dirty(g_settings)) {
-            /* Applied on the pass it changed, which is the whole argument for
-             * stepping a value in place: a brightness nobody can see while
-             * choosing it is a brightness chosen twice. Saving waits for the
-             * way out. */
-            const catnip_config *cfg = catnip_settings_config(g_settings);
-            if (cfg) {
-                g_cfg = *cfg;
-                apply_settings(&g_cfg);
-                g_settings_unsaved = true;
-            }
-        }
-        /* A keeps the page and B puts it back - the page says which, because it
-         * is the one that knows whether B was a departure or something it
-         * handled itself. Long B is home and keeps: it is an escape, and an
-         * escape that also undid the last five minutes would be a trap. */
-        int result = catnip_settings_take_result(g_settings);
-        if (gesture == CATNIP_UI_GESTURE_HOME) leave_settings(true, true);
-        else if (result == CATNIP_SETTINGS_SAVE) leave_settings(true, false);
-        else if (result == CATNIP_SETTINGS_DISCARD) leave_settings(false, false);
-        else if (gesture == CATNIP_UI_GESTURE_BACK && !catnip_render_take_claim(g_rt))
-            leave_settings(false, false);
-
     } else if (g_shell) {
-        if (catnip_shell_state(g_shell) == CATNIP_SHELL_RUNNING) {
-            int st = CATNIP_SHELL_RUNNING;
-            stepped = true;
-            /* Home first: a gesture that grew into a long press must not also
-             * be read as the short one it passed through. */
-            if (gesture == CATNIP_UI_GESTURE_HOME) {
-                /* Home is the cat, so the ring opens there rather than where
-                 * this app was launched from. Short B is the one that returns
-                 * you to where you came from. */
-                catnip_menu_home(g_menu);
-                st = catnip_shell_home(g_shell);
-            } else if (gesture == CATNIP_UI_GESTURE_BACK) {
-                /* Here and not earlier: the drain above has just run the app's
-                 * on_back, and this reads what it answered. The app may have
-                 * climbed a level and stayed, in which case the step below still
-                 * runs and nothing else happened. */
-                st = catnip_shell_back(g_shell);
-            }
-            if (st == CATNIP_SHELL_RUNNING) st = catnip_shell_step(g_shell);
-            /* Whichever way it ended - B, home, finished, faulted - teardown
-             * loaded the blank screen, so the menu has to be rebuilt before the
-             * next pass draws it. */
-            if (st == CATNIP_SHELL_MENU) {
-                /* The launcher's own screens are never bare, and this has to be
-                 * cleared before the menu is rebuilt rather than after. */
-                catnip_lvgl_backend_set_bare(false);
-                rebuild_menu();
-            }
-        } else {
-            /* In the menu. A click has latched which app to launch; the launch
-             * tears the menu tree down, so one that then fails to load must put
-             * the menu back rather than leave a blank screen. */
-            /* Down, on the home carousel, opens the hub: what this device
-             * is, and the two places you would go having read it. Checked
-             * before the pick, so a pass that carries both leaves the menu
-             * rather than launching out of a screen that is going away. */
-            if (gesture == CATNIP_UI_GESTURE_SETTINGS) {
-                enter_info();
-                return;
-            }
-            const char *id = catnip_menu_take_pick(g_menu);
-            if (id) {
-                char err[64];
-                /* Before the app's first screen exists, which is what decides
-                 * whether it reserves room for a bar it will not be given. */
-                if (catnip_shell_launch_id(g_shell, id, err, sizeof(err)) == 0) {
-                    catnip_lvgl_backend_set_bare(catnip_shell_bare(g_shell) != 0);
-                } else {
-                    Serial.printf("[catnip] menu: %s could not launch: %s\n", id, err);
-                    rebuild_menu();
-                }
+        /* In the menu. A click has latched which app to launch; the launch
+         * tears the menu tree down, so one that then fails to load must put the
+         * menu back rather than leave a blank screen. */
+        const char *id = catnip_pages_take_launch(g_pages);
+        if (id) {
+            char err[64];
+            /* Before the app's first screen exists, which is what decides
+             * whether it reserves room for a bar it will not be given. */
+            if (catnip_shell_launch_id(g_shell, id, err, sizeof(err)) == 0) {
+                catnip_lvgl_backend_set_bare(catnip_shell_bare(g_shell) != 0);
+            } else {
+                Serial.printf("[catnip] menu: %s could not launch: %s\n", id, err);
+                catnip_pages_rebuild(g_pages);
             }
         }
     }
@@ -881,6 +767,10 @@ void loop()
     /* Not over a canvas. `frame: "bare"` is a promise about the whole panel, and
      * a bar floating on the top layer would be the platform breaking it. */
     catnip_frame_show(catnip_lvgl_backend_active() && !catnip_shell_bare(g_shell));
+    /* And what the four directions do from where the ring is (#80). Derived
+     * from the tree by the same function the input pass asks, so the arrow that
+     * is lit and the press that does something cannot disagree. */
+    catnip_frame_set_hint(catnip_ui_input_hint(g_rt, catnip_ui_input_focused()));
     /* Running an app, the shell answers what the header reads - a title the app
      * set, else its manifest name - and only after app code could have run,
      * since that is the only thing that can change the answer and the question
@@ -889,13 +779,12 @@ void loop()
     if (g_shell) {
         if (catnip_shell_state(g_shell) == CATNIP_SHELL_RUNNING) {
             if (delivered || stepped) catnip_frame_set_title(catnip_shell_title(g_shell));
-        } else if (g_page == PAGE_INFO) {
-            catnip_frame_set_title("Device");
-        } else if (g_page == PAGE_PREF) {
-            catnip_frame_set_title("Preference");
-        } else if (g_menu) {
-            catnip_frame_set_title(catnip_menu_focus_name(g_menu));
+        } else if (catnip_pages_current(g_pages) == CATNIP_PAGE_HOME) {
+            catnip_frame_set_title(catnip_menu_focus_name(catnip_pages_menu(g_pages)));
         }
+        /* The other two name themselves as they are entered, in
+         * catnip_pages.c - they are one screen each and their titles do not
+         * change while they are up, where the ring's does on every step. */
     }
     catnip_toast_step();
     catnip_frame_step(g_rt);

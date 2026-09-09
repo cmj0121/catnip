@@ -36,6 +36,13 @@ extern "C" {
  * on one value rather than on two that happen to match. */
 #define CATNIP_FRAME_BAR_H 26
 
+/* And the corner the control hint occupies, bottom-left, for the same reason
+ * the bar's height is here: it is drawn on the top layer over every screen, so
+ * whatever lays a screen out has to know what is already there. A screen that
+ * ignored it would put its own bottom-left content under four arrows. */
+#define CATNIP_FRAME_HINT_W 34
+#define CATNIP_FRAME_HINT_H 30
+
 /* Draw or hide the bar. Hidden is the honest state before anything has been
  * drawn and while the diagnostic page has the panel: a bar over a page that is
  * testing the panel would be the frame testing itself. */
@@ -45,6 +52,20 @@ void catnip_frame_show(bool on);
  * a placeholder, which is what the launcher wants - it is the frame, so naming
  * itself in its own bar would be an app introducing itself to nobody. */
 void catnip_frame_set_title(const char *title);
+
+/* Which of the four directions do something where the user is, as
+ * CATNIP_HINT_* bits from ui_input_core.h. Drawn as a small cross in the
+ * bottom-left corner, each arrow lit or dimmed.
+ *
+ * The dimming is the whole point. Several directions do nothing depending on
+ * where you are - up on the cat has no grid to open yet, and a page of two
+ * buttons has nothing for up and down to move - and on a device with no hint at
+ * all, a direction that does nothing is indistinguishable from a device that
+ * has stopped listening.
+ *
+ * A and B are deliberately not on it. They are the two gestures that mean the
+ * same thing everywhere, and a hint is for what changes. */
+void catnip_frame_set_hint(unsigned mask);
 
 /* The battery, top-left. Below zero means "not measured", and the frame then
  * draws no percentage at all rather than a plausible wrong one - the same rule
