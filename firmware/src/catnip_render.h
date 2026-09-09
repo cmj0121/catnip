@@ -163,6 +163,20 @@ enum {
     CATNIP_NODE_DISABLED = 1u << 2,
 };
 
+/* Which handlers a node has, reported in `events` below.
+ *
+ * Named for the events they answer rather than for the Lua keys, because that
+ * is what a caller is asking: "would anything happen if this node were sent a
+ * next?" is a question about the event, and the key that answers it is the
+ * renderer's business. */
+enum {
+    CATNIP_EV_CLICK = 1u << 0,
+    CATNIP_EV_PREV = 1u << 1,
+    CATNIP_EV_NEXT = 1u << 2,
+    CATNIP_EV_OPTIONS = 1u << 3,
+    CATNIP_EV_BACK = 1u << 4,
+};
+
 /*
  * Everything a backend is allowed to know about a node. Flat, with no Lua in
  * it, so the shim under this vtable never links against the VM.
@@ -221,6 +235,15 @@ typedef struct {
                        * prop is one-based like every other Lua index; the
                        * renderer converts, so a backend never has to. */
     unsigned flags;
+    /* Which handlers this node has, as CATNIP_EV_* bits.
+     *
+     * What a node is listening to, rather than what it looks like, and the
+     * renderer is the only thing in a position to say: it reads the node's
+     * `handlers` table on every pass anyway. Two things want the answer and had
+     * been deriving it separately - whether the focus ring should stop here at
+     * all, and whether a direction does anything from here, which is what the
+     * on-screen control hint is drawn from. One fact, so they cannot drift. */
+    unsigned events;
 } catnip_node_desc;
 
 /*
@@ -414,6 +437,14 @@ int catnip_render_selected(catnip_rt *rt, catnip_handle h);
  * the same `prev`/`next` either way, reached by whichever direction the shape
  * on screen makes obvious. */
 catnip_node_layout catnip_render_layout(catnip_rt *rt, catnip_handle h);
+
+/* Which handlers the node behind `h` has, as CATNIP_EV_* bits, or 0 for a
+ * handle that resolves to nothing.
+ *
+ * The question the control hint asks of every direction, and the question the
+ * focus order already asks of every list. Answered from the cached descriptor,
+ * so it costs no Lua. */
+unsigned catnip_render_events(catnip_rt *rt, catnip_handle h);
 
 /* The `N/total` the frame draws for the list the user is navigating: `n` is the
  * one-based selected row and `total` the row count. Returns 1 when there is a

@@ -45,6 +45,15 @@ typedef struct {
      * given the whole 320x240. It buys space, not coordinates - the app still
      * names things and never places them. */
     int bare;
+    /* 0 when the manifest says `"hints": false`: the control hint is not drawn
+     * over this app (#80).
+     *
+     * Default on, and that direction is deliberate. The apps most likely to
+     * need the hint are the ones whose authors did not think about it, so the
+     * one that says nothing gets it; turning it off is a claim about a screen
+     * whose whole surface is the point, which is the same claim `frame: "bare"`
+     * makes and is stated the same way - by saying so. */
+    int hints;
 } catnip_manifest;
 
 /* Parse manifest JSON text into `out`. Required fields: id, name, catnip_api

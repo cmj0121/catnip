@@ -12,6 +12,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The layout tests run the device's own backend against the device's own
+      # LVGL, and take it from PlatformIO's copy so the host and the device are
+      # never laid out by two different versions. Without this they are skipped
+      # with a note - which locally is a kindness and here would be a whole
+      # class of test quietly not running.
+      - name: Fetch the pinned libraries (LVGL, for the layout tests)
+        run: |
+          pip install platformio
+          pio pkg install -d firmware -e meowkit
+
       - name: Run every check
         run: make ci
 

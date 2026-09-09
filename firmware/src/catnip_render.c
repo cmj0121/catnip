@@ -73,6 +73,7 @@ typedef struct {
     size_t value_text_cap;
     int selected;
     unsigned flags;
+    unsigned events;
     char *text;      /* owned copy of the last text sent, or NULL */
     size_t text_cap; /* bytes handed to the allocator, so they can be given back */
 } slot;
@@ -362,30 +363,39 @@ static catnip_style_role style_of(const char *s)
     return CATNIP_STYLE_BODY;
 }
 
-/* Whether anything would be delivered to this node if the focus stopped on it.
- * A list with no on_click, on_prev and on_next has nothing for a selection to
- * move and nothing for A to activate: it is text laid out in a column, and a
- * focus ring around it offers an interaction that does not exist. Same rule as
- * the row strip below, one level down - a strip is decoration by its shape,
- * and this is decoration by having no handlers. */
-static int node_operable(lua_State *L, int node)
+/* What this node is listening to. The `handlers` table is a raw field, put
+ * there by ui.make() from every key beginning `on_`, so this is one lookup and
+ * five comparisons rather than a scan.
+ *
+ * Reported rather than acted on here, because two different questions are
+ * downstream of it and they must not each grow their own copy: whether the
+ * focus ring stops on this node, and whether a direction does anything from
+ * it - which is what the control hint on the screen is drawn from. */
+static unsigned node_events(lua_State *L, int node)
 {
-    static const char *const kKeys[] = {"on_click", "on_prev", "on_next"};
-    int operable = 0;
-    int i;
+    static const struct {
+        const char *key;
+        unsigned bit;
+    } kMap[] = {
+        {"on_click", CATNIP_EV_CLICK}, {"on_prev", CATNIP_EV_PREV},
+        {"on_next", CATNIP_EV_NEXT},   {"on_options", CATNIP_EV_OPTIONS},
+        {"on_back", CATNIP_EV_BACK},
+    };
+    unsigned events = 0;
+    size_t i;
 
     lua_pushstring(L, "handlers");
     lua_rawget(L, node);
     if (lua_istable(L, -1)) {
-        for (i = 0; i < 3 && !operable; i++) {
-            lua_pushstring(L, kKeys[i]);
+        for (i = 0; i < sizeof(kMap) / sizeof(kMap[0]); i++) {
+            lua_pushstring(L, kMap[i].key);
             lua_rawget(L, -2);
-            operable = !lua_isnil(L, -1);
+            if (!lua_isnil(L, -1)) events |= kMap[i].bit;
             lua_pop(L, 1);
         }
     }
     lua_pop(L, 1);
-    return operable;
+    return events;
 }
 
 /* Fill *d from `node`, leaving on the stack the Lua values d->id and d->text
@@ -499,6 +509,8 @@ static void desc_build(ctx *c, int node, catnip_node_desc *d)
         lua_pop(L, 1);
     }
 
+    d->events = node_events(L, node);
+
     /* A strip is a line of labels, not a set of choices: `selected` means
      * nothing on one, there is nothing for prev/next to move and nothing for a
      * click to activate. So it does not take focus, and the focus cursor does
@@ -508,7 +520,7 @@ static void desc_build(ctx *c, int node, catnip_node_desc *d)
      * would be a bug in the app rather than a page of facts. */
     if ((d->kind == CATNIP_NODE_BUTTON ||
          (d->kind == CATNIP_NODE_LIST && d->layout != CATNIP_LAYOUT_ROW &&
-          node_operable(L, node))) &&
+          (d->events & (CATNIP_EV_CLICK | CATNIP_EV_PREV | CATNIP_EV_NEXT)))) &&
         !(flags & (CATNIP_NODE_HIDDEN | CATNIP_NODE_DISABLED)))
         flags |= CATNIP_NODE_FOCUSABLE;
     d->flags = flags;
@@ -518,8 +530,8 @@ static int desc_same(const slot *s, const catnip_node_desc *d)
 {
     return s->kind == d->kind && s->style == d->style && s->icon == d->icon &&
            s->layout == d->layout && s->selected == d->selected && s->flags == d->flags &&
-           s->value == d->value && s->steps == d->steps && s->text != NULL &&
-           strcmp(s->text, d->text) == 0 && s->image != NULL &&
+           s->events == d->events && s->value == d->value && s->steps == d->steps &&
+           s->text != NULL && strcmp(s->text, d->text) == 0 && s->image != NULL &&
            strcmp(s->image, d->image) == 0 && s->value_text != NULL &&
            strcmp(s->value_text, d->value_text) == 0;
 }
@@ -532,6 +544,7 @@ static void desc_store(lua_State *L, slot *s, const catnip_node_desc *d)
     s->layout = d->layout;
     s->selected = d->selected;
     s->flags = d->flags;
+    s->events = d->events;
     s->value = d->value;
     s->steps = d->steps;
     text_store(L, s, d->text);
@@ -1060,6 +1073,16 @@ int catnip_render_counter(catnip_rt *rt, catnip_handle focus, int *n, int *total
     if (n) *n = list->selected + 1; /* one-based for display, converted once */
     if (total) *total = rows;
     return 1;
+}
+
+unsigned catnip_render_events(catnip_rt *rt, catnip_handle h)
+{
+    lua_State *L = catnip_rt_lua(rt);
+    if (!L) return 0;
+    render_state *st = state_peek(L);
+    if (!st) return 0;
+    slot *sl = slot_of(st, h);
+    return sl ? sl->events : 0u;
 }
 
 catnip_node_layout catnip_render_layout(catnip_rt *rt, catnip_handle h)

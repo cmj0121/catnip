@@ -26,6 +26,7 @@
 
 #include <stdbool.h>
 
+#include "../catnip_render.h"
 #include "../catnip_runtime.h"
 
 #ifdef __cplusplus
@@ -83,6 +84,10 @@ int catnip_ui_input_step(catnip_rt *rt);
  * of the same handoff that tears the app tree down. A no-op when no indev was
  * ever created, which is the boot-marker path into diag. */
 void catnip_ui_input_end(void);
+
+/* Where the focus ring is. The control hint asks, because what a direction does
+ * depends on what the ring is resting on (#80). */
+catnip_handle catnip_ui_input_focused(void);
 
 #ifdef __cplusplus
 }
