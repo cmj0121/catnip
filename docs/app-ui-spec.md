@@ -36,12 +36,13 @@ geometry-free tree.
 Four shapes, and no fifth. Each is a `list`; what differs is how the platform
 lays it out.
 
-| Shape               | When                                          | Layout                               |
-| ------------------- | --------------------------------------------- | ------------------------------------ |
-| **One icon**        | a landing page — the cat, a splash            | centred, alone                       |
-| **Up to six icons** | a set of things to choose between             | **3x2 grid**, the focused one ringed |
-| **Rows of text**    | anything longer, or anything that needs words | one row per line                     |
-| **Values**          | settings — quantities, not choices            | **vertical bars**, side by side      |
+| Shape               | When                                             | Layout                                   |
+| ------------------- | ------------------------------------------------ | ---------------------------------------- |
+| **One icon**        | a landing page — the cat, a splash               | centred, alone                           |
+| **Up to six icons** | a set of things to choose between                | **3x2 grid**, the focused one ringed     |
+| **Rows of text**    | anything longer, or anything that needs words    | one row per line                         |
+| **Values**          | settings — quantities, not choices               | **vertical bars**, side by side          |
+| **A face**          | one thing to be looked at, with labels around it | **canvas** — a centrepiece and two lines |
 
 The first three all answer "which one?". **Values** is the fourth because none of
 them can answer "how much?" — a quantity has no natural row and no natural icon,
@@ -64,6 +65,14 @@ height of the region rather than a line of text.
 A value is a **ladder of a few named steps**, not a range, because "the next
 value" needs a finite list to come from. Pick the rungs so that the one after the
 last is somewhere safe to land: the ladder wraps.
+
+**A face** answers neither question: it is one thing to be looked at with labels
+around it, which is what a clock is. `ui.list{ layout = "canvas" }` - and what
+`frame: "bare"` gives a screen - is laid out around its centrepiece: the child in
+the `display` role goes in the middle of the region, what you named before it
+forms the top line and what you named after it the bottom, each running
+first-to-the-left and last-to-the-right. **The order you name them in is the
+layout**, and you still never say where anything goes.
 
 More than six icons scrolls rather than paginating: the selection leads and the
 view follows, exactly as a list does, so there is one scrolling model and not
@@ -113,18 +122,18 @@ optional.
 
 ## The gestures
 
-| Gesture          | Meaning                                         | Reaches you as                         |
-| ---------------- | ----------------------------------------------- | -------------------------------------- |
-| Up / Down        | move the selection; the list scrolls to follow  | `prev` / `next` to the focused list    |
-| Left / Right     | move the focus between focusable things         | nothing; the platform moves the ring   |
-| Short A          | activate the focused item — a value's next step | `on_click(self)`                       |
-| Long A           | options for the **selected item**               | `on_options(self, index)` → action ids |
-| Tap a row        | select and activate it                          | `on_click(self, index)`                |
-| Long-press a row | options for that row                            | `on_options(self, index)` → action ids |
-| Swipe            | the joystick's four directions, by finger       | whatever that direction means          |
-| Short B          | back — pop, climb, or exit                      | `on_back(self)` on the visible screen  |
-| Long B           | home — the cat, from any depth                  | nothing; the platform keeps it         |
-| Hold power       | power off                                       | nothing; the PMIC keeps it             |
+| Gesture          | Meaning                                                              | Reaches you as                         |
+| ---------------- | -------------------------------------------------------------------- | -------------------------------------- |
+| Up / Down        | move the selection; the list scrolls to follow. **Held, it repeats** | `prev` / `next` to the focused list    |
+| Left / Right     | move the focus between focusable things                              | nothing; the platform moves the ring   |
+| Short A          | activate the focused item — a value's next step                      | `on_click(self)`                       |
+| Long A           | options for the **selected item**                                    | `on_options(self, index)` → action ids |
+| Tap a row        | select and activate it                                               | `on_click(self, index)`                |
+| Long-press a row | options for that row                                                 | `on_options(self, index)` → action ids |
+| Swipe            | the joystick's four directions, by finger                            | whatever that direction means          |
+| Short B          | back — pop, climb, or exit                                           | `on_back(self)` on the visible screen  |
+| Long B           | home — the cat, from any depth                                       | nothing; the platform keeps it         |
+| Hold power       | power off                                                            | nothing; the PMIC keeps it             |
 
 **A swipe is not a new gesture.** It is the joystick, made with a finger: swipe
 up and down where you would push up and down, left and right the same. Touch and
@@ -178,7 +187,7 @@ held at it → long, and the short is suppressed.
 
 So a single-screen app writes no `on_back` and B still leaves it; a pushed dialog
 needs no `on_back` and B still cancels it. Write one only for a level of your own to
-climb. To leave from inside a handler, call `ui.exit()`.
+climb. To leave from inside a handler, call `sys.exit()`.
 
 ```text
  cat  (home)                 ◄── long B, from anywhere, always
@@ -259,7 +268,28 @@ The manifest carries the knobs; Lua carries the behaviour.
 | `counter`                             | manifest | `false` if you are not a list                       |
 | `ui.title(s)`                         | Lua      | a title that changes at runtime                     |
 | `layout`                              | Lua      | on a list: `"grid"` for icons, `"mixer"` for values |
+| `style`                               | Lua      | which of the roles below a node is set in           |
 | `on_click` / `on_options` / `on_back` | Lua      | claim short A, long A, short B                      |
+
+### The style roles
+
+You name a role; the platform decides what it looks like. There is no font, no
+size and no colour in your tree, for the same reason there are no coordinates.
+
+| Role      | For                                              |
+| --------- | ------------------------------------------------ |
+| `body`    | the default — anything you have not marked       |
+| `title`   | a heading inside your region                     |
+| `caption` | the working under an answer: units, paths, hints |
+| `primary` | the affirmative one of two                       |
+| `danger`  | the one that cannot be undone                    |
+| `display` | _one number_ large enough to own the screen      |
+
+**`display` takes digits and nothing else** — `0-9`, a colon, a full stop, a
+dash. Ask for it with letters in the string and you get missing-glyph boxes, on
+purpose: it exists for a quantity that has earned the whole panel, and a role
+that also worked as "big text" would immediately become that instead, leaving
+the five prose roles no longer the only way to set words.
 
 **`frame: "bare"`** drops the top bar and gives you the whole 320x240 — for an app
 that is genuinely a canvas (a game, a clock face) rather than a list. It costs you
@@ -345,6 +375,67 @@ local function fill_rows()
 end
 ```
 
+## Example: the Clock
+
+_Designed, not built (#73)._ The File Browser above is a list; this is the other
+end of the same vocabulary, and it needs nothing the platform does not already
+have.
+
+```text
+┌────────────────────────────────────────────────┐
+│  09-09                                         │  caption
+│                                                │
+│                                                │
+│                 14:32                          │  display
+│                                                │
+│                                                │
+│           S   M   T  [W]  T   F   S            │  caption, one lit
+│                                                │
+│  ▮ 87%                                         │  caption
+└────────────────────────────────────────────────┘
+```
+
+Three layers, three sizes, and **none of them asks to be read twice**: the date
+waits in a corner for someone who wants it, the time meets the eye in the middle,
+and the weekday is a row of almost-invisible letters with today's lit. The strip
+earns its place by not needing to be read at all — seven positions, and the lit
+one is the answer.
+
+```lua
+ui.screen{ ui.list{
+  ui.label{ id = "date",    text = "09-09",             style = "caption" },
+  ui.label{ id = "time",    text = "14:32",             style = "display" },
+  ui.label{ id = "weekday", text = "S M T [W] T F S",   style = "caption" },
+  ui.label{ id = "battery", text = "▮ 87%",             style = "caption" },
+}}
+```
+
+**An unset clock says so.** The RTC comes up never having been set, and a
+confident `00:00` on the first of January is worse than an admission: it will be
+believed. So the same face shows `--:--` at the same size and in the same place,
+with **no** letter lit in the strip — seven positions, none of them today — and
+one line of `caption` under it saying to hold A.
+
+**Setting it is a mixer**, the shape from _What the main region holds_:
+
+```text
+      14      32       9      Sep     2026
+     ╔═══╗  ┌───┐   ┌───┐   ┌───┐   ┌───┐
+     ║███║  │███│   │███│   │███│   │███│
+     ╚═══╝  └───┘   └───┘   └───┘   └───┘
+     Hour    Min     Day    Month    Year
+```
+
+`ui.list{ layout = "mixer" }` is yours as much as it is the preference page's,
+and using it here costs a user nothing to learn: left and right choose a field,
+A makes it live, up and down change it, a finger sets it directly, B lets go and
+B again leaves. **Hours and minutes wrap** where a preference clamps — 23 goes to
+00, because a clock is a ring and a brightness is not.
+
+The screen is reached from `on_options`, which is what long A delivers, so the
+clock is doing exactly what the File Browser does with its actions — asking the
+platform for the one gesture that means "there is more here", and answering it.
+
 ## Home, and where your app is found
 
 _Designed, not built._
@@ -365,7 +456,7 @@ big.
                         │
   pinned  ◄──────────  [cat]  ──────────►  pinned
                         │
-                        ▼  settings, and preferences
+                        ▼  what this device is
 ```
 
 Up and down are not two of the same thing: **up is yours and down is the
@@ -375,16 +466,64 @@ maintained for one screen buys only that nobody may replace it, which is not
 worth having.
 
 The four directions mean four different things here, and that is what makes this
-the home section rather than a list laid out sideways. **Down reaches settings
-from any position on the carousel**, not only from the cat — you never have to
-come back to the middle to change the brightness.
+the home section rather than a list laid out sideways. **Down reaches the device
+page from any position on the carousel**, not only from the cat — you never have
+to come back to the middle to change the brightness.
 
-Settings is the platform's own page, in the **Values** shape above, and it is not
-an app: it is not in the grid, it cannot be pinned, and nothing you write can
-replace it. **Down again** — when no column is live — reaches the device info
-page: the version, the chip, what is free, what is answering on the bus. The
-stack goes down and B climbs back up it one level at a time, while long B
-returns to the cat from any depth. **The grid is the exception to "down is settings"**: inside it, down
+**Down is the device, and the device answers before it offers.** What down opens
+is a page of facts — the version, the chip, what is free, what the clock says,
+what is answering on the bus — with two tiles under them:
+
+```text
+  ┌──────────── Device ────────────┐
+  │ catnip v0.3.1                  │   the facts scroll: up and down
+  │ built 2026-09-09               │   move through them, and A on a
+  │ clock 2026-09-09 14:03         │   fact does nothing, because a
+  │ battery 82%   card none        │   fact is not a choice
+  ├────────────────────────────────┤
+  │      ⚙            ⚠           │   left and right choose a tile,
+  │  Preference   Diagnostic       │   A goes there
+  └────────────────────────────────┘
+```
+
+That order is the design: "what is this thing" is answered before "change it",
+and long before "is the joystick broken". Both pages below it are the platform's
+own — neither is in the grid, neither can be pinned, and nothing you write can
+replace either.
+
+**Preference** is the **Values** shape above. A keeps and leaves, B puts back and
+leaves, and both come back here rather than to the cat; long B is the one that
+goes all the way home, as it does everywhere.
+
+**Diagnostic** takes the whole panel — it is testing the panel, so it can hardly
+share it — and **long B gives it back**. It used to restart the device instead,
+which is a way out in the sense that a device that has started again is showing
+the cat, and is not one in any sense a person holding it cares about.
+
+### Setting something
+
+Every page that sets a value works the same way, whether it is the platform's or
+yours — the preference page and the clock's setter are the same six words:
+
+|               |                                           |
+| ------------- | ----------------------------------------- |
+| Left / Right  | choose a column                           |
+| Up / Down     | change the one you are on; hold to repeat |
+| Drag a column | set it to where your finger is            |
+| Tap a column  | move to it, and stay                      |
+| **Short A**   | **keep it and leave**                     |
+| **Short B**   | **put it back and leave**                 |
+| Long B        | home, keeping                             |
+
+**A value is applied as you step it**, because one you cannot see while choosing
+it is one you choose twice — and B putting it back is what lets "leave without
+saving" mean anything. Nothing is written until A.
+
+There is no "now you are editing" state, and that is what B buys: a press that
+can be taken back does not need guarding against. A tap and a press of A are the
+same event and not the same act — a finger carries the column it landed on, so
+it moves there and stays; a press has none to carry, so it can only mean the
+page. **The grid is the exception to "down is settings"**: inside it, down
 is the next row, because a rule that let a long list fall out of itself while
 being scrolled would cost more than the one gesture it saves.
 

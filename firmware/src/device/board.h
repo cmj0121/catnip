@@ -213,18 +213,17 @@
  *   0x38  FT6336 touch controller confirmed by its identity registers:
  *                                 0xA3 = 0x64 and 0xA8 = 0x11, which is what
  *                                 an FT6336 reports
- *   0x51  likely a PCF8563 / BM8563 RTC
+ *   0x51  PCF8563 (or its register-identical BM8563 clone), confirmed by
+ *         watching its seconds register tick - see rtc.cpp
  *   0x68  BMI270 accelerometer/gyro  identified by its own registers, and NOT
  *                                 the QMI8658A the vendor's code named. See
  *                                 the record below.
  *   0x41  unknown
  *
- * The last two are addresses that were seen answering. 0x51 is the
- * conventional address for an RTC, which is consistent with what this bus is
- * supposed to carry, but no chip there has been identified by reading a
- * register, and 0x41 has no guess attached at all. Do not let the plausible
- * names harden into facts the way the vendor's pin map did - 0x68 is the third
- * time it did exactly that, after the display's chip-select and the buttons.
+ * 0x41 was seen answering and has no guess attached at all. Do not let a
+ * plausible name harden into a fact the way the vendor's pin map did - 0x68 is
+ * the third time it did exactly that, after the display's chip-select and the
+ * buttons. 0x51 was on this list as a guess until it was made to prove itself.
  *
  * WHAT 0x68 ACTUALLY IS, AND HOW THAT WAS ESTABLISHED.
  *

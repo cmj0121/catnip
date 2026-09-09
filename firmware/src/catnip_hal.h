@@ -39,6 +39,11 @@ typedef struct {
      * device/imu.h), so three of these six have nothing to report. */
     void (*imu)(void *ud, float out[6]);
     long (*rtc_now)(void *ud); /* unix epoch seconds */
+    /* Set the clock. Returns non-zero when it took. NULL, or a zero return,
+     * both mean "this device cannot be told the time", which an app has to be
+     * able to find out - a setter that silently does nothing is worse than one
+     * that is not there. */
+    int (*rtc_set)(void *ud, long epoch);
 
     /* gpio.* */
     void (*gpio_mode)(void *ud, int pin, const char *mode); /* in|out|adc */

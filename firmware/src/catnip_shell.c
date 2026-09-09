@@ -19,6 +19,7 @@ struct catnip_shell {
     int state;
     int running;  /* index of the running app, or -1 */
     int resident; /* the app's setup is done but its UI lives on its handlers */
+    int bare;     /* the running app asked for the whole panel; see the header */
 };
 
 catnip_shell *catnip_shell_new(catnip_rt *rt, const char *apps_root, catnip_now_fn now,
@@ -91,6 +92,12 @@ int catnip_shell_launch(catnip_shell *s, int index, char *errbuf, size_t errlen)
     int rc = catnip_loader_open(s->apps[index].dir, &m, &code, errbuf, errlen);
     if (rc != 0) return rc; /* incompatible or invalid: stay in MENU */
 
+    /* Remembered here rather than acted on: what a bare frame looks like is the
+     * device's business, and the caller asks for this the moment the launch
+     * succeeds - before the app's first screen is built, which is what matters.
+     */
+    s->bare = m.bare;
+
     rc = catnip_sched_start(s->sched, code, m.id);
     free(code);
     if (rc != 0) {
@@ -118,6 +125,18 @@ int catnip_shell_step(catnip_shell *s)
 {
     if (!s) return CATNIP_SHELL_MENU;
     if (s->state != CATNIP_SHELL_RUNNING) return s->state;
+
+    /* An app that has finished says so, and is taken at its word.
+     *
+     * Before the resident check, not after it. A resident app is precisely the
+     * one that would ask: its main chunk has returned and it lives on through
+     * its handlers, so a handler is the only place left for it to say it is
+     * done. Checking after meant the request was read for exactly the apps that
+     * could never make it, and A on the clock's setter did nothing at all. */
+    if (catnip_sched_take_exit(s->sched)) {
+        catnip_shell_exit(s);
+        return s->state;
+    }
 
     /* Once an app is resident its main coroutine is gone; there is nothing to
      * step. It stays on screen and its handlers run in the render drain, until
@@ -147,6 +166,11 @@ int catnip_shell_step(catnip_shell *s)
         }
     }
     return s->state;
+}
+
+int catnip_shell_bare(const catnip_shell *s)
+{
+    return (s && s->state == CATNIP_SHELL_RUNNING) ? s->bare : 0;
 }
 
 const char *catnip_shell_title(const catnip_shell *s)

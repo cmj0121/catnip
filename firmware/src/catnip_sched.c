@@ -29,6 +29,7 @@ struct catnip_sched {
     int state;              /* last CATNIP_* state */
     unsigned long wake;     /* millis at which to resume, when sleeping */
     int started;            /* has the coroutine been resumed at least once */
+    int exit_asked;         /* the app called sys.exit(); see l_sys_exit */
     unsigned long wd_count; /* watchdog: hook fires in the current resume */
     catnip_now_fn now;
     catnip_pump_fn pump;
@@ -71,6 +72,25 @@ static int l_sys_now(lua_State *L)
     return 1;
 }
 
+/* sys.exit(): this app has finished.
+ *
+ * An app could already leave by declining short B - the platform takes it and
+ * exits - but that is the user leaving, not the app finishing. A setter that
+ * has written what it was opened to write is done, and had no way to say so:
+ * it could only sit there waiting to be dismissed from something it had already
+ * completed.
+ *
+ * It is a request rather than an exit. The app is running inside a coroutine
+ * the shell owns, and tearing that down from inside a call on it is the same
+ * mistake as a handler destroying the tree it is running on. The flag is read
+ * at a safe point, exactly as the launcher's pick latch is. */
+static int l_sys_exit(lua_State *L)
+{
+    catnip_sched *s = (catnip_sched *)lua_touserdata(L, lua_upvalueindex(1));
+    if (s) s->exit_asked = 1;
+    return 0;
+}
+
 static void install_sys(catnip_sched *s)
 {
     lua_State *L = catnip_rt_lua(s->rt);
@@ -78,6 +98,10 @@ static void install_sys(catnip_sched *s)
 
     lua_pushcfunction(L, l_sys_sleep);
     lua_setfield(L, -2, "sleep");
+
+    lua_pushlightuserdata(L, s);
+    lua_pushcclosure(L, l_sys_exit, 1);
+    lua_setfield(L, -2, "exit");
 
     lua_pushlightuserdata(L, s);
     lua_pushcclosure(L, l_sys_now, 1);
@@ -109,6 +133,16 @@ static void drop_coroutine(catnip_sched *s)
         s->co_ref = LUA_NOREF;
     }
     s->co = NULL;
+}
+
+int catnip_sched_take_exit(catnip_sched *s)
+{
+    int asked;
+
+    if (!s) return 0;
+    asked = s->exit_asked;
+    s->exit_asked = 0;
+    return asked;
 }
 
 int catnip_sched_start(catnip_sched *s, const char *code, const char *chunkname)

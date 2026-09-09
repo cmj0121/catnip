@@ -96,9 +96,21 @@ bool catnip_diag_serial_request(void);
  * over a device that is otherwise fine. */
 bool catnip_diag_begin(void);
 
-/* True once catnip_diag_begin() has succeeded. The page keeps the screen for
- * the rest of the run: there is no way out that does not involve the buttons,
- * and that is the same reason there is no way in that does. */
+/* Give the screen back and take the page down.
+ *
+ * The page used to have no way out at all, and long B restarted the device
+ * instead - which worked, in the sense that a device that has started again is
+ * showing the cat, and did not, in every sense a person holding it cares
+ * about: three seconds of boot, an animation, and no way to tell a deliberate
+ * exit from a crash. The page is built out of ordinary LVGL objects on a screen
+ * it borrowed, so taking it down is taking them off again.
+ *
+ * Safe to call when the page is not up. Afterwards the caller owns the screen
+ * and has to put something on it. */
+void catnip_diag_end(void);
+
+/* True once catnip_diag_begin() has succeeded, and false again after
+ * catnip_diag_end(). */
 bool catnip_diag_active(void);
 
 /* Put the page back on a screen that was cleared underneath it - which the

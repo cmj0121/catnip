@@ -11,6 +11,10 @@
  * the long lines below, and g_len records the length the sink was actually
  * handed, so a truncated line cannot pass for a whole one. */
 static char g_log[8192];
+/* The error sink is separate from the log on purpose - see catnip_rt_set_error -
+ * so it is captured separately here, which is the only way to show the two
+ * really are separate. */
+static char g_err[512];
 static size_t g_len;
 static int g_lines;
 static void capture(void *ud, const char *msg, size_t len)
@@ -22,9 +26,18 @@ static void capture(void *ud, const char *msg, size_t len)
     g_log[len] = '\0';
     g_lines++;
 }
+static void capture_err(void *ud, const char *msg, size_t len)
+{
+    (void)ud;
+    if (len >= sizeof(g_err)) len = sizeof(g_err) - 1;
+    memcpy(g_err, msg, len);
+    g_err[len] = '\0';
+}
+
 static void reset(void)
 {
     g_log[0] = '\0';
+    g_err[0] = '\0';
     g_len = 0;
     g_lines = 0;
 }
@@ -73,6 +86,7 @@ int main(void)
     catnip_rt *rt = catnip_rt_new();
     assert(rt && "runtime must be created");
     catnip_rt_set_log(rt, capture, NULL);
+    catnip_rt_set_error(rt, capture_err, NULL);
 
     /* hello meow: the ground-floor proof the VM runs. */
     reset();
@@ -100,6 +114,17 @@ int main(void)
     rc = catnip_rt_dostring(rt, "error('boom')", "=err");
     CHECK(rc != 0, "runtime error returns non-zero");
     CHECK(strstr(g_log, "boom") != NULL, "error message reaches the log");
+    /* And the error sink, which is what puts a fault on the screen. The two are
+     * separate so that something reacting to faults does not also react to a
+     * script saying hello. */
+    CHECK(strstr(g_err, "boom") != NULL, "and the fault reaches the error sink");
+    CHECK(strstr(g_err, "stack traceback") == NULL,
+          "as the message, without the stack under it");
+
+    /* A print is not a fault, however loudly it is spelled. */
+    reset();
+    rc = catnip_rt_dostring(rt, "print('error: not really')", "=notfault");
+    CHECK(rc == 0 && g_err[0] == '\0', "a print never reaches the error sink");
 
     /* a syntax error is caught at load time, not a crash. */
     reset();

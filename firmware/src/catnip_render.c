@@ -357,8 +357,35 @@ static catnip_style_role style_of(const char *s)
         if (strcmp(s, "caption") == 0) return CATNIP_STYLE_CAPTION;
         if (strcmp(s, "primary") == 0) return CATNIP_STYLE_PRIMARY;
         if (strcmp(s, "danger") == 0) return CATNIP_STYLE_DANGER;
+        if (strcmp(s, "display") == 0) return CATNIP_STYLE_DISPLAY;
     }
     return CATNIP_STYLE_BODY;
+}
+
+/* Whether anything would be delivered to this node if the focus stopped on it.
+ * A list with no on_click, on_prev and on_next has nothing for a selection to
+ * move and nothing for A to activate: it is text laid out in a column, and a
+ * focus ring around it offers an interaction that does not exist. Same rule as
+ * the row strip below, one level down - a strip is decoration by its shape,
+ * and this is decoration by having no handlers. */
+static int node_operable(lua_State *L, int node)
+{
+    static const char *const kKeys[] = {"on_click", "on_prev", "on_next"};
+    int operable = 0;
+    int i;
+
+    lua_pushstring(L, "handlers");
+    lua_rawget(L, node);
+    if (lua_istable(L, -1)) {
+        for (i = 0; i < 3 && !operable; i++) {
+            lua_pushstring(L, kKeys[i]);
+            lua_rawget(L, -2);
+            operable = !lua_isnil(L, -1);
+            lua_pop(L, 1);
+        }
+    }
+    lua_pop(L, 1);
+    return operable;
 }
 
 /* Fill *d from `node`, leaving on the stack the Lua values d->id and d->text
@@ -444,6 +471,8 @@ static void desc_build(ctx *c, int node, catnip_node_desc *d)
             d->layout = CATNIP_LAYOUT_ROWS;
             if (lay && strcmp(lay, "carousel") == 0) d->layout = CATNIP_LAYOUT_CAROUSEL;
             else if (lay && strcmp(lay, "mixer") == 0) d->layout = CATNIP_LAYOUT_MIXER;
+            else if (lay && strcmp(lay, "row") == 0) d->layout = CATNIP_LAYOUT_ROW;
+            else if (lay && strcmp(lay, "canvas") == 0) d->layout = CATNIP_LAYOUT_CANVAS;
             lua_pop(L, 1);
         }
 
@@ -470,7 +499,16 @@ static void desc_build(ctx *c, int node, catnip_node_desc *d)
         lua_pop(L, 1);
     }
 
-    if ((d->kind == CATNIP_NODE_BUTTON || d->kind == CATNIP_NODE_LIST) &&
+    /* A strip is a line of labels, not a set of choices: `selected` means
+     * nothing on one, there is nothing for prev/next to move and nothing for a
+     * click to activate. So it does not take focus, and the focus cursor does
+     * not stop on decoration - nor on a column that is decoration for the
+     * other reason, that nothing is listening to it. A button is focusable by
+     * its kind: it is a promise to the eye, and one that answered nothing
+     * would be a bug in the app rather than a page of facts. */
+    if ((d->kind == CATNIP_NODE_BUTTON ||
+         (d->kind == CATNIP_NODE_LIST && d->layout != CATNIP_LAYOUT_ROW &&
+          node_operable(L, node))) &&
         !(flags & (CATNIP_NODE_HIDDEN | CATNIP_NODE_DISABLED)))
         flags |= CATNIP_NODE_FOCUSABLE;
     d->flags = flags;

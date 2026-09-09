@@ -45,6 +45,8 @@ RT_SRC  += $(SRCDIR)/device/imu_map.c
 RT_SRC  += $(SRCDIR)/device/ui_input_map.c
 RT_SRC  += $(SRCDIR)/device/press_gesture.c
 RT_SRC  += $(SRCDIR)/device/swipe.c
+RT_SRC  += $(SRCDIR)/device/rtc_time.c
+RT_SRC  += $(SRCDIR)/device/key_repeat.c
 TEST_SRC := $(wildcard test/native/*.c)
 TESTS   := $(patsubst test/native/%.c,$(BUILD)/%,$(TEST_SRC))
 

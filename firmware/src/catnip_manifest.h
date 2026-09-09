@@ -27,10 +27,24 @@ typedef struct {
     char author[64];
     char entry[64]; /* defaults to "main.lua" */
     char icon[64];
+    /* What this app puts on its carousel cell instead of an icon: the name of a
+     * value the platform already has, or "" for an ordinary icon.
+     *
+     * A name rather than a value, because the carousel is drawn by the shell
+     * and the app is not running when it is - its Lua has not been loaded, so
+     * it cannot compute anything. And a small vocabulary rather than a free
+     * string, so an unknown one degrades to "no glance" on an older firmware
+     * instead of failing to load. There is one word so far: "time". */
+    char glance[16];
     int api_major;
     int api_minor;
     char permissions[CATNIP_MAX_PERMISSIONS][32];
     int n_permissions;
+    /* 1 when the manifest says `"frame": "bare"`: this app is a canvas rather
+     * than a page, so the platform's header is not drawn over it and it is
+     * given the whole 320x240. It buys space, not coordinates - the app still
+     * names things and never places them. */
+    int bare;
 } catnip_manifest;
 
 /* Parse manifest JSON text into `out`. Required fields: id, name, catnip_api

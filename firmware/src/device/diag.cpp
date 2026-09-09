@@ -831,6 +831,40 @@ bool catnip_diag_begin(void)
     return true;
 }
 
+void catnip_diag_end(void)
+{
+    if (!g_active) return;
+
+    /* The page built itself on the screen the backend was already showing -
+     * lv_screen_active(), which is the blank one - and stripped its styles on
+     * the way in. So leaving is: take the widgets off it, put the ground back,
+     * and let whoever comes next load a screen of their own over it.
+     *
+     * Not lv_obj_delete(g_screen): that screen is not the page's, it was
+     * borrowed, and deleting it would leave the display with nothing active
+     * for as long as it took the shell to build its first tree. */
+    lv_obj_clean(g_screen);
+    lv_obj_set_style_bg_color(g_screen, lv_color_hex(kColBg), 0);
+    lv_obj_set_style_bg_opa(g_screen, LV_OPA_COVER, 0);
+
+    /* Every pointer the page held is now dangling, and apply() runs off these.
+     * Cleared together rather than as they are used, because "the page is
+     * gone" is one fact and half of it is worse than none. */
+    g_overlay = nullptr;
+    g_lbl_quad = nullptr;
+    g_lbl_touch = nullptr;
+    g_lbl_up = nullptr;
+    g_lbl_event = nullptr;
+    g_lbl_imu = nullptr;
+    for (int b = 0; b < CATNIP_BTN_COUNT; b++) {
+        g_box[b] = nullptr;
+        g_box_label[b] = nullptr;
+    }
+    g_screen = nullptr;
+    g_active = false;
+    Serial.println("[catnip] diag: leaving, the screen goes back to the shell");
+}
+
 bool catnip_diag_active(void)
 {
     return g_active;

@@ -43,6 +43,17 @@ int catnip_rt_mem(catnip_rt *rt, size_t *in_use, size_t *peak);
 /* Route print()/errors to `fn`. Until set, output goes to stdout. */
 void catnip_rt_set_log(catnip_rt *rt, catnip_log_fn fn, void *ud);
 
+/* A second sink, called only for a Lua error, and given the message without the
+ * traceback.
+ *
+ * It is separate from the log because the log cannot tell the two apart: a
+ * script's own print() and a fault arrive at the same callback, and something
+ * that wants to react to a fault - put it on the screen, count it, stop - must
+ * not react to a script saying hello. The traceback still goes to the log,
+ * where there is room for it; what arrives here is the one line a person needs
+ * to see. */
+void catnip_rt_set_error(catnip_rt *rt, catnip_log_fn fn, void *ud);
+
 /* Run a chunk. Returns 0 on success, non-zero on load/runtime error (the error
  * message is sent to the log). `chunkname` labels the chunk in errors. */
 int catnip_rt_dostring(catnip_rt *rt, const char *code, const char *chunkname);

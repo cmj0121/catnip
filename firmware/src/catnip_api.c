@@ -96,6 +96,17 @@ static int l_rtc(lua_State *L)
     return 1;
 }
 
+/* sensor.rtc_set(epoch) -> ok. False when this device has no clock to set, so
+ * an app can tell "I set it" from "there was nothing to set" rather than
+ * writing into the air. */
+static int l_rtc_set(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+    lua_Integer epoch = luaL_checkinteger(L, 1);
+    lua_pushboolean(L, (h && h->rtc_set) ? h->rtc_set(h->ud, (long)epoch) : 0);
+    return 1;
+}
+
 /* ---- gpio.* ---- */
 
 static int l_gpio_mode(lua_State *L)
@@ -413,7 +424,8 @@ int catnip_api_open(catnip_rt *rt, const catnip_hal *hal)
     static const luaL_Reg device_funcs[] = {
         {"vibrate", l_vibrate},       {"led", l_led},       {"battery", l_battery},
         {"brightness", l_brightness}, {"button", l_button}, {NULL, NULL}};
-    static const luaL_Reg sensor_funcs[] = {{"imu", l_imu}, {"rtc", l_rtc}, {NULL, NULL}};
+    static const luaL_Reg sensor_funcs[] = {
+        {"imu", l_imu}, {"rtc", l_rtc}, {"rtc_set", l_rtc_set}, {NULL, NULL}};
     static const luaL_Reg gpio_funcs[] = {{"mode", l_gpio_mode},
                                           {"write", l_gpio_write},
                                           {"read", l_gpio_read},

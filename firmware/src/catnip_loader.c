@@ -105,7 +105,10 @@ int catnip_loader_builtin(catnip_app_entry *out, int max)
         catnip_manifest m;
         e->compatible = (catnip_manifest_parse(b->manifest, &m, NULL, 0) == 0) &&
                         catnip_manifest_compatible(&m);
-        if (e->compatible) e->needs_fs = manifest_needs_fs(&m);
+        if (e->compatible) {
+            e->needs_fs = manifest_needs_fs(&m);
+            snprintf(e->glance, sizeof(e->glance), "%s", m.glance);
+        }
         n++;
     }
     return n;
@@ -149,6 +152,7 @@ int catnip_loader_discover(const char *apps_root, catnip_app_entry *out, int max
                 snprintf(entry->id, sizeof(entry->id), "%s", m.id);
                 snprintf(entry->name, sizeof(entry->name), "%s", m.name);
                 snprintf(entry->icon, sizeof(entry->icon), "%s", m.icon);
+                snprintf(entry->glance, sizeof(entry->glance), "%s", m.glance);
                 entry->compatible = catnip_manifest_compatible(&m);
                 entry->needs_fs = manifest_needs_fs(&m);
             } else {

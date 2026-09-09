@@ -70,6 +70,11 @@ int catnip_shell_step(catnip_shell *s);
  * body rather than anywhere a test could reach it. */
 const char *catnip_shell_title(const catnip_shell *s);
 
+/* Whether the running app asked for the whole panel - `"frame": "bare"` in its
+ * manifest. Meaningless when nothing is running, and 0 then, because the
+ * launcher's own screens are never bare. */
+int catnip_shell_bare(const catnip_shell *s);
+
 /* Act on a short B, after the drain that ran the app's on_back. Returns the
  * shell state.
  *

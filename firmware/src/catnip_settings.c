@@ -23,13 +23,11 @@ static const char CATNIP_SETTINGS_LUA[] =
     "function __catnip_settings_build(names, fills, blocks, labels, pos, ranges)\n"
     "  local rows = {}\n"
     "  local list\n"
-    /* Which column is under the ring (0 = none, which is where the page opens)
-     * and whether that column is the one being edited. Two states, because
-     * choosing a setting and changing it are two acts here: arriving on a page
-     * of five things and having one of them already live under the joystick is
-     * how a brightness gets changed by someone who only wanted to look. */
-    "  local sel = 0\n"
-    "  local active = false\n"
+    /* One state, not two. A page of settings used to require A to make a column
+     * live before up and down meant anything, because arriving here by pushing
+     * down should not put a brightness under the joystick - but B discards now,
+     * so a press that can be taken back needs no guarding against. */
+    "  local sel = 1\n"
     /* A column is either a ladder of named rungs or a continuous range, and
      * `pos[i]` holds whichever that column deals in - the rung, or the value.
      * These three turn one into the other so nothing below has to ask twice. */
@@ -51,12 +49,11 @@ static const char CATNIP_SETTINGS_LUA[] =
     "  end\n"
     "  local function paint()\n"
     "    list.selected = sel\n"
-    "    __catnip_settings_live(active)\n"
     "    for i, row in ipairs(rows) do\n"
-    /* `primary` is how the backend is told which column is live - the style
-     * roles are already the vocabulary for "this one matters more than its
-     * neighbours". */
-    "      row.style = (active and i == sel) and 'primary' or 'body'\n"
+    /* `primary` is how the backend is told which column the keys are on - the
+     * style roles are already the vocabulary for "this one matters more than
+     * its neighbours". */
+    "      row.style = (i == sel) and 'primary' or 'body'\n"
     "    end\n"
     "  end\n"
     /* Put a column where it is being asked to go, and tell C. One place, so
@@ -83,7 +80,6 @@ static const char CATNIP_SETTINGS_LUA[] =
      * finger is pointing at a value, not filling a tank. */
     "                        on_drag = function(self, pct)\n"
     "                          sel = i\n"
-    "                          active = true\n"
     "                          local r = ranges[i]\n"
     "                          if r then\n"
     "                            local v = r[1] + pct * (r[2] - r[1]) / 100\n"
@@ -98,49 +94,43 @@ static const char CATNIP_SETTINGS_LUA[] =
     "  list = ui.list{ id = 'settings_list', layout = 'mixer',\n"
     /* Left and right choose the column, and stop at the ends rather than
      * wrapping: this shape has a visible first and last, and coming round in
-     * one you can see the whole of reads as the ring jumping. From nothing
-     * selected, either direction lands on the first. */
+     * one you can see the whole of reads as the ring jumping. */
     "    on_prev = function()\n"
-    "      if sel <= 1 then sel = 1 else sel = sel - 1 end\n"
+    "      if sel > 1 then sel = sel - 1 end\n"
     "      paint()\n"
     "    end,\n"
     "    on_next = function()\n"
-    "      if sel < 1 then sel = 1 elseif sel < #rows then sel = sel + 1 end\n"
+    "      if sel < #rows then sel = sel + 1 end\n"
     "      paint()\n"
     "    end,\n"
-    /* Short A, or a tap: choose this column to edit. A tap names its own
-     * column, where the joystick can only have moved to one. */
+    /* Short A confirms the page: keep what is on it and leave. There is no
+     * "are you sure" because the page already shows exactly what it is about to
+     * keep, and a question whose answer is on the screen is worth not asking.
+     *
+     * A *tap* carries the column it landed on and only moves the ring there.
+     * The two are the same event and they are not the same act: a finger names
+     * a column, where a button press has no column to name and can therefore
+     * only mean the page. Making a tap confirm as well would leave no way to
+     * choose a column by touch without also leaving. */
     "    on_click = function(self, i)\n"
-    "      if i then sel = i end\n"
-    "      if sel >= 1 then active = true end\n"
-    "      paint()\n"
+    "      if i then sel = i; paint(); return end\n"
+    "      __catnip_settings_done(1)\n"
     "    end,\n"
-    /* Up and down are the value, and only once a column is live. Before that
-     * they do nothing, which is the point of the second state. */
+    /* Up and down are the value of whichever column the ring is on. */
     "    on_raise = function()\n"
-    "      if not (active and sel >= 1) then return end\n"
     "      put(sel, pos[sel] + (ranges[sel] and ranges[sel][3] or 1))\n"
     "    end,\n"
     "    on_lower = function()\n"
-    "      if not (active and sel >= 1) then return end\n"
     "      put(sel, pos[sel] - (ranges[sel] and ranges[sel][3] or 1))\n"
     "    end }\n"
     "  list:set_children(rows)\n"
     "  paint()\n"
-    /* B lets go of the column first and leaves the page second - one press per
-     * level, the same climb every other screen offers. Claimed only while
-     * something is live, so a B with nothing selected falls through to the
-     * platform and leaves. */
+    /* B discards and leaves. It is claimed so the platform does not also act on
+     * it - what happens next is the caller's, and it is putting back what these
+     * settings were when the page opened. */
     "  ui.screen{ list, id = 'settings_screen',\n"
     "    on_back = function()\n"
-    "      if not active then return false end\n"
-    "      active = false\n"
-    /* And the ring goes with it. "Unselected" has to look like nothing is
-     * selected: a column still wearing a border after B would say the page is
-     * waiting on it, and the next up or down - which now does nothing - would
-     * read as the device having stopped listening. */
-    "      sel = 0\n"
-    "      paint()\n"
+    "      __catnip_settings_done(2)\n"
     "      return true\n"
     "    end }\n"
     "end\n";
@@ -238,7 +228,7 @@ struct catnip_settings {
     catnip_config cfg;   /* the settings as they now stand */
     int step[SET_COUNT]; /* the rung each column is on, zero-based */
     bool dirty;
-    bool editing; /* a column is live; see catnip_settings_editing() */
+    int result; /* how the owner left; see catnip_settings_take_result() */
 };
 
 /* The rung whose value is closest to `v`. Distance rather than a match, because
@@ -307,13 +297,12 @@ static int settings_set_cb(lua_State *L)
     return 0;
 }
 
-/* Lua telling C what the page is showing. Pushed rather than pulled because the
- * answer lives in the closure that moves the selection, and nothing in C is in
- * a position to read it. */
-static int settings_live_cb(lua_State *L)
+/* Lua saying the owner has left, and how. Pushed rather than pulled because the
+ * answer is an event and nothing in C is in a position to notice one. */
+static int settings_done_cb(lua_State *L)
 {
     catnip_settings *s = (catnip_settings *)lua_touserdata(L, lua_upvalueindex(1));
-    if (s) s->editing = lua_toboolean(L, 1) != 0;
+    if (s) s->result = (int)luaL_checkinteger(L, 1);
     return 0;
 }
 
@@ -343,8 +332,8 @@ catnip_settings *catnip_settings_new(catnip_rt *rt)
     lua_pushcclosure(L, settings_set_cb, 1);
     lua_setglobal(L, "__catnip_settings_set");
     lua_pushlightuserdata(L, s);
-    lua_pushcclosure(L, settings_live_cb, 1);
-    lua_setglobal(L, "__catnip_settings_live");
+    lua_pushcclosure(L, settings_done_cb, 1);
+    lua_setglobal(L, "__catnip_settings_done");
     return s;
 }
 
@@ -360,7 +349,7 @@ void catnip_settings_show(catnip_settings *s, const catnip_config *cfg)
 
     if (cfg) s->cfg = *cfg;
     s->dirty = false;
-    s->editing = false; /* every rebuild opens with nothing live */
+    s->result = CATNIP_SETTINGS_STAY; /* nobody has left a page just opened */
     s->step[SET_SCREEN] = nearest(&kDefs[SET_SCREEN], s->cfg.screen_brightness);
     /* nearest() gives a rung for a ladder and the value itself for a range, and
      * `step[]` holds whichever of the two that column deals in. */
@@ -456,9 +445,14 @@ const catnip_config *catnip_settings_config(const catnip_settings *s)
     return s ? &s->cfg : NULL;
 }
 
-bool catnip_settings_editing(const catnip_settings *s)
+int catnip_settings_take_result(catnip_settings *s)
 {
-    return s && s->editing;
+    int r;
+
+    if (!s) return CATNIP_SETTINGS_STAY;
+    r = s->result;
+    s->result = CATNIP_SETTINGS_STAY;
+    return r;
 }
 
 bool catnip_settings_take_dirty(catnip_settings *s)
