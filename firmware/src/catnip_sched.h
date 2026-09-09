@@ -50,6 +50,10 @@ catnip_sched *catnip_sched_new(catnip_rt *rt, catnip_now_fn now, catnip_pump_fn 
  * success, non-zero on a load (syntax) error. */
 int catnip_sched_start(catnip_sched *s, const char *code, const char *chunkname);
 
+/* Whether the app has called sys.exit() since this was last asked. Reading
+ * clears it, so one request is acted on once. */
+int catnip_sched_take_exit(catnip_sched *s);
+
 /* Advance the app by one step: resume it if it is due, otherwise pump the host.
  * Returns one of the CATNIP_* states. */
 int catnip_sched_step(catnip_sched *s);

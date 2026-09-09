@@ -79,6 +79,20 @@
  * in, so the only place to ask for one is here. */
 #define LV_FONT_MONTSERRAT_16 1
 
+/* The one text size a canvas uses. A bare screen has a single thing on it worth
+ * looking at - that is what asking for one means - and everything else there is
+ * a label beside that thing rather than a line in a page. So the prose roles
+ * keep their colours and share a size, and the size is a step up from a page's,
+ * because a canvas is looked at rather than read. */
+#define LV_FONT_MONTSERRAT_20 1
+#define LV_FONT_MONTSERRAT_24 1
+
+/* The `display` role's face is not one of LVGL's. 48 is the largest Montserrat
+ * the library builds in, and 48 px is not a clock face on this panel - it is a
+ * line of text that happens to be bigger. catnip_font_display.h carries the
+ * one that is, generated from the same typeface at 96 px with the letters left
+ * out, which costs a third of what enabling Montserrat 48 cost. */
+
 /* An app's identity icon is a PNG on the card, or compiled in for a built-in
  * one, and either way it arrives as bytes rather than as an lv_image_dsc_t
  * somebody generated. lodepng decodes from memory, so no filesystem driver has

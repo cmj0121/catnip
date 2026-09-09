@@ -44,6 +44,15 @@ const catnip_render_backend *catnip_lvgl_backend(catnip_rt *rt);
  * turns true. */
 bool catnip_lvgl_backend_active(void);
 
+/* The palette, for the two platform overlays that are drawn outside the node
+ * tree - the frame's bar and the fault toast. Both had their own copies of
+ * these values with a comment saying whose they really were, which is a theme
+ * change that silently misses one surface. */
+uint32_t catnip_color_bg(void);
+uint32_t catnip_color_text(void);
+uint32_t catnip_color_faint(void);
+uint32_t catnip_color_danger(void);
+
 /* Mark the screen dirty so the next catnip_lvgl_step() paints it again. For
  * when the panel was painted over from outside LVGL, which LVGL has no way to
  * know about: the power button blanking it is the case that exists today. */
@@ -75,6 +84,18 @@ catnip_handle catnip_lvgl_backend_focused(void);
  * one asking.
  *
  * Returns 0 when the point is over no such column. */
+/* The running app asked for the whole panel: no room reserved for the frame's
+ * bar, and a screen that centres what it holds rather than stacking it from the
+ * top. Set when an app is launched and cleared when it leaves, because it is a
+ * property of what is running rather than of any node.
+ *
+ * Centring is part of what "bare" means and not a separate knob. A canvas is
+ * what an app asks for when its content is one thing to be looked at rather
+ * than a page to be read down, and there is nowhere else on such a screen for
+ * that thing to sensibly go. Rule 1 is untouched: the app still named a label
+ * and never said where. */
+void catnip_lvgl_backend_set_bare(bool bare);
+
 int catnip_lvgl_backend_mixer_at(int x, int y, catnip_handle *h, int *pct);
 
 /* The same measurement against one column that has already been chosen, so a

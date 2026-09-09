@@ -1,0 +1,11 @@
+{
+  "id": "clock",
+  "name": "Clock",
+  "version": "0.1.0",
+  "author": "cmj",
+  "catnip_api": "1.0",
+  "entry": "main.lua",
+  "glance": "time",
+  "counter": false,
+  "permissions": []
+}

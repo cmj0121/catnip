@@ -10,10 +10,6 @@
 
 namespace {
 
-/* The palette is lvgl_backend.cpp's; these are the two values the bar needs and
- * they are the ones the rest of the device draws with. */
-const uint32_t kColBarInk = 0xFFFFFF;
-const uint32_t kColBarFaint = 0x7B7D7B;
 /* A shade under the ground it floats over, so the bar reads as a bar rather
  * than as a stripe of a different material. */
 const uint32_t kColBarBg = 0x18243A;
@@ -75,9 +71,9 @@ bool ensure_bar(void)
 
     /* Left to right, and each cell takes an equal share so the header stays
      * centred on the screen rather than on whatever is left over. */
-    g_battery = make_cell(g_bar, LV_TEXT_ALIGN_LEFT, kColBarFaint);
-    g_title = make_cell(g_bar, LV_TEXT_ALIGN_CENTER, kColBarInk);
-    g_counter = make_cell(g_bar, LV_TEXT_ALIGN_RIGHT, kColBarFaint);
+    g_battery = make_cell(g_bar, LV_TEXT_ALIGN_LEFT, catnip_color_faint());
+    g_title = make_cell(g_bar, LV_TEXT_ALIGN_CENTER, catnip_color_text());
+    g_counter = make_cell(g_bar, LV_TEXT_ALIGN_RIGHT, catnip_color_faint());
     return g_battery && g_title && g_counter;
 }
 

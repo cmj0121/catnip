@@ -40,6 +40,9 @@
 #include "device/power.h"
 #include "device/i2cbus.h"
 #include "device/prefs.h"
+#include "device/rtc.h"
+#include "device/toast.h"
+#include "device/rtc_time.h"
 #include "device/ui_input.h"
 #include "generated/anim_f01_rgb565.h"
 #include "generated/anim_f02_rgb565.h"
@@ -80,8 +83,23 @@ static catnip_page g_page;
  * than read off the page, because the page's own dirty flag is consumed every
  * pass to apply the change to the hardware, and saving happens once, later. */
 static bool g_settings_unsaved;
+/* What the settings were when the page opened, so B can put them back. Applying
+ * as the owner steps is what makes a brightness visible while it is being
+ * chosen; being able to undo that is what lets B mean "leave without saving"
+ * rather than "leave, having already changed everything". */
+static catnip_config g_settings_was;
 /* The settings as they now stand. The one copy the rest of this file reads. */
 static catnip_config g_cfg;
+
+/* A Lua fault, on the glass as well as in the log. The log keeps the traceback;
+ * this is the one line somebody holding the device needs to see, because the
+ * alternative is a screen that stopped responding and said nothing. */
+static void lua_error_toast(void *ud, const char *msg, size_t len)
+{
+    (void)ud;
+    (void)len;
+    catnip_toast_show(msg);
+}
 
 static void serial_log(void *ud, const char *msg, size_t len)
 {
@@ -121,31 +139,9 @@ static bool g_animating = true;
 /* Hand the screen to the input diagnostic (#42). The boot animation stops the
  * same way it will when the shell takes over (#33): g_animating goes false and
  * stays false, so nothing repaints the mascot over the page. */
-/* Set across a restart and cleared by the boot that honours it.
- *
- * RTC memory is exactly the right lifetime for this: it survives a software
- * reset and not a power cycle, so "skip the diagnostic this once" means this
- * once. Without it, leaving the page on a device whose card carries the
- * marker file would come straight back to the page, and the way out would not
- * be a way out. RTC_NOINIT_ATTR rather than RTC_DATA_ATTR so a cold boot leaves
- * whatever noise is in the cell rather than being zeroed into a valid-looking
- * value - which is why the flag is a magic number and not a bool. */
-RTC_NOINIT_ATTR static uint32_t g_skip_diag;
-#define SKIP_DIAG_MAGIC 0xCA7B0075u
-
 /* B's press timer while the diagnostic page is up. Separate from ui_input's,
  * which is not running then. */
 static catnip_press g_press_diag;
-
-static void catnip_reboot_to_normal(void)
-{
-    Serial.println("[catnip] diag: leaving, restarting into the shell");
-    Serial.flush();
-    g_skip_diag = SKIP_DIAG_MAGIC;
-    /* Not ESP.restart(): this board switches itself off when the rail's hold
-     * pin is let go, and a bare reset lets go of it. See power.h. */
-    catnip_power_restart();
-}
 
 static void enter_diag(void)
 {
@@ -171,6 +167,22 @@ static void enter_diag(void)
     catnip_ui_input_end();
     g_animating = false;
     if (!catnip_diag_begin()) g_animating = true;
+}
+
+static void rebuild_menu(void);
+
+/* And out of it, back to the cat. The page hands the screen back; what is on
+ * the other side is whatever was there before it - which is the launcher,
+ * because entering tore any running app down. The touch panel comes back with
+ * it: enter_diag() gave the indev away so the page's own screen would not be
+ * taking taps, and nothing else puts it back. */
+static void leave_diag(void)
+{
+    if (!catnip_diag_active()) return;
+    catnip_diag_end();
+    catnip_ui_input_begin();
+    g_page = PAGE_HOME;
+    rebuild_menu();
 }
 
 static const uint16_t *const g_anim_frames[] = {
@@ -369,37 +381,74 @@ static void update_status(bool force)
     if (!force && now - g_status_last < 2000) return;
     g_status_last = now;
     catnip_frame_set_battery(catnip_pmu_battery_percent());
+
+    /* And the launcher's value cells (#75). Only while the ring is what is on
+     * screen: `g_menu` outlives the menu's tree, so testing it asked "does a
+     * launcher exist" - which is always - and answered by going to the I2C bus
+     * for a clock nobody could see, thirty times a minute, for as long as the
+     * device was on. The menu writes only what differs, so of the reads that
+     * remain one in thirty changes anything. */
+    if (g_menu && g_page == PAGE_HOME && g_shell &&
+        catnip_shell_state(g_shell) != CATNIP_SHELL_RUNNING) {
+        uint32_t t = catnip_rtc_now();
+        if (t) {
+            static const char *const kDay[7] = {"Sun", "Mon", "Tue", "Wed",
+                                                "Thu", "Fri", "Sat"};
+            char hm[8];
+            char date[16];
+            int32_t y;
+            uint32_t mo, d, h, mi, wd;
+
+            catnip_rtc_split(t, &y, &mo, &d, &h, &mi, &wd);
+            snprintf(hm, sizeof(hm), "%02u:%02u", (unsigned)h, (unsigned)mi);
+            snprintf(date, sizeof(date), "%04d-%02u-%02u", (int)y, (unsigned)mo,
+                     (unsigned)d);
+            catnip_menu_set_glance(g_menu, hm, date, kDay[wd]);
+        } else {
+            /* The same admission the clock's own face makes. */
+            catnip_menu_set_glance(g_menu, NULL, "----------", "");
+        }
+    }
 }
 
 static void rebuild_menu(void);
+static void enter_info(void);
 
 /* Down from the home section: the settings plane. It replaces the menu's tree
  * with its own, which is all "entering" means here - both are platform screens
  * on the same renderer, and neither is an app. */
 static void enter_settings(void)
 {
-    if (!g_settings || g_page != PAGE_HOME) return;
+    if (!g_settings || (g_page != PAGE_HOME && g_page != PAGE_INFO)) return;
     g_page = PAGE_PREF;
     g_settings_unsaved = false;
+    g_settings_was = g_cfg;
     catnip_settings_show(g_settings, &g_cfg);
     catnip_frame_set_title("Preference");
 }
 
 /* And back out of it, saving on the way if anything was stepped. Once, here,
  * rather than on every step: see prefs.h. */
-static void leave_settings(void)
+static void leave_settings(bool keep, bool home)
 {
     if (g_page != PAGE_PREF) return;
-    g_page = PAGE_HOME;
-    if (g_settings_unsaved) {
-        const catnip_config *cfg = catnip_settings_config(g_settings);
-        if (cfg) {
-            g_cfg = *cfg;
-            catnip_prefs_save(&g_cfg);
-        }
-        g_settings_unsaved = false;
+    if (keep) {
+        if (g_settings_unsaved) catnip_prefs_save(&g_cfg);
+    } else {
+        /* Put back what was applied on the way in. Nothing is written, so a
+         * page left with B costs no flash even if every column was moved. */
+        g_cfg = g_settings_was;
+        apply_settings(&g_cfg);
     }
-    rebuild_menu();
+    g_settings_unsaved = false;
+    /* Back to the hub it was opened from. Long B is the one that goes all the
+     * way to the cat, and says so by passing PAGE_HOME. */
+    if (home) {
+        g_page = PAGE_HOME;
+        rebuild_menu();
+    } else {
+        enter_info();
+    }
 }
 
 /* What this device is, written out. Asked afresh every time the page is opened
@@ -432,6 +481,21 @@ static void enter_info(void)
              (unsigned)(ESP.getPsramSize() / (1024U * 1024U)));
     snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "heap %u KB free",
              (unsigned)(ESP.getFreeHeap() / 1024U));
+    {
+        uint32_t t = catnip_rtc_now();
+        if (t) {
+            int32_t y;
+            uint32_t mo, d, h, mi;
+            catnip_rtc_split(t, &y, &mo, &d, &h, &mi, NULL);
+            snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "clock %04d-%02u-%02u %02u:%02u",
+                     (int)y, (unsigned)mo, (unsigned)d, (unsigned)h, (unsigned)mi);
+        } else {
+            /* Which part, even when it has no time to give: knowing the chip is
+             * there and unset is a different problem from it not being there. */
+            snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "clock not set (%s)",
+                     catnip_rtc_part());
+        }
+    }
     snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "battery %d%%",
              catnip_pmu_battery_percent());
     if (catnip_sd_mounted())
@@ -464,11 +528,13 @@ static void enter_info(void)
 
     for (i = 0; i < n; i++)
         ptrs[i] = rows[i];
-    /* The one row that acts rather than reports, and it says what it costs:
-     * catnip_diag_begin() takes the screen and keeps it, so there is no way out
-     * of that page short of a reboot. Saying so on the row is cheaper than
-     * making the page leavable, and much cheaper than not saying so. */
-    catnip_device_info_show(g_info, ptrs, n, "Input diagnostic - hold B to return");
+    /* The two places you would go having read this, each with the icon it is
+     * known by: the gear the preference page is reached by, and the warning
+     * triangle for a page that takes the screen and only gives it back through
+     * a restart. */
+    static const catnip_info_key kPref = {"Preference", "settings"};
+    static const catnip_info_key kDiag = {"Diagnostic", "warning"};
+    catnip_device_info_show(g_info, ptrs, n, &kPref, &kDiag);
     catnip_frame_set_title("Device");
 }
 
@@ -530,6 +596,10 @@ void setup()
     if (!catnip_pmu_begin()) Serial.println("[catnip] WARN: PMIC not found");
     catnip_i2c_scan();
     if (!catnip_ioexp_begin()) Serial.println("[catnip] WARN: I/O expander not found");
+    /* After the scan, so the dump it prints sits under the list of what
+     * answered. It takes a second, deliberately: identifying the part means
+     * watching a register tick, and there is no shorter way to do that. */
+    catnip_rtc_begin();
 
     /* Before the panel is lit, and before the card is even looked for: the
      * fade below climbs to the owner's brightness, and with an empty g_cfg that
@@ -554,31 +624,13 @@ void setup()
      * the owner's settings only when a card happened to be in the slot is the
      * exact failure this page exists to fix. */
     apply_config();
-    if (card) {
-        /* The marker file means the owner wants the input page and nothing
-         * else, so the Lua runtime and the shell below are never started: they
-         * would only delay the page and then compete with it for the screen.
-         * The other way in - typing "diag" - is in loop(), because it has to
-         * work on a device with no card in the slot. */
-        if (g_skip_diag == SKIP_DIAG_MAGIC) {
-            /* Left the page on purpose a moment ago. Cleared here so it is one
-             * boot's reprieve and not a mode - the marker file still means what
-             * it says on the boot after this one. */
-            g_skip_diag = 0;
-            Serial.println("[catnip] diag: marker present, skipped once by request");
-        } else if (catnip_diag_marker_present()) {
-            Serial.println("[catnip] diag: " CATNIP_DIAG_MARKER_PATH " is on the card");
-            enter_diag();
-            return;
-        }
-    }
-
     g_rt = catnip_rt_new_tracked(); /* Lua heap lives in PSRAM (#8) */
     if (!g_rt) {
         Serial.println("[catnip] FATAL: runtime allocation failed");
         return;
     }
     catnip_rt_set_log(g_rt, serial_log, nullptr);
+    catnip_rt_set_error(g_rt, lua_error_toast, nullptr);
     /* device/sensor/gpio/service/fs (#3), backed by the real drivers (#35).
      * What is wired and what is deliberately left as a no-op is listed at the
      * top of device/hal_meowkit.cpp. */
@@ -623,6 +675,19 @@ void setup()
         Serial.printf("[catnip] shell ready, %d built-in app(s), %d under %s\n", builtin,
                       total - builtin, CATNIP_APPS_ROOT);
     }
+
+    /* The marker file means the owner wants the input page on this boot. Last,
+     * after the shell is standing, rather than instead of it: long B leaves the
+     * page now, and the way out has to lead to a launcher that exists. It cost
+     * nothing to build - the page takes the screen from it on the next line -
+     * and the alternative is a device whose diagnostic exits to nothing.
+     *
+     * The other way in - typing "diag" - is in loop(), because it has to work
+     * on a device with no card in the slot. */
+    if (card && catnip_diag_marker_present()) {
+        Serial.println("[catnip] diag: " CATNIP_DIAG_MARKER_PATH " is on the card");
+        enter_diag();
+    }
 }
 
 void loop()
@@ -639,18 +704,18 @@ void loop()
         catnip_lvgl_step();
         poll_power_button();
         catnip_led_breathe();
-        /* Holding B is the way out, and the way out is a restart: the page took
-         * lv_screen_active() and keeps it, so there is nothing to give back.
+        /* Holding B is the way out, and it goes back to the cat rather than
+         * through a restart: the page borrowed lv_screen_active() and gives it
+         * back, so there is a shell on the other side of the gesture.
          *
          * Long B rather than a button on the page, because long B is already
-         * "home, and the platform's alone" everywhere else - and the diagnostic
-         * page's home is a device that has started again. It is read here and
+         * "home, and the platform's alone" everywhere else. It is read here and
          * not in diag.cpp so that the page keeps knowing nothing about what is
          * above it; the switch it is reading is one it also draws, which is its
          * own confirmation that the press registered. */
         if (catnip_press_step(&g_press_diag, catnip_input_down(CATNIP_BTN_B),
                               (unsigned)millis()) == CATNIP_PRESS_LONG)
-            catnip_reboot_to_normal();
+            leave_diag();
         return;
     }
 
@@ -711,19 +776,20 @@ void loop()
     if (g_page == PAGE_INFO) {
         /* Nothing on this page changes anything, so there is nothing to apply
          * and nothing to save. It answers a click in one place only. */
-        if (catnip_device_info_take_action(g_info)) {
+        int act = catnip_device_info_take_action(g_info);
+        if (act == CATNIP_INFO_LEFT) {
+            enter_settings();
+            return;
+        }
+        if (act == CATNIP_INFO_RIGHT) {
             enter_diag();
             return;
         }
-        if (gesture == CATNIP_UI_GESTURE_HOME) {
+        /* Either way out of here is the cat: this page is one step down from
+         * the ring, not a stack of its own. */
+        if (gesture == CATNIP_UI_GESTURE_HOME || gesture == CATNIP_UI_GESTURE_BACK) {
             g_page = PAGE_HOME;
             rebuild_menu();
-        } else if (gesture == CATNIP_UI_GESTURE_BACK) {
-            /* One level, not all of them: back climbs to the page this one was
-             * opened from. */
-            g_page = PAGE_PREF;
-            catnip_settings_show(g_settings, &g_cfg);
-            catnip_frame_set_title("Preference");
         }
     } else if (g_page == PAGE_PREF) {
         if (catnip_settings_take_dirty(g_settings)) {
@@ -738,21 +804,17 @@ void loop()
                 g_settings_unsaved = true;
             }
         }
-        /* B is a negotiation here as everywhere else: the drain above has just
-         * run the page's on_back, and this reads what it answered. It claims B
-         * while a column is live, so the first press lets go of the column and
-         * only the second leaves - one press per level, the same climb every
-         * other screen offers. Home is not a negotiation and takes both levels
-         * at once. */
-        if (gesture == CATNIP_UI_GESTURE_HOME) leave_settings();
+        /* A keeps the page and B puts it back - the page says which, because it
+         * is the one that knows whether B was a departure or something it
+         * handled itself. Long B is home and keeps: it is an escape, and an
+         * escape that also undid the last five minutes would be a trap. */
+        int result = catnip_settings_take_result(g_settings);
+        if (gesture == CATNIP_UI_GESTURE_HOME) leave_settings(true, true);
+        else if (result == CATNIP_SETTINGS_SAVE) leave_settings(true, false);
+        else if (result == CATNIP_SETTINGS_DISCARD) leave_settings(false, false);
         else if (gesture == CATNIP_UI_GESTURE_BACK && !catnip_render_take_claim(g_rt))
-            leave_settings();
-        /* Down again goes further down, but only when it was not the value of a
-         * live column - which is the page's own two-state model doing the work,
-         * not a second rule bolted on. */
-        else if (gesture == CATNIP_UI_GESTURE_INFO &&
-                 !catnip_settings_editing(g_settings))
-            enter_info();
+            leave_settings(false, false);
+
     } else if (g_shell) {
         if (catnip_shell_state(g_shell) == CATNIP_SHELL_RUNNING) {
             int st = CATNIP_SHELL_RUNNING;
@@ -760,6 +822,10 @@ void loop()
             /* Home first: a gesture that grew into a long press must not also
              * be read as the short one it passed through. */
             if (gesture == CATNIP_UI_GESTURE_HOME) {
+                /* Home is the cat, so the ring opens there rather than where
+                 * this app was launched from. Short B is the one that returns
+                 * you to where you came from. */
+                catnip_menu_home(g_menu);
                 st = catnip_shell_home(g_shell);
             } else if (gesture == CATNIP_UI_GESTURE_BACK) {
                 /* Here and not earlier: the drain above has just run the app's
@@ -772,22 +838,32 @@ void loop()
             /* Whichever way it ended - B, home, finished, faulted - teardown
              * loaded the blank screen, so the menu has to be rebuilt before the
              * next pass draws it. */
-            if (st == CATNIP_SHELL_MENU) rebuild_menu();
+            if (st == CATNIP_SHELL_MENU) {
+                /* The launcher's own screens are never bare, and this has to be
+                 * cleared before the menu is rebuilt rather than after. */
+                catnip_lvgl_backend_set_bare(false);
+                rebuild_menu();
+            }
         } else {
             /* In the menu. A click has latched which app to launch; the launch
              * tears the menu tree down, so one that then fails to load must put
              * the menu back rather than leave a blank screen. */
-            /* Down, on the home carousel, is the settings plane. Checked
+            /* Down, on the home carousel, opens the hub: what this device
+             * is, and the two places you would go having read it. Checked
              * before the pick, so a pass that carries both leaves the menu
              * rather than launching out of a screen that is going away. */
             if (gesture == CATNIP_UI_GESTURE_SETTINGS) {
-                enter_settings();
+                enter_info();
                 return;
             }
             const char *id = catnip_menu_take_pick(g_menu);
             if (id) {
                 char err[64];
-                if (catnip_shell_launch_id(g_shell, id, err, sizeof(err)) != 0) {
+                /* Before the app's first screen exists, which is what decides
+                 * whether it reserves room for a bar it will not be given. */
+                if (catnip_shell_launch_id(g_shell, id, err, sizeof(err)) == 0) {
+                    catnip_lvgl_backend_set_bare(catnip_shell_bare(g_shell) != 0);
+                } else {
                     Serial.printf("[catnip] menu: %s could not launch: %s\n", id, err);
                     rebuild_menu();
                 }
@@ -802,7 +878,9 @@ void loop()
      * It is hidden until there is a screen to wrap - a bar over a black panel
      * would be the only thing on it. */
     update_status(false);
-    catnip_frame_show(catnip_lvgl_backend_active());
+    /* Not over a canvas. `frame: "bare"` is a promise about the whole panel, and
+     * a bar floating on the top layer would be the platform breaking it. */
+    catnip_frame_show(catnip_lvgl_backend_active() && !catnip_shell_bare(g_shell));
     /* Running an app, the shell answers what the header reads - a title the app
      * set, else its manifest name - and only after app code could have run,
      * since that is the only thing that can change the answer and the question
@@ -819,5 +897,6 @@ void loop()
             catnip_frame_set_title(catnip_menu_focus_name(g_menu));
         }
     }
+    catnip_toast_step();
     catnip_frame_step(g_rt);
 }

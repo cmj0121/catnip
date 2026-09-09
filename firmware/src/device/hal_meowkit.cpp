@@ -55,6 +55,7 @@
 #include "input_names.h"
 #include "led.h"
 #include "pmu.h"
+#include "rtc.h"
 #include "sd_mount.h"
 
 namespace {
@@ -89,6 +90,23 @@ int hal_battery(void *ud)
      * neither goes to the I2C bus on a script's schedule nor invents a number
      * when the answer is not known. */
     return catnip_pmu_battery_percent();
+}
+
+/* The clock, or 0 when this device does not know the time - which is what
+ * rtc.h promises and what sensor.rtc() has always been specified to mean. This
+ * hook was NULL until now, so the call already answered 0; what changes is that
+ * the answer can become a time, and that when it is still 0 that is a measured
+ * fact rather than an unwired pointer. */
+long hal_rtc_now(void *ud)
+{
+    (void)ud;
+    return (long)catnip_rtc_now();
+}
+
+int hal_rtc_set(void *ud, long epoch)
+{
+    (void)ud;
+    return catnip_rtc_set((uint32_t)epoch) ? 1 : 0;
 }
 
 void hal_brightness(void *ud, int pct)
@@ -161,6 +179,8 @@ const catnip_hal *catnip_meowkit_hal_begin(void)
     g_hal.brightness = hal_brightness;
     g_hal.button = hal_button;
     g_hal.imu = hal_imu;
+    g_hal.rtc_now = hal_rtc_now;
+    g_hal.rtc_set = hal_rtc_set;
 
     /* fs.* is the card and nothing else. The root is the mount point itself,
      * because catnip_api.c reaches the card through plain stdio - fopen,

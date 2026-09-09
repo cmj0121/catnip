@@ -5,6 +5,7 @@
 #include "../catnip_render.h"
 #include "input.h"
 #include "lvgl_backend.h"
+#include "key_repeat.h"
 #include "press_gesture.h"
 #include "swipe.h"
 #include "touch.h"
@@ -56,6 +57,10 @@ catnip_swipe g_swipe;
 catnip_handle g_drag_col = CATNIP_HANDLE_NONE;
 bool g_drag_settled;
 
+/* A held direction keeps going. Four states, one per direction, because they
+ * are four separate keys and holding one must not arm another. */
+catnip_repeat g_rep_up, g_rep_down, g_rep_left, g_rep_right;
+
 void touch_read(lv_indev_t *indev, lv_indev_data_t *data)
 {
     uint16_t x = 0, y = 0;
@@ -85,11 +90,26 @@ void ensure_touch_indev(void)
 /* Post the event a pressed switch maps to, when it maps to one and something is
  * focused to receive it. Routed through catnip_ui_input_event so the names stay
  * the ones the host test pins. */
+/* Where an input event goes: the focused node, or the visible screen when
+ * nothing is focused - which is what a canvas looks like, since a face has no
+ * list on it and nothing to select.
+ *
+ * One home for the rule. It was written out at each of the three sites that
+ * need it, each with its own copy of the same paragraph, which is the shape
+ * that becomes four copies. */
+catnip_handle input_target(catnip_rt *rt)
+{
+    if (g_focus != CATNIP_HANDLE_NONE) return g_focus;
+    return catnip_render_visible_screen(rt);
+}
+
 void post_if_event(catnip_rt *rt, catnip_button button)
 {
     const char *event = catnip_ui_input_event(button);
-    if (event && g_focus != CATNIP_HANDLE_NONE)
-        catnip_render_post(rt, g_focus, event, CATNIP_INDEX_NONE);
+    catnip_handle to = input_target(rt);
+
+    if (event && to != CATNIP_HANDLE_NONE)
+        catnip_render_post(rt, to, event, CATNIP_INDEX_NONE);
 }
 
 /* A held switch asks about the *selected item*, so the event carries which row
@@ -101,8 +121,12 @@ void post_if_event(catnip_rt *rt, catnip_button button)
 void post_if_long_event(catnip_rt *rt, catnip_button button)
 {
     const char *event = catnip_ui_input_long_event(button);
-    if (!event || g_focus == CATNIP_HANDLE_NONE) return;
-    catnip_render_post(rt, g_focus, event, catnip_render_selected(rt, g_focus));
+    catnip_handle to = input_target(rt);
+
+    if (!event || to == CATNIP_HANDLE_NONE) return;
+    /* A screen has no selection to be about, and catnip_render_selected answers
+     * the sentinel for one, so the index is right either way. */
+    catnip_render_post(rt, to, event, catnip_render_selected(rt, to));
 }
 
 } /* namespace */
@@ -120,10 +144,14 @@ int catnip_ui_input_step(catnip_rt *rt)
 {
     /* Read every edge once: the driver clears an edge as it is read, so this is
      * the sole reader and has to take them all here or lose them. */
-    bool up = catnip_input_pressed(CATNIP_BTN_UP);
-    bool down = catnip_input_pressed(CATNIP_BTN_DOWN);
-    bool left = catnip_input_pressed(CATNIP_BTN_LEFT);
-    bool right = catnip_input_pressed(CATNIP_BTN_RIGHT);
+    /* The edges are still read, because the driver clears them as they are read
+     * and this is their sole reader - but what a direction *means* now comes
+     * from how long it has been held, so that a value with sixty of something
+     * in it is not sixty presses. */
+    (void)catnip_input_pressed(CATNIP_BTN_UP);
+    (void)catnip_input_pressed(CATNIP_BTN_DOWN);
+    (void)catnip_input_pressed(CATNIP_BTN_LEFT);
+    (void)catnip_input_pressed(CATNIP_BTN_RIGHT);
     /* A, the centre and B are timed rather than edged: their meaning depends on
      * how long they are held, so what matters is the settled level, and the
      * edges are read only to keep this the sole reader of them. */
@@ -131,6 +159,11 @@ int catnip_ui_input_step(catnip_rt *rt)
     (void)catnip_input_pressed(CATNIP_BTN_A);
     (void)catnip_input_pressed(CATNIP_BTN_B);
     unsigned now = (unsigned)millis();
+    bool up = catnip_repeat_step(&g_rep_up, catnip_input_down(CATNIP_BTN_UP), now);
+    bool down = catnip_repeat_step(&g_rep_down, catnip_input_down(CATNIP_BTN_DOWN), now);
+    bool left = catnip_repeat_step(&g_rep_left, catnip_input_down(CATNIP_BTN_LEFT), now);
+    bool right =
+        catnip_repeat_step(&g_rep_right, catnip_input_down(CATNIP_BTN_RIGHT), now);
     int a_press = catnip_press_step(&g_press_a, catnip_input_down(CATNIP_BTN_A), now);
     int c_press =
         catnip_press_step(&g_press_centre, catnip_input_down(CATNIP_BTN_CENTRE), now);
@@ -179,8 +212,16 @@ int catnip_ui_input_step(catnip_rt *rt)
      * ring. So the two shapes share "left and right move the selection" and
      * part company on what up and down mean. */
     bool sideways = carousel || layout == CATNIP_LAYOUT_MIXER;
-    bool step_back = left || swipe == CATNIP_SWIPE_LEFT;
-    bool step_fwd = right || swipe == CATNIP_SWIPE_RIGHT;
+    /* A carousel does not repeat. Repeat was added for a value with sixty of
+     * something in it, where a step costs one number; on a carousel a step
+     * hides one cell and shows another, and with a full-screen render mode that
+     * is the whole panel blitted and any icon on it decoded again. Holding left
+     * on the home ring would pin the CPU and the SPI bus at nine steps a
+     * second, on battery, to walk past four apps. */
+    bool left_edge = carousel ? (left && catnip_repeat_first(&g_rep_left)) : left;
+    bool right_edge = carousel ? (right && catnip_repeat_first(&g_rep_right)) : right;
+    bool step_back = left_edge || swipe == CATNIP_SWIPE_LEFT;
+    bool step_fwd = right_edge || swipe == CATNIP_SWIPE_RIGHT;
 
     int dir = 0;
     if (!sideways) {
@@ -277,12 +318,6 @@ int catnip_ui_input_step(catnip_rt *rt)
      * out is the gesture that must never be the one that loses. */
     if (carousel && dpad_down) return CATNIP_UI_GESTURE_SETTINGS;
 
-    /* And down on a mixer offers the page below it. Offered rather than
-     * decided: the same press has already been posted as "lower", and whether
-     * that meant anything is the page's to say. A drag is not this - a finger
-     * travelling down a column is setting it, not leaving. */
-    if (mixer && !dragged && dpad_down) return CATNIP_UI_GESTURE_INFO;
-
     return CATNIP_UI_GESTURE_NONE;
 }
 
@@ -301,4 +336,7 @@ void catnip_ui_input_end(void)
     g_swipe = catnip_swipe{};
     g_drag_col = CATNIP_HANDLE_NONE;
     g_drag_settled = false;
+    /* And a direction still held here must not carry its start time into
+     * whatever comes next, for the reason press_gesture.h gives. */
+    g_rep_up = g_rep_down = g_rep_left = g_rep_right = catnip_repeat{};
 }

@@ -58,13 +58,27 @@ typedef enum {
  * is the backend's, because it lives with the fonts on the device. An unknown
  * name from Lua resolves to BODY rather than raising, so an app written against
  * a later firmware degrades on an older one instead of failing to open. Adding
- * a role is cheap and removing one is not, which is why five is the whole list. */
+ * a role is cheap and removing one is not, which is why the list is short and
+ * every entry on it has to earn a difference somebody can see. */
 typedef enum {
     CATNIP_STYLE_BODY = 0, /* the fallback, and therefore value 0 */
     CATNIP_STYLE_TITLE,
     CATNIP_STYLE_CAPTION,
     CATNIP_STYLE_PRIMARY,
     CATNIP_STYLE_DANGER,
+    /* One number large enough to own the screen: a time, a level, a count.
+     *
+     * It is the same argument that made `title` a role at all - two roles set
+     * in the same face at the same size are one role with two names, and an app
+     * that marked its big number would have nothing to show for it. This one is
+     * three times the size of anything else here, which is a difference nobody
+     * can miss.
+     *
+     * It is for a *quantity*, not for large text. Nothing in the renderer can
+     * enforce that; what keeps it honest is that there is no second place to
+     * reach for - the five roles above are the only way to set words, and this
+     * one is shaped like a readout. */
+    CATNIP_STYLE_DISPLAY,
 } catnip_style_role;
 
 /* A glyph a row or button wears in front of its text. Like a style role it is
@@ -127,6 +141,17 @@ typedef enum {
      * glance, and the whole column is the touch target rather than a row of
      * text. See `value` below. */
     CATNIP_LAYOUT_MIXER,
+    /* Children side by side, each keeping its own style role - a strip rather
+     * than a list. It exists because a row of items that are not all the same
+     * cannot be one label: a node carries one role, and "these seven letters,
+     * with today's brighter than the rest" is seven nodes or it is nothing. */
+    CATNIP_LAYOUT_ROW,
+    /* A centrepiece with a line above it and a line below: what a bare screen
+     * has always been laid out as, made available as a layout so that anything
+     * can be one. A carousel cell that is a clock face is the case that asked
+     * for it - the cell is the whole region, and a face is what belongs in a
+     * whole region. */
+    CATNIP_LAYOUT_CANVAS,
 } catnip_node_layout;
 
 enum {

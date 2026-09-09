@@ -66,6 +66,15 @@ int catnip_manifest_parse(const char *json, catnip_manifest *out, char *errbuf,
              cJSON_GetObjectItemCaseSensitive(root, "author"));
     copy_str(out->icon, sizeof(out->icon),
              cJSON_GetObjectItemCaseSensitive(root, "icon"));
+    copy_str(out->glance, sizeof(out->glance),
+             cJSON_GetObjectItemCaseSensitive(root, "glance"));
+
+    /* Only the exact word turns it on. An unknown value is "standard", the way
+     * an unknown style role is `body`: an app written for a later firmware
+     * loses the frame it asked for and still opens. */
+    const cJSON *frame = cJSON_GetObjectItemCaseSensitive(root, "frame");
+    out->bare = (cJSON_IsString(frame) && frame->valuestring &&
+                 strcmp(frame->valuestring, "bare") == 0);
 
     const cJSON *entry = cJSON_GetObjectItemCaseSensitive(root, "entry");
     if (cJSON_IsString(entry) && entry->valuestring[0]) {

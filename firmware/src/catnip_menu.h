@@ -56,6 +56,23 @@ const char *catnip_menu_take_pick(catnip_menu *m);
  * clear it - it is a state, not an event. */
 const char *catnip_menu_focus_name(const catnip_menu *m);
 
+/* A value cell is a small face: the time in the middle, the date and the
+ * weekday on the line under it, one at each end. Three strings because they are
+ * three roles, and a node carries one.
+ *
+ * Writes only what differs, so the twenty-nine passes a minute where nothing
+ * has changed cost nothing at all. */
+void catnip_menu_set_glance(catnip_menu *m, const char *time, const char *date,
+                            const char *week);
+
+/* Forget where the ring was, so the next rebuild opens on the cat.
+ *
+ * `catnip_menu_show` otherwise opens on the app that was last launched from it,
+ * which is what makes the spec's promise true - short B returns you to where
+ * you came from, and the launcher used to be the one exception. Long B is home
+ * and says so by calling this. */
+void catnip_menu_home(catnip_menu *m);
+
 void catnip_menu_free(catnip_menu *m);
 
 #ifdef __cplusplus

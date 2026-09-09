@@ -46,19 +46,29 @@ void catnip_settings_show(catnip_settings *s, const catnip_config *cfg);
  * shown. Owned by the page; valid until the next catnip_settings_show. */
 const catnip_config *catnip_settings_config(const catnip_settings *s);
 
-/* Whether a column is live - chosen with A or a tap, and therefore the thing up
- * and down are currently the value of.
- *
- * The platform asks because down means two things on this page: the value of a
- * live column, or - when none is - the way on to the device info page. One
- * gesture, two meanings, and the state the page is already in decides which.
- * Not a state, so reading it changes nothing. */
-bool catnip_settings_editing(const catnip_settings *s);
-
 /* Whether anything has been stepped since this was last asked. Reading clears
- * it, so a caller that saves on the way out saves once, and a page nobody
- * touched costs no flash write at all. */
+ * it, so a caller that applies as it goes applies once per change. */
 bool catnip_settings_take_dirty(catnip_settings *s);
+
+/* How the owner left, or CATNIP_SETTINGS_STAY while they have not.
+ *
+ * A confirms and B discards, which is the same pair the clock's setter offers -
+ * one convention for every page that sets something, so nobody has to remember
+ * which kind of page they are on.
+ *
+ * B discarding is what lets this page have no "now you are editing" state. It
+ * used to need one: arriving by pushing down should not put a brightness under
+ * the joystick, so a column had to be chosen with A before up and down meant
+ * anything. A press that can be taken back does not need to be guarded against,
+ * so the guard is gone and the page is simpler for it.
+ *
+ * Reading clears it, so one departure is acted on once. */
+enum {
+    CATNIP_SETTINGS_STAY = 0,
+    CATNIP_SETTINGS_SAVE,    /* 1, and the Lua side passes these by number */
+    CATNIP_SETTINGS_DISCARD, /* 2 */
+};
+int catnip_settings_take_result(catnip_settings *s);
 
 void catnip_settings_free(catnip_settings *s);
 

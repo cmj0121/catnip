@@ -21,9 +21,10 @@ extern "C" {
 typedef struct {
     char id[64];
     char name[64];
-    char icon[64];  /* icon filename from the manifest (for the launcher) */
-    char dir[256];  /* full path to the app folder */
-    int compatible; /* 1 if its manifest parsed and the API is satisfiable */
+    char icon[64];   /* icon filename from the manifest (for the launcher) */
+    char glance[16]; /* the platform value this app's cell shows, or "" */
+    char dir[256];   /* full path to the app folder */
+    int compatible;  /* 1 if its manifest parsed and the API is satisfiable */
     /* 1 if the manifest asks for the filesystem. Compatibility is about the
      * API version and never changes; this is about what the device has in it
      * right now, and a card can be taken out between one launch and the next -

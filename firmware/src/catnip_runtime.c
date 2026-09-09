@@ -20,6 +20,8 @@ struct catnip_rt {
     lua_State *L;
     catnip_log_fn log;
     void *log_ud;
+    catnip_log_fn err; /* faults only; see catnip_rt_set_error */
+    void *err_ud;
     catnip_alloc acct; /* used only when `tracked` */
     int tracked;
 };
@@ -38,6 +40,23 @@ static void emit(catnip_rt *rt, const char *msg, size_t len)
         fwrite(msg, 1, len, stdout);
         fputc('\n', stdout);
     }
+}
+
+/* Tell the error sink, with the first line only.
+ *
+ * There are two ways a fault is reported - this file's own run_protected, and
+ * catnip_rt_report_error for the ones a caller catches - and both have to reach
+ * the sink or a fault would appear on the screen depending on which of them
+ * happened to run. The line trim is here rather than in the sink because both
+ * callers would otherwise have to remember to do it, and one of them already
+ * has a traceback stapled on by the message handler. */
+static void notify_err(catnip_rt *rt, const char *msg, size_t len)
+{
+    const char *nl;
+
+    if (!rt || !rt->err || !msg) return;
+    nl = (const char *)memchr(msg, '\n', len);
+    rt->err(rt->err_ud, msg, nl ? (size_t)(nl - msg) : len);
 }
 
 /* print(...) -> one log line, fields separated by tabs, like stock Lua. */
@@ -185,11 +204,21 @@ void catnip_rt_report_error(catnip_rt *rt, lua_State *L)
     if (!rt || !L) return;
     const char *msg = lua_tostring(L, -1);
     if (msg == NULL) msg = "(non-string error)";
+    /* Before the traceback is built, so the sink gets the fault and not the
+     * stack under it. */
+    notify_err(rt, msg, strlen(msg));
     luaL_traceback(L, L, msg, 1); /* pushes the traceback string */
     size_t len;
     const char *tb = lua_tolstring(L, -1, &len);
     emit(rt, tb, len);
     lua_pop(L, 2); /* traceback + original error */
+}
+
+void catnip_rt_set_error(catnip_rt *rt, catnip_log_fn fn, void *ud)
+{
+    if (!rt) return;
+    rt->err = fn;
+    rt->err_ud = ud;
 }
 
 void catnip_rt_log(catnip_rt *rt, const char *msg)
@@ -213,6 +242,7 @@ static int run_protected(catnip_rt *rt, int load_status, const char *what)
     if (load_status != LUA_OK) {
         size_t len;
         const char *err = lua_tolstring(L, -1, &len);
+        notify_err(rt, err ? err : "load error", err ? len : 10);
         emit(rt, err ? err : "load error", err ? len : 10);
         lua_pop(L, 1);
         return load_status;
@@ -225,6 +255,7 @@ static int run_protected(catnip_rt *rt, int load_status, const char *what)
     if (st != LUA_OK) {
         size_t len;
         const char *err = lua_tolstring(L, -1, &len);
+        notify_err(rt, err ? err : "runtime error", err ? len : 13);
         emit(rt, err ? err : "runtime error", err ? len : 13);
         lua_pop(L, 1);
     }
