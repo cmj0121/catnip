@@ -74,6 +74,17 @@ struct Entry {
     catnip_node_layout layout; /* list only: how its children are arranged */
     bool sel_dirty;            /* list only: the highlight has to be re-applied */
     bool row;                  /* list child: internal flex row of image + label */
+    /* The widgets inside a row, held rather than looked up by child index: a
+     * mixer column adds two more and the order on screen is not the order they
+     * were made in, so an index here would be a second thing to keep in step
+     * with the flex flow. nullptr on anything that is not a row, and `bar` and
+     * `val` stay nullptr until a row turns out to carry a value - a directory
+     * of four hundred files should not pay for four hundred bars it never
+     * shows. */
+    lv_obj_t *img;
+    lv_obj_t *name;
+    lv_obj_t *bar;
+    lv_obj_t *val;
     bool used;
 };
 
@@ -194,7 +205,7 @@ void apply_style(Entry *e, catnip_style_role role)
             label, lv_color_hex(fill == kColPanel ? kColText : kColBg), 0);
         return;
     }
-    lv_obj_t *text = e->row ? lv_obj_get_child(e->obj, 1) : e->obj;
+    lv_obj_t *text = e->row ? e->name : e->obj;
     if (!text) return;
     lv_obj_set_style_text_font(text, role_font(role), 0);
     lv_obj_set_style_text_color(text, lv_color_hex(role_ink(role)), 0);
@@ -206,11 +217,13 @@ void apply_text(Entry *e, const char *text, catnip_icon icon, const char *image)
     lv_obj_t *img = nullptr;
 
     bool big = false;
+    bool mixer = false;
     if (e->row) {
         Entry *p = map_find(e->parent);
         big = p && p->layout == CATNIP_LAYOUT_CAROUSEL;
-        img = lv_obj_get_child(e->obj, 0);
-        label = lv_obj_get_child(e->obj, 1);
+        mixer = p && p->layout == CATNIP_LAYOUT_MIXER;
+        img = e->img;
+        label = e->name;
     } else if (e->kind == CATNIP_NODE_LABEL) {
         label = e->obj;
     } else if (e->kind == CATNIP_NODE_BUTTON) {
@@ -225,9 +238,22 @@ void apply_text(Entry *e, const char *text, catnip_icon icon, const char *image)
     if (e->row) {
         /* A carousel cell is the whole region: the picture over its name,
          * centred. A row is a line: the glyph before its name, ranged left. */
-        lv_obj_set_flex_flow(e->obj, big ? LV_FLEX_FLOW_COLUMN : LV_FLEX_FLOW_ROW);
-        lv_obj_set_flex_align(e->obj, big ? LV_FLEX_ALIGN_CENTER : LV_FLEX_ALIGN_START,
+        lv_obj_set_flex_flow(e->obj,
+                             (big || mixer) ? LV_FLEX_FLOW_COLUMN : LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(e->obj,
+                              (big || mixer) ? LV_FLEX_ALIGN_CENTER : LV_FLEX_ALIGN_START,
                               LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        /* A mixer column is as tall as the region and shares the width evenly
+         * with its neighbours, which is the whole point of the shape: height is
+         * the number, so every column has to have the same height to be read
+         * against the others. */
+        if (mixer) {
+            lv_obj_set_flex_grow(e->obj, 1);
+            lv_obj_set_width(e->obj, LV_SIZE_CONTENT);
+            lv_obj_set_height(e->obj, LV_PCT(100));
+            lv_obj_set_style_pad_ver(e->obj, 4, 0);
+            lv_obj_set_style_pad_row(e->obj, 4, 0);
+        }
         /* A carousel cell is the region, so it carries no padding of its own;
          * the gap under the picture is there only when there is a name. */
         lv_obj_set_style_pad_all(e->obj, big ? 0 : 2, 0);
@@ -242,10 +268,10 @@ void apply_text(Entry *e, const char *text, catnip_icon icon, const char *image)
          * does not steal room from the thing it names. */
         if (big) lv_obj_add_flag(label, LV_OBJ_FLAG_HIDDEN);
         else lv_obj_remove_flag(label, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_flex_grow(label, big ? 0 : 1);
-        lv_obj_set_width(label, big ? LV_SIZE_CONTENT : LV_PCT(100));
-        lv_obj_set_style_text_align(label,
-                                    big ? LV_TEXT_ALIGN_CENTER : LV_TEXT_ALIGN_LEFT, 0);
+        lv_obj_set_flex_grow(label, (big || mixer) ? 0 : 1);
+        lv_obj_set_width(label, (big || mixer) ? LV_SIZE_CONTENT : LV_PCT(100));
+        lv_obj_set_style_text_align(
+            label, (big || mixer) ? LV_TEXT_ALIGN_CENTER : LV_TEXT_ALIGN_LEFT, 0);
     }
     lv_label_set_text(label, text);
     if (!img) return;
@@ -317,6 +343,191 @@ void apply_text(Entry *e, const char *text, catnip_icon icon, const char *image)
     }
 }
 
+/* The quantity a row stands for: a bar whose height is the number, and the
+ * reading printed above it.
+ *
+ * Both widgets are made the first time a row turns out to have a value and are
+ * then kept, which is the same bargain the rest of this backend makes - a
+ * widget is expensive to create and cheap to hide. They are moved to the front
+ * of the row because the flex flow draws children in order and the reading
+ * belongs above the bar, above the icon, above the name.
+ *
+ * A vertical bar rather than a horizontal one: five of them side by side can be
+ * compared at a glance, and the touch target becomes a column the height of the
+ * region instead of a line of text. */
+/* `active` is the column being edited rather than merely the one under the
+ * ring - two states, because on a settings page choosing which setting and
+ * changing it are separate acts (see catnip_settings.c). It arrives as the
+ * `primary` style role rather than as a field of its own: the roles are already
+ * the vocabulary for "this one matters more than its neighbours", and a second
+ * way of saying it would be a second thing to keep in step. */
+void apply_value(Entry *e, int value, const char *value_text, int steps, bool active)
+{
+    if (!e->row) return;
+    if (value < 0) {
+        if (e->bar) lv_obj_add_flag(e->bar, LV_OBJ_FLAG_HIDDEN);
+        if (e->val) lv_obj_add_flag(e->val, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    if (!e->bar) {
+        e->val = lv_label_create(e->obj);
+        e->bar = lv_obj_create(e->obj);
+        if (!e->val || !e->bar) {
+            /* Half of it is worse than none: a bar with no reading is a
+             * quantity nobody can name. Whatever was made is left hidden. */
+            if (e->val) lv_obj_add_flag(e->val, LV_OBJ_FLAG_HIDDEN);
+            if (e->bar) lv_obj_add_flag(e->bar, LV_OBJ_FLAG_HIDDEN);
+            return;
+        }
+        lv_obj_remove_flag(e->val, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_remove_flag(e->bar, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_remove_flag(e->bar, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_move_to_index(e->val, 0);
+        lv_obj_move_to_index(e->bar, 1);
+
+        lv_obj_set_width(e->bar, 26);
+        lv_obj_set_flex_grow(e->bar, 1);
+        lv_obj_set_style_bg_opa(e->bar, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(e->bar, 0, 0);
+        lv_obj_set_style_pad_all(e->bar, 0, 0);
+        lv_obj_set_style_pad_row(e->bar, 3, 0);
+        lv_obj_set_style_text_color(e->val, lv_color_hex(kColText), 0);
+    }
+    lv_obj_remove_flag(e->bar, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(e->val, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(e->val, value_text);
+
+    /* A quantity with rungs is drawn as that many blocks; one without is drawn
+     * as a filled track, because those are two different promises and a finger
+     * is about to be dragged up one of them. `steps` is 0 for the continuous
+     * kind, which is one block whose height is the value rather than one block
+     * per rung. */
+    bool ladder = steps > 1;
+    /* A quantity grows upward, so the fill is anchored to the bottom.
+     *
+     * Two mechanisms rather than one, and deliberately not flex-with-a-reversed
+     * flow: the blocks are laid out top to bottom and lit from the end, and the
+     * single fill of a continuous track is aligned to the bottom with no layout
+     * at all. Both are stated in terms of where things end up rather than in
+     * terms of which way a flow runs, because "reversed" is a property of the
+     * container that has to be read together with the alignment to know what it
+     * means - and read wrongly once already, which is how this bar came out
+     * upside down. */
+    lv_obj_set_layout(e->bar, ladder ? LV_LAYOUT_FLEX : LV_LAYOUT_NONE);
+    if (ladder) lv_obj_set_flex_flow(e->bar, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_bg_color(e->bar, lv_color_hex(kColFaint), 0);
+    lv_obj_set_style_bg_opa(e->bar, ladder ? LV_OPA_TRANSP : LV_OPA_20, 0);
+    lv_obj_set_style_radius(e->bar, ladder ? 0 : 6, 0);
+
+    int want = ladder ? steps : 1;
+    if ((int)lv_obj_get_child_count(e->bar) != want) {
+        lv_obj_clean(e->bar);
+        for (int i = 0; i < want; i++) {
+            lv_obj_t *blk = lv_obj_create(e->bar);
+            if (!blk) break;
+            lv_obj_remove_flag(blk, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_remove_flag(blk, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_set_width(blk, LV_PCT(100));
+            lv_obj_set_flex_grow(blk, 1);
+            lv_obj_set_style_border_width(blk, 0, 0);
+            lv_obj_set_style_radius(blk, 3, 0);
+            lv_obj_set_style_bg_opa(blk, LV_OPA_COVER, 0);
+        }
+    }
+
+    /* The rung the value stands on, counting the bottom one as lit: `value` is
+     * the position along the ladder, so rung 0 of five is 0 and lights one
+     * block, and rung 4 is 100 and lights all five. Nothing is ever unlit
+     * entirely - a column with no blocks would read as a broken widget rather
+     * than as the lowest setting. */
+    uint32_t n = lv_obj_get_child_count(e->bar);
+    uint32_t ink = active ? kColPrimary : kColText;
+    if (!ladder) {
+        lv_obj_t *blk = lv_obj_get_child(e->bar, 0);
+        if (blk) {
+            /* Never quite nothing: a track with no fill at all reads as a
+             * broken widget rather than as the lowest setting. */
+            lv_obj_set_flex_grow(blk, 0);
+            lv_obj_set_size(blk, LV_PCT(100), LV_PCT(value < 3 ? 3 : value));
+            lv_obj_align(blk, LV_ALIGN_BOTTOM_MID, 0, 0);
+            lv_obj_set_style_radius(blk, 6, 0);
+            lv_obj_set_style_bg_color(blk, lv_color_hex(ink), 0);
+            lv_obj_set_style_bg_opa(blk, LV_OPA_COVER, 0);
+        }
+        return;
+    }
+    /* No forced minimum: a ladder that reaches Off has to be able to look
+     * empty, and one that does not never asks for zero in the first place -
+     * catnip_settings.c gives its bottom rung a fill of one block instead. */
+    int lit = ((int)n * value + 50) / 100;
+    if (lit > (int)n) lit = (int)n;
+    for (uint32_t i = 0; i < n; i++) {
+        lv_obj_t *blk = lv_obj_get_child(e->bar, (int32_t)i);
+        /* Lit from the end, because the children run down the column and the
+         * value climbs up it. */
+        bool on = ((int)i >= (int)n - lit);
+        lv_obj_set_style_bg_color(blk, lv_color_hex(on ? ink : kColFaint), 0);
+        lv_obj_set_style_bg_opa(blk, on ? LV_OPA_COVER : LV_OPA_20, 0);
+    }
+}
+
+/* How far up `e`'s blocks the y coordinate is: 0 at the bottom, 100 at the top.
+ *
+ * Measured against the blocks and not the whole column, because the reading and
+ * the name are inside the column too, and a finger on the word "Screen" asking
+ * for 0% is not what anyone meant. */
+int mixer_pct_of(Entry *e, int y)
+{
+    lv_area_t bar;
+    lv_obj_get_coords(e->bar, &bar);
+    int h_px = bar.y2 - bar.y1;
+    if (h_px <= 0) return -1;
+    int up = bar.y2 - y; /* from the bottom, which is where 0 is */
+    if (up < 0) up = 0;
+    if (up > h_px) up = h_px;
+    return up * 100 / h_px;
+}
+
+/* A drawn column of a mixer, or nullptr. */
+Entry *mixer_column(catnip_handle h)
+{
+    Entry *e = map_find(h);
+    if (!e || !e->used || !e->row || !e->bar) return nullptr;
+    Entry *p = map_find(e->parent);
+    if (!p || p->layout != CATNIP_LAYOUT_MIXER) return nullptr;
+    if (lv_obj_has_flag(e->obj, LV_OBJ_FLAG_HIDDEN)) return nullptr;
+    return e;
+}
+
+} // namespace
+
+int catnip_lvgl_backend_mixer_at(int x, int y, catnip_handle *h, int *pct)
+{
+    for (int i = 0; i < kMaxObjects; i++) {
+        Entry *e = mixer_column(g_map[i].h);
+        if (!e) continue;
+
+        lv_area_t col;
+        lv_obj_get_coords(e->obj, &col);
+        if (x < col.x1 || x > col.x2) continue;
+
+        int p = mixer_pct_of(e, y);
+        if (p < 0) continue;
+        if (h) *h = e->h;
+        if (pct) *pct = p;
+        return 1;
+    }
+    return 0;
+}
+
+int catnip_lvgl_backend_mixer_pct(catnip_handle h, int y)
+{
+    Entry *e = mixer_column(h);
+    return e ? mixer_pct_of(e, y) : -1;
+}
+
+namespace {
+
 void apply_flags(Entry *e, unsigned flags)
 {
     /* LV_OBJ_FLAG_HIDDEN takes the object out of the flex layout as well as out
@@ -343,6 +554,7 @@ void apply_flags(Entry *e, unsigned flags)
 void apply_desc(Entry *e, const catnip_node_desc *d)
 {
     apply_text(e, d->text, d->icon, d->image);
+    apply_value(e, d->value, d->value_text, d->steps, d->style == CATNIP_STYLE_PRIMARY);
     apply_style(e, d->style);
     apply_flags(e, d->flags);
     if (e->kind == CATNIP_NODE_LIST) {
@@ -388,6 +600,16 @@ void scroll_into_view(lv_obj_t *list, lv_obj_t *child)
     /* Negated: scrolling by a negative dy moves the content up, which is what
      * brings a row that is below the window into it. */
     if (dy) lv_obj_scroll_by(list, 0, -dy, LV_ANIM_OFF);
+
+    /* And the same along x, because a mixer lays its children out across the
+     * region rather than down it. One function for both axes rather than two:
+     * "move as little as possible to bring the selection into the window" is
+     * the same rule whichever way the list runs, and a second copy of it would
+     * be a second place for it to drift. */
+    int32_t dx = 0;
+    if (row.x1 < content.x1) dx = row.x1 - content.x1;
+    else if (row.x2 > content.x2) dx = row.x2 - content.x2;
+    if (dx) lv_obj_scroll_by(list, -dx, 0, LV_ANIM_OFF);
 }
 
 /* A list's own arrangement. Rows stack and scroll; a carousel centres one child
@@ -397,10 +619,14 @@ void scroll_into_view(lv_obj_t *list, lv_obj_t *child)
 void apply_list_layout(Entry *e)
 {
     bool carousel = e->layout == CATNIP_LAYOUT_CAROUSEL;
+    bool mixer = e->layout == CATNIP_LAYOUT_MIXER;
 
-    lv_obj_set_flex_align(e->obj, carousel ? LV_FLEX_ALIGN_CENTER : LV_FLEX_ALIGN_START,
-                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_border_width(e->obj, carousel ? 0 : 1, 0);
+    /* Rows and a carousel run down the region; a mixer runs across it. */
+    lv_obj_set_flex_flow(e->obj, mixer ? LV_FLEX_FLOW_ROW : LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(
+        e->obj, (carousel || mixer) ? LV_FLEX_ALIGN_CENTER : LV_FLEX_ALIGN_START,
+        LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_border_width(e->obj, (carousel || mixer) ? 0 : 1, 0);
     lv_obj_set_style_pad_all(e->obj, carousel ? 0 : 2, 0);
 
     /* A carousel takes the whole panel and the bar floats over it, where a
@@ -693,6 +919,12 @@ int be_create(void *ud, catnip_handle h, catnip_handle parent, int index,
     e->selected = -1;
     e->row = parent_entry && parent_entry->kind == CATNIP_NODE_LIST &&
              d->kind == CATNIP_NODE_LABEL;
+    if (e->row) {
+        /* The two widgets make_row() built, remembered here so nothing later
+         * has to know what order they ended up in. */
+        e->img = lv_obj_get_child(obj, 0);
+        e->name = lv_obj_get_child(obj, 1);
+    }
 
     if (parent_entry && parent_entry->kind == CATNIP_NODE_LIST) {
         style_as_row(obj);

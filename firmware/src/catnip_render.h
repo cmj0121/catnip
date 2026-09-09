@@ -121,6 +121,12 @@ typedef enum {
 typedef enum {
     CATNIP_LAYOUT_ROWS = 0, /* the fallback, and therefore value 0 */
     CATNIP_LAYOUT_CAROUSEL,
+    /* Columns of vertical bars, side by side - the shape a page of settings
+     * wants, where every child is a value rather than a thing to choose. Height
+     * carries the number, so the columns can be read against each other at a
+     * glance, and the whole column is the touch target rather than a row of
+     * text. See `value` below. */
+    CATNIP_LAYOUT_MIXER,
 } catnip_node_layout;
 
 enum {
@@ -161,7 +167,31 @@ typedef struct {
      * Borrowed for the length of the call, like `text` and `id`. */
     const char *image;
     catnip_node_layout layout; /* list only: how its children are arranged */
-    int selected;              /* list only: the selected child, as a zero-based index to
+
+    /* A quantity this node stands for, 0-100, or -1 when it does not stand for
+     * one. `value` is the fill and `value_text` is what is printed above it -
+     * two fields rather than one because the platform cannot derive the second
+     * from the first: 70 reads as "70%" for a brightness and as "2.5 s" for a
+     * period, and only the owner of the setting knows which.
+     *
+     * The percentage is the platform's unit deliberately. A bar has one height
+     * and the frame has one way to draw it; letting each setting bring its own
+     * range would make the drawing code carry arithmetic that belongs to
+     * whoever chose the range.
+     *
+     * `value_text` is borrowed for the length of the call, like `text`. */
+    int value;
+    const char *value_text;
+    /* How many rungs the ladder has, or 0 when the quantity is continuous.
+     *
+     * A discrete value is drawn as that many blocks rather than as one filled
+     * bar, because those are two different promises: a bar says "anywhere along
+     * here", and this value cannot go anywhere along here - it can only be one
+     * of five things. Drawing it as a bar invites a drag that would have to be
+     * quietly rounded, and a control that silently disagrees with the finger is
+     * worse than one that never offered. */
+    int steps;
+    int selected; /* list only: the selected child, as a zero-based index to
                        * match `index` below, or -1 for none. Lua's `selected`
                        * prop is one-based like every other Lua index; the
                        * renderer converts, so a backend never has to. */

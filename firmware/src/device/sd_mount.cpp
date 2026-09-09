@@ -7,6 +7,19 @@
 
 namespace {
 bool g_mounted = false;
+/* "No card" is said once, not once a second.
+ *
+ * The slot is retried every SD_POLL_MS so that a card pushed in after boot is
+ * noticed, and each failed retry used to print. A device with no card in it
+ * therefore emitted a line a second for as long as it was on, which drowned
+ * every other line in the log - including the ones somebody was reading the log
+ * for - and spent the serial link on saying nothing had changed. The line is
+ * worth having the first time and never again until the answer is different.
+ *
+ * The ESP-IDF driver's own failure lines underneath it are not ours to silence
+ * from here; this at least stops us adding to them. */
+bool g_said_empty;
+
 } /* namespace */
 
 bool catnip_sd_mount(void)
@@ -20,11 +33,13 @@ bool catnip_sd_mount(void)
         return false;
     }
     if (!SD_MMC.begin(CATNIP_SD_MOUNT_POINT, true /* 1-bit */)) {
-        Serial.println("[catnip] sd: no card");
+        if (!g_said_empty) Serial.println("[catnip] sd: no card");
+        g_said_empty = true;
         return false;
     }
     if (SD_MMC.cardType() == CARD_NONE) {
-        Serial.println("[catnip] sd: no card");
+        if (!g_said_empty) Serial.println("[catnip] sd: no card");
+        g_said_empty = true;
         SD_MMC.end();
         return false;
     }
@@ -39,6 +54,7 @@ bool catnip_sd_mount(void)
     Serial.printf("[catnip] sd: %s card, %llu MB, mounted at " CATNIP_SD_MOUNT_POINT "\n",
                   type, SD_MMC.cardSize() / (1024ULL * 1024ULL));
     g_mounted = true;
+    g_said_empty = false; /* so the next empty slot is reported again */
     return true;
 }
 

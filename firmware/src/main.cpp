@@ -16,6 +16,7 @@
 #include "catnip_api.h"
 #include "catnip_config.h"
 #include "catnip_menu.h"
+#include "catnip_settings.h"
 #include "catnip_runtime.h"
 #include "catnip_shell.h"
 #include "catnip_ui.h"
@@ -33,6 +34,7 @@
 #include "device/pmu.h"
 #include "device/sd_mount.h"
 #include "device/power.h"
+#include "device/prefs.h"
 #include "device/ui_input.h"
 #include "generated/anim_f01_rgb565.h"
 #include "generated/anim_f02_rgb565.h"
@@ -53,6 +55,18 @@ static const catnip_render_backend *g_be;
  * renderer and input layer that run an app run the menu. It is what finally
  * exercises the whole path end to end. */
 static catnip_menu *g_menu;
+/* The preferences page (#67), and whether it is what is on screen. It is a
+ * mode of the launcher rather than a state of the shell: the shell's states are
+ * about running an app, and this runs nothing - it is another platform screen
+ * beside the menu, reached from the home section by pushing down. */
+static catnip_settings *g_settings;
+static bool g_in_settings;
+/* Something was stepped and has not been written down yet. Kept here rather
+ * than read off the page, because the page's own dirty flag is consumed every
+ * pass to apply the change to the hardware, and saving happens once, later. */
+static bool g_settings_unsaved;
+/* The settings as they now stand. The one copy the rest of this file reads. */
+static catnip_config g_cfg;
 
 static void serial_log(void *ud, const char *msg, size_t len)
 {
@@ -214,7 +228,9 @@ static void set_screen(bool on)
      * when it went dark is stale by now, and raising the backlight over it
      * shows the old frame first and the new one a moment later. */
     if (on) draw_current_frame();
-    catnip_display_backlight(on ? 255 : 0);
+    /* The owner's brightness, not full: this is the one place the panel is lit
+     * after boot, so it is the one place that has to remember the setting. */
+    catnip_display_backlight(on ? (uint8_t)(g_cfg.screen_brightness * 255 / 100) : 0);
     Serial.printf("[catnip] screen %s (%lu ms)\n", on ? "on" : "off", millis() - t0);
 }
 
@@ -237,41 +253,28 @@ static void poll_power_button(void)
     if (catnip_pmu_power_key_pressed()) set_screen(!g_screen_on);
 }
 
-/* Read the owner's settings off the card and act on them. Everything here is
- * optional: no file, an unreadable file or a file full of typos all leave the
- * built-in behaviour in place, and say so in the log rather than on screen. */
-#ifndef CATNIP_CONFIG_PATH
-#define CATNIP_CONFIG_PATH "/sd/catnip/config.json"
-#endif
+/* Read the owner's settings and act on them. Where they come from and which
+ * copy wins is device/prefs.h; everything there is optional, so a device with
+ * no card and nothing saved still boots looking like itself. */
+
+/* The settings that hardware has to be told about, told to it. Called at boot
+ * and again on every step the owner makes on the settings page, which is what
+ * makes a brightness visible while it is being chosen rather than after. */
+static void apply_settings(const catnip_config *cfg)
+{
+    catnip_led_configure((uint8_t)(cfg->led_brightness * 255 / 100),
+                         cfg->led_breaths_per_second);
+    if (g_screen_on)
+        catnip_display_backlight((uint8_t)(cfg->screen_brightness * 255 / 100));
+}
 
 static void apply_config(void)
 {
     catnip_config cfg;
-    catnip_config_defaults(&cfg);
+    catnip_prefs_load(&cfg);
+    g_cfg = cfg;
 
-    File f = SD_MMC.open(CATNIP_CONFIG_PATH);
-    if (!f || f.isDirectory()) {
-        Serial.println("[catnip] config: none on the card, using the built-in settings");
-    } else {
-        size_t len = f.size();
-        char *text = (char *)malloc(len + 1);
-        if (text && f.readBytes(text, len) == len) {
-            text[len] = '\0';
-            if (catnip_config_parse(&cfg, text, len)) {
-                Serial.println("[catnip] config: read from " CATNIP_CONFIG_PATH);
-            } else {
-                Serial.println(
-                    "[catnip] config: not valid JSON, using the built-in settings");
-            }
-        } else {
-            Serial.println(
-                "[catnip] config: could not be read, using the built-in settings");
-        }
-        free(text);
-        f.close();
-    }
-
-    catnip_led_configure(cfg.led_brightness, cfg.led_breaths_per_second);
+    apply_settings(&cfg);
     if (cfg.boot_frames_dir[0]) {
         g_sd_frames = catnip_display_load_frames(cfg.boot_frames_dir);
         if (g_sd_frames) {
@@ -297,10 +300,15 @@ static void apply_config(void)
 /* Raise the backlight gradually - an abrupt jump to full reads as a flash. */
 static void fade_in(void)
 {
-    for (int level = 0; level <= 255; level += 5) {
+    int target = g_cfg.screen_brightness * 255 / 100;
+    for (int level = 0; level <= target; level += 5) {
         catnip_display_backlight((uint8_t)level);
         delay(4);
     }
+    /* The last step of the loop lands below the target whenever it is not a
+     * multiple of five, and a backlight one step short of what was asked for is
+     * a setting that never quite takes. */
+    catnip_display_backlight((uint8_t)target);
 }
 
 /* Put the battery on the menu's status line. Wifi is deliberately not shown:
@@ -320,6 +328,37 @@ static void update_status(bool force)
     if (!force && now - g_status_last < 2000) return;
     g_status_last = now;
     catnip_frame_set_battery(catnip_pmu_battery_percent());
+}
+
+static void rebuild_menu(void);
+
+/* Down from the home section: the settings plane. It replaces the menu's tree
+ * with its own, which is all "entering" means here - both are platform screens
+ * on the same renderer, and neither is an app. */
+static void enter_settings(void)
+{
+    if (!g_settings || g_in_settings) return;
+    g_in_settings = true;
+    g_settings_unsaved = false;
+    catnip_settings_show(g_settings, &g_cfg);
+    catnip_frame_set_title("Preference");
+}
+
+/* And back out of it, saving on the way if anything was stepped. Once, here,
+ * rather than on every step: see prefs.h. */
+static void leave_settings(void)
+{
+    if (!g_in_settings) return;
+    g_in_settings = false;
+    if (g_settings_unsaved) {
+        const catnip_config *cfg = catnip_settings_config(g_settings);
+        if (cfg) {
+            g_cfg = *cfg;
+            catnip_prefs_save(&g_cfg);
+        }
+        g_settings_unsaved = false;
+    }
+    rebuild_menu();
 }
 
 /* (Re)draw the menu with the apps the shell found. Called at boot and every
@@ -381,6 +420,12 @@ void setup()
     catnip_i2c_scan();
     if (!catnip_ioexp_begin()) Serial.println("[catnip] WARN: I/O expander not found");
 
+    /* Before the panel is lit, and before the card is even looked for: the
+     * fade below climbs to the owner's brightness, and with an empty g_cfg that
+     * target is zero - a boot that ends in a black screen with nothing wrong.
+     * The real settings arrive a few lines down and correct this. */
+    catnip_config_defaults(&g_cfg);
+
     if (catnip_display_begin()) {
         catnip_display_blit(catnip_splash);
 
@@ -392,8 +437,13 @@ void setup()
 
     /* After the splash, deliberately: the card is the slowest thing in the
      * boot and nothing on screen should wait for it. */
-    if (catnip_sd_mount()) {
-        apply_config();
+    bool card = catnip_sd_mount();
+    /* Outside the card check on purpose: NVS is where a setting lives on a
+     * device with no card, and that is most devices most of the time. Reading
+     * the owner's settings only when a card happened to be in the slot is the
+     * exact failure this page exists to fix. */
+    apply_config();
+    if (card) {
         /* The marker file means the owner wants the input page and nothing
          * else, so the Lua runtime and the shell below are never started: they
          * would only delay the page and then compete with it for the screen.
@@ -438,6 +488,7 @@ void setup()
      * the boot animation: the first pass draws it, catnip_lvgl_backend_active()
      * turns true, and animate() stands down. */
     g_menu = catnip_menu_new(g_rt);
+    g_settings = catnip_settings_new(g_rt);
     rebuild_menu();
 
     /* Expect zero apps until the SD card is mounted (#32). */
@@ -524,7 +575,32 @@ void loop()
     /* The menu and a running app are the same kind of tree; which is up is the
      * shell's state, and the transitions between them are here (#33). */
     bool stepped = false;
-    if (g_shell) {
+    /* The settings page, before the shell's own states: it is not one of them.
+     * While it is up the menu's pick is not read and no app can start, because
+     * the tree on screen is this page's and there is nothing on it to launch. */
+    if (g_in_settings) {
+        if (catnip_settings_take_dirty(g_settings)) {
+            /* Applied on the pass it changed, which is the whole argument for
+             * stepping a value in place: a brightness nobody can see while
+             * choosing it is a brightness chosen twice. Saving waits for the
+             * way out. */
+            const catnip_config *cfg = catnip_settings_config(g_settings);
+            if (cfg) {
+                g_cfg = *cfg;
+                apply_settings(&g_cfg);
+                g_settings_unsaved = true;
+            }
+        }
+        /* B is a negotiation here as everywhere else: the drain above has just
+         * run the page's on_back, and this reads what it answered. It claims B
+         * while a column is live, so the first press lets go of the column and
+         * only the second leaves - one press per level, the same climb every
+         * other screen offers. Home is not a negotiation and takes both levels
+         * at once. */
+        if (gesture == CATNIP_UI_GESTURE_HOME) leave_settings();
+        else if (gesture == CATNIP_UI_GESTURE_BACK && !catnip_render_take_claim(g_rt))
+            leave_settings();
+    } else if (g_shell) {
         if (catnip_shell_state(g_shell) == CATNIP_SHELL_RUNNING) {
             int st = CATNIP_SHELL_RUNNING;
             stepped = true;
@@ -548,6 +624,13 @@ void loop()
             /* In the menu. A click has latched which app to launch; the launch
              * tears the menu tree down, so one that then fails to load must put
              * the menu back rather than leave a blank screen. */
+            /* Down, on the home carousel, is the settings plane. Checked
+             * before the pick, so a pass that carries both leaves the menu
+             * rather than launching out of a screen that is going away. */
+            if (gesture == CATNIP_UI_GESTURE_SETTINGS) {
+                enter_settings();
+                return;
+            }
             const char *id = catnip_menu_take_pick(g_menu);
             if (id) {
                 char err[64];
@@ -575,6 +658,8 @@ void loop()
     if (g_shell) {
         if (catnip_shell_state(g_shell) == CATNIP_SHELL_RUNNING) {
             if (delivered || stepped) catnip_frame_set_title(catnip_shell_title(g_shell));
+        } else if (g_in_settings) {
+            catnip_frame_set_title("Preference");
         } else if (g_menu) {
             catnip_frame_set_title(catnip_menu_focus_name(g_menu));
         }

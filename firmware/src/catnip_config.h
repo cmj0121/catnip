@@ -24,9 +24,29 @@ extern "C" {
  * rejected rather than silently cut in half. */
 #define CATNIP_CONFIG_PATH_MAX 128
 
+/* The screen is never allowed all the way down. Every setting in here is
+ * reachable from the settings page, and a device whose only display has been
+ * turned off cannot show the way back - the owner would be left holding a black
+ * rectangle that is still running. The stock firmware picked the same floor for
+ * the same reason. */
+#define CATNIP_SCREEN_MIN_PCT 20
+
 typedef struct {
-    /* Status LED. Peak of the breathing cycle, 0-255. A WS2812 is far brighter
-     * at a given value than people expect, which is why the default is low. */
+    /* Backlight, 20-100%. See CATNIP_SCREEN_MIN_PCT for the floor. */
+    uint8_t screen_brightness;
+
+    /* Seconds of no input before the screen goes dark, or 0 for never. The LED
+     * dims with it, so the device still says it is alive without lighting up a
+     * pocket. */
+    uint16_t idle_off_s;
+
+    /* Status LED. Peak of the breathing cycle, 0-100%. A WS2812 is far brighter
+     * at a given value than people expect, which is why the default is low.
+     *
+     * Percent rather than the 0-255 the part takes, because this is a number an
+     * owner reads and sets. The conversion belongs at the edge that talks to the
+     * hardware, and having it anywhere else means two scales in the same file
+     * and a bug waiting for whoever forgets which one they are holding. */
     uint8_t led_brightness;
     /* Breaths per second. 0.4 is one breath every two and a half seconds. */
     float led_breaths_per_second;
