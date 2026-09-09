@@ -20,6 +20,7 @@ struct catnip_shell {
     int running;  /* index of the running app, or -1 */
     int resident; /* the app's setup is done but its UI lives on its handlers */
     int bare;     /* the running app asked for the whole panel; see the header */
+    int hints;    /* the running app takes the control hint; see the header */
 };
 
 catnip_shell *catnip_shell_new(catnip_rt *rt, const char *apps_root, catnip_now_fn now,
@@ -97,6 +98,7 @@ int catnip_shell_launch(catnip_shell *s, int index, char *errbuf, size_t errlen)
      * succeeds - before the app's first screen is built, which is what matters.
      */
     s->bare = m.bare;
+    s->hints = m.hints;
 
     rc = catnip_sched_start(s->sched, code, m.id);
     free(code);
@@ -171,6 +173,14 @@ int catnip_shell_step(catnip_shell *s)
 int catnip_shell_bare(const catnip_shell *s)
 {
     return (s && s->state == CATNIP_SHELL_RUNNING) ? s->bare : 0;
+}
+
+int catnip_shell_hints(const catnip_shell *s)
+{
+    /* The launcher's own screens always take the hint: it is the one place
+     * where a direction meaning nothing is most likely and least expected. */
+    if (!s || s->state != CATNIP_SHELL_RUNNING) return 1;
+    return s->hints;
 }
 
 const char *catnip_shell_title(const catnip_shell *s)

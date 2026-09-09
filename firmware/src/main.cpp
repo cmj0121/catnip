@@ -143,6 +143,10 @@ static void enter_diag(void)
      * over a page whose whole job is to show what the panel is doing, with the
      * frame testing itself in the top 26 pixels. */
     catnip_frame_show(false);
+    /* And the hint with it: the loop's diag branch returns before the line that
+     * would hide it, so a hint left up here would float over a page whose whole
+     * job is to show what the panel is doing. */
+    catnip_frame_show_hint(false);
     /* Hand the touch panel back before the page takes it: the input layer's LVGL
      * pointer indev would otherwise keep injecting taps onto the page's own
      * screen (#31/#42). Safe on the boot-marker path, where no indev was made. */
@@ -770,6 +774,12 @@ void loop()
     /* And what the four directions do from where the ring is (#80). Derived
      * from the tree by the same function the input pass asks, so the arrow that
      * is lit and the press that does something cannot disagree. */
+    /* Unless the app asked for the panel to itself, which is `frame: "bare"`,
+     * or asked for the hint not to be drawn, which is `"hints": false`. The
+     * first is a claim about the whole surface and the second about this app's
+     * directions needing no explanation, and either is reason enough. */
+    catnip_frame_show_hint(catnip_lvgl_backend_active() && !catnip_shell_bare(g_shell) &&
+                           catnip_shell_hints(g_shell));
     catnip_frame_set_hint(catnip_ui_input_hint(g_rt, catnip_ui_input_focused()));
     /* Running an app, the shell answers what the header reads - a title the app
      * set, else its manifest name - and only after app code could have run,

@@ -76,6 +76,15 @@ int catnip_manifest_parse(const char *json, catnip_manifest *out, char *errbuf,
     out->bare = (cJSON_IsString(frame) && frame->valuestring &&
                  strcmp(frame->valuestring, "bare") == 0);
 
+    /* Only the literal false turns it off. An absent key, a string, a number -
+     * anything but false - leaves the hint on, because "I did not think about
+     * this" and "I want it" want the same answer, and only one of them is
+     * written down. */
+    {
+        const cJSON *hints = cJSON_GetObjectItemCaseSensitive(root, "hints");
+        out->hints = !cJSON_IsFalse(hints);
+    }
+
     const cJSON *entry = cJSON_GetObjectItemCaseSensitive(root, "entry");
     if (cJSON_IsString(entry) && entry->valuestring[0]) {
         copy_str(out->entry, sizeof(out->entry), entry);

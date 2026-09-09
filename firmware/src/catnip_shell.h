@@ -75,6 +75,16 @@ const char *catnip_shell_title(const catnip_shell *s);
  * launcher's own screens are never bare. */
 int catnip_shell_bare(const catnip_shell *s);
 
+/* Whether the control hint is drawn over the running app - `"hints": false` in
+ * its manifest turns it off (#80). 1 when no app is running, because the
+ * launcher's own screens always take it.
+ *
+ * Separate from `bare`, though both are about the platform drawing over an app,
+ * because they are different claims: `bare` says "this is a canvas and the
+ * whole panel is the picture", and this says "the directions here need no
+ * explaining". An app can want either without the other. */
+int catnip_shell_hints(const catnip_shell *s);
+
 /* Act on a short B, after the drain that ran the app's on_back. Returns the
  * shell state.
  *

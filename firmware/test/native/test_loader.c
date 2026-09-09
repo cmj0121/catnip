@@ -67,6 +67,20 @@ int main(void)
                                 &m, err, sizeof(err)) == 0,
           "valid manifest parses");
     CHECK(strcmp(m.entry, "main.lua") == 0, "entry defaults to main.lua");
+    /* The control hint is on unless an app says otherwise (#80), and the
+     * direction of that default is the design: the apps most likely to need it
+     * are the ones whose authors did not think about it, so silence means yes. */
+    CHECK(m.hints, "an app that says nothing about hints gets them");
+    CHECK(catnip_manifest_parse("{\"id\":\"a\",\"name\":\"A\",\"catnip_api\":\"1.0\","
+                                "\"hints\":false}",
+                                &m, err, sizeof(err)) == 0 &&
+              !m.hints,
+          "and one that says hints:false does not");
+    CHECK(catnip_manifest_parse("{\"id\":\"a\",\"name\":\"A\",\"catnip_api\":\"1.0\","
+                                "\"hints\":\"no\"}",
+                                &m, err, sizeof(err)) == 0 &&
+              m.hints,
+          "only the literal false turns them off, not anything false-looking");
     CHECK(catnip_manifest_parse("{\"name\":\"A\",\"catnip_api\":\"1.0\"}", &m, err,
                                 sizeof(err)) != 0,
           "missing id is rejected");

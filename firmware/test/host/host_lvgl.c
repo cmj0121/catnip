@@ -26,19 +26,36 @@
 #include "device/app_icon.h"
 #include "device/board.h"
 #include "device/lvgl_port.h"
+#include "host_png.h"
+#include <stdio.h>
+#include <string.h>
 
 static bool g_up;
 static lv_display_t *g_disp;
 static uint32_t g_tick;
+/* The last frame LVGL handed over, kept so it can be written out. A screenshot
+ * is not a test - what is asserted is geometry, not colour - but it is the
+ * difference between reasoning about a page and looking at one, and looking at
+ * one used to cost a build, a flash and ninety seconds. */
+static uint16_t g_frame[CATNIP_SCREEN_W * CATNIP_SCREEN_H];
 
 /* Nowhere. The pixels are rendered - which is the point, because rendering is
  * what runs the layout - and then dropped: what is asserted is where things
  * ended up, not what colour they were. */
 static void flush_nowhere(lv_display_t *d, const lv_area_t *area, uint8_t *px)
 {
+    /* The render mode is FULL, so every flush is the whole panel and the copy
+     * is one memcpy rather than a rectangle blit. Kept rather than dropped
+     * because catnip_host_shot() is the only reason any of this is rendered at
+     * all - the layout is computed on the way here. */
     (void)area;
-    (void)px;
+    memcpy(g_frame, px, sizeof(g_frame));
     lv_display_flush_ready(d);
+}
+
+bool catnip_host_shot(const char *path)
+{
+    return catnip_host_png_write(path, CATNIP_SCREEN_W, CATNIP_SCREEN_H, g_frame);
 }
 
 /* LVGL needs a clock and does not care whose. Nothing here animates, so it only

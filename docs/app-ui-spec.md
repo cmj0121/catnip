@@ -168,6 +168,12 @@ the way the bar's height is: a canvas's bottom line starts to the right of it, a
 a column leaves room below. **A `frame: "bare"` app reserves neither**, because
 no bar and no hint are drawn over one.
 
+**An app can turn it off** with `"hints": false` in its manifest — a different
+claim from `bare`, and worth making on its own: _the directions here need no
+explaining_. The default is on, and that direction is deliberate: the apps most
+likely to need the hint are the ones whose authors did not think about it, so an
+app that says nothing gets it.
+
 **A swipe is not a new gesture.** It is the joystick, made with a finger: swipe
 up and down where you would push up and down, left and right the same. Touch and
 the joystick are two ways of saying the same small vocabulary, which is already
@@ -299,6 +305,7 @@ The manifest carries the knobs; Lua carries the behaviour.
 | `actions[]`                           | manifest | the action catalogue: `id`, `name`, `icon`          |
 | `frame`                               | manifest | `"standard"` (default) or `"bare"`                  |
 | `counter`                             | manifest | `false` if you are not a list                       |
+| `hints`                               | manifest | `false` to draw no control hint over you            |
 | `ui.title(s)`                         | Lua      | a title that changes at runtime                     |
 | `layout`                              | Lua      | on a list: `"grid"` for icons, `"mixer"` for values |
 | `style`                               | Lua      | which of the roles below a node is set in           |

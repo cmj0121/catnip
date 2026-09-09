@@ -122,6 +122,10 @@ grid 就是 `ui.list{ layout = "grid" }`——同一個 node、同一個 `select
 它佔的那個角落跟 bar 的高度一樣是**被保留的**：canvas 的底行會從它右邊開始，欄式畫面則在底下留出空間。
 **`frame: "bare"` 的 app 兩者都不保留**，因為那種畫面上既不畫 bar 也不畫提示。
 
+**app 可以自己關掉它**：manifest 裡寫 `"hints": false`。這跟 `bare` 是不同的主張，也值得單獨存在 ——
+它說的是「**這裡的方向不需要解釋**」。預設是開的，而且這個方向是刻意的：
+最需要提示的 app，正是作者沒想過這件事的那些，所以什麼都沒寫的 app 會拿到它。
+
 **滑動不是新手勢。** 它就是搖桿，只是用手指做：本來往上推的地方就往上滑，左右亦然。
 觸控與搖桿是同一套小詞彙的兩種說法——「點一下就是在那一列上短按 A」本來就成立——方向遵循同一條規則，而不是為手指另造一套語法。
 
@@ -220,6 +224,7 @@ B 在裝置的其他地方都是逃生口，而把 Delete 放在那裡的 app，
 | `actions[]`                           | manifest | 動作目錄：`id`、`name`、`icon`             |
 | `frame`                               | manifest | `"standard"`(預設)或 `"bare"`              |
 | `counter`                             | manifest | 你不是清單的話設 `false`                   |
+| `hints`                               | manifest | 設 `false` 就不在你身上畫控制提示          |
 | `ui.title(s)`                         | Lua      | 執行期會變的標題                           |
 | `layout`                              | Lua      | 清單上：`"grid"` 放 icon，`"mixer"` 放數值 |
 | `style`                               | Lua      | 這個節點用下面哪一個角色                   |

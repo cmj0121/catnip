@@ -144,7 +144,18 @@ void catnip_frame_show(bool on)
     shown = on;
     if (on) lv_obj_remove_flag(g_bar, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(g_bar, LV_OBJ_FLAG_HIDDEN);
+}
+
+void catnip_frame_show_hint(bool on)
+{
+    static bool shown = false;
+
     if (!ensure_hint()) return;
+    /* The same guard as the bar, for the same reason it gives at length: on a
+     * display that renders the whole panel, an invalidation that changes
+     * nothing still costs 153,600 bytes over the bus. */
+    if (on == shown) return;
+    shown = on;
     if (on) lv_obj_remove_flag(g_hint, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(g_hint, LV_OBJ_FLAG_HIDDEN);
 }

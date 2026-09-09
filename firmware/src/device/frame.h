@@ -67,6 +67,16 @@ void catnip_frame_set_title(const char *title);
  * same thing everywhere, and a hint is for what changes. */
 void catnip_frame_set_hint(unsigned mask);
 
+/* Draw the hint at all. Off while the diagnostic has the panel, over an app
+ * that asked for the whole surface with `frame: "bare"`, and over one that said
+ * `"hints": false` - which is a different claim from `bare` and worth making on
+ * its own: this app's directions need no explaining.
+ *
+ * Separate from catnip_frame_show() because the bar and the hint are hidden for
+ * different reasons and by different callers; they were one call, and the app
+ * that wanted its own hint suppressed would have lost its title bar with it. */
+void catnip_frame_show_hint(bool on);
+
 /* The battery, top-left. Below zero means "not measured", and the frame then
  * draws no percentage at all rather than a plausible wrong one - the same rule
  * device.battery() answers -1 by. */

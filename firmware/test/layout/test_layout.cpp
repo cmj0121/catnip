@@ -35,6 +35,8 @@
 #include "device/frame.h"
 #include "device/lvgl_backend.h"
 #include "device/lvgl_port.h"
+#include "host_shot.h"
+#include <stdlib.h>
 
 static int failures;
 #define CHECK(cond, name)                                                                \
@@ -115,6 +117,23 @@ static void pass(void)
     lv_refr_now(NULL);
 }
 
+/* And, when asked, a picture of what that came out as.
+ *
+ * Off unless CATNIP_SHOTS names a directory, because writing four PNGs on every
+ * `make test` is four files nobody asked for. Nothing here asserts anything
+ * about them: what a page *should* look like is a judgement, and a golden image
+ * would make every deliberate redesign a failing test. This is for the moment
+ * when the geometry all passes and the page is still wrong. */
+static void shot(const char *name)
+{
+    const char *dir = getenv("CATNIP_SHOTS");
+    char path[256];
+
+    if (!dir || !dir[0]) return;
+    snprintf(path, sizeof(path), "%s/%s.png", dir, name);
+    printf("    [wrote %s]\n", catnip_host_shot(path) ? path : "nothing");
+}
+
 static lv_obj_t *find_handle(lv_obj_t *root, catnip_handle h)
 {
     if (!root) return NULL;
@@ -162,6 +181,7 @@ int main(void)
         CHECK(menu != NULL, "the launcher is built");
         catnip_menu_show(menu, NULL, 0, false);
         pass();
+        shot("launcher");
         ring = obj("menu_list");
         cell = obj("menu_home");
         CHECK(ring && cell, "the ring and the cat are drawn");
@@ -186,6 +206,7 @@ int main(void)
         "    ui.label{ id = 'date', text = '2026-09-09', style = 'caption' },\n"
         "    ui.label{ id = 'week', text = 'Tue', style = 'caption' } } }\n");
     pass();
+    shot("clock-face");
     {
         lv_obj_t *date = obj("date");
         lv_obj_t *week = obj("week");
@@ -215,6 +236,7 @@ int main(void)
         "    ui.label{ id = 'c1', text = 'Y', value = 50 },\n"
         "    ui.label{ id = 'c2', text = 'M', value = 50 } } }\n");
     pass();
+    shot("setter");
     {
         lv_obj_t *cols = obj("cols");
         lv_obj_t *c1 = obj("c1");
@@ -245,6 +267,7 @@ int main(void)
         CHECK(info != NULL, "the device page is built");
         catnip_device_info_show(info, rows, 3, &pref, &diag);
         pass();
+        shot("device-page");
         facts = obj("info_list");
         keys = obj("info_keys");
         k1 = obj("info_left");
