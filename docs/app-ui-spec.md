@@ -144,6 +144,21 @@ step, select, activate and ask for options — everything that moves you around
 inside what is on screen. Back and home have no swipe and no corner to tap: B is
 a physical button and stays one.
 
+**What a tap has already been through before it reaches you.** The platform
+guards touch so your `on_click` does not have to, and these are the guards, so
+you know what you are being handed:
+
+| Guard                                                         | What it means for you                                             |
+| ------------------------------------------------------------- | ----------------------------------------------------------------- |
+| The tap that wakes a dark screen does nothing else            | a device picked up out of a pocket cannot start you               |
+| Taps are ignored for a moment after a screen is built         | a finger still down through a page change lands on nothing        |
+| A tap begins and ends on the same target, having barely moved | a drag that started on your row is a swipe, not a click           |
+| Nothing destructive is ever one tap away                      | which is why operations live behind long A, and not on the screen |
+
+There is deliberately **no inertia and no momentum**: the carousel has a handful
+of positions and the grid scrolls a row at a time, and momentum is a solution to
+long lists that here would only overshoot the thing being aimed at.
+
 That line is where it is on purpose, and it earns its place twice. Leaving is the
 one action a stray touch must never cause — a pocket, a thumb resting on the
 glass, a panel reading a drop of water. And it is the one action a user must
@@ -341,17 +356,23 @@ main region's one-icon shape.
 Two levels sit around it, and they are not two ways of doing the same thing —
 one is _your_ things, the other is _everything_.
 
-**The carousel is the shortlist.** From home, each direction opens a plane: up
-is the clock, down is settings and preferences, left and right step through the
-apps you keep. One per step, big.
+**The carousel is the shortlist.** From home, up is every app you have, down is
+the system, and left and right step through the ones you keep. One per step,
+big.
 
 ```text
-                        ▲  the clock
+                        ▲  all apps — a 3x2 grid
                         │
-   apps  ◄──────────  [cat]  ──────────►  apps
+  pinned  ◄──────────  [cat]  ──────────►  pinned
                         │
                         ▼  settings, and preferences
 ```
+
+Up and down are not two of the same thing: **up is yours and down is the
+device's**. The clock is not a direction — it is an app, pinned to the carousel
+like any other, and anything you write can take its place. A whole plane
+maintained for one screen buys only that nobody may replace it, which is not
+worth having.
 
 The four directions mean four different things here, and that is what makes this
 the home section rather than a list laid out sideways. **Down reaches settings
@@ -367,10 +388,11 @@ returns to the cat from any depth. **The grid is the exception to "down is setti
 is the next row, because a rule that let a long list fall out of itself while
 being scrolled would cost more than the one gesture it saves.
 
-**The grid is everything.** One carousel position is _All apps_, and it opens
-the main region's six-icon shape: a 3x2 grid of every app on the card, scrolling
-when there are more than six. Finding the twelfth app is two screens rather than
-twelve steps, which is what the carousel alone could not do.
+**The grid is everything.** Up from anywhere on the carousel opens the main
+region's six-icon shape: a 3x2 grid of every app there is, scrolling when there
+are more than six. Finding the twelfth app is two screens rather than twelve
+steps, which is what the carousel alone could not do — a carousel is a
+shortlist, and it stops working the moment it is used as a directory.
 
 The focused icon is ringed, and its name is the header's `[TITLE]` — so an icon
 needs no label under it and the name is still there to read.
