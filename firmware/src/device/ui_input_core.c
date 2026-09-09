@@ -111,7 +111,7 @@ int catnip_ui_input_run(catnip_ui_input *in, catnip_rt *rt, const catnip_ui_samp
 {
     catnip_handle order[CATNIP_UI_MAX_FOCUS];
     int n;
-    int layout;
+    catnip_node_layout layout;
     unsigned events;
     int swipe;
     bool up, down, left, right;
