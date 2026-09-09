@@ -2,11 +2,14 @@
  * Native test for issue #67: the preference page's two states and its ladders.
  *
  * Drawing the page is LVGL and needs the device; the part everything else
- * depends on is plain. The page opens with nothing chosen, left and right move
- * the ring, A or a tap makes a column live, and only then do up and down change
- * anything. That second state is the whole safety argument of the page: arriving
- * on five settings with one of them already under the joystick is how a
- * brightness gets changed by someone who only wanted to look.
+ * depends on is plain. Left and right move the ring, up and down change the
+ * column it is on, A keeps the page and leaves, and B puts everything back.
+ *
+ * B is what makes that safe. The page used to need a second state - a column
+ * had to be made live with A before up and down meant anything - because
+ * arriving here by pushing down should not put a brightness under the joystick.
+ * A press that can be taken back needs no guarding against, so the state is
+ * gone and the page is simpler for it.
  *
  * Two kinds of column share the page. Screen is a continuous range, because
  * every brightness between the ends is a real one; the rest are ladders of a
@@ -57,23 +60,10 @@ int main(void)
           "showing it holds the settings it was given");
     CHECK(!catnip_settings_take_dirty(s), "and nothing is dirty before a press");
 
-    /* Nothing is chosen yet, so up and down are not the value of anything. */
-    fire(rt, "ui.fire('settings_list', 'lower')");
-    fire(rt, "ui.fire('settings_list', 'raise')");
-    CHECK(!catnip_settings_take_dirty(s),
-          "up and down do nothing until a column is live");
-    CHECK(catnip_settings_config(s)->screen_brightness == 100, "and change nothing");
-
-    /* Right lands on the first column; A makes it live; only now does down move
-     * the value. */
-    fire(rt, "ui.fire('settings_list', 'next')");
-    fire(rt, "ui.fire('settings_list', 'lower')");
-    CHECK(catnip_settings_config(s)->screen_brightness == 100,
-          "the ring alone does not make a column live");
-    fire(rt, "ui.fire('settings_list', 'click')");
+    /* The ring opens on the first column and down moves it straight away. */
     fire(rt, "ui.fire('settings_list', 'lower')");
     now = catnip_settings_config(s);
-    CHECK(now->screen_brightness == 95, "A makes it live and down steps it");
+    CHECK(now->screen_brightness == 95, "down steps the column the ring is on");
     CHECK(catnip_settings_take_dirty(s), "a change marks the page dirty");
     CHECK(!catnip_settings_take_dirty(s), "and reading that clears it");
 
@@ -90,19 +80,19 @@ int main(void)
         fire(rt, "ui.fire('settings_list', 'raise')");
     CHECK(catnip_settings_config(s)->screen_brightness == 100, "up stops at the top");
 
-    /* B lets go of the column before it leaves the page: it is claimed while
-     * something is live and declined when nothing is, which is what makes one
-     * press per level rather than one press out of everything. */
+    /* A confirms and B discards, and each is reported once. */
+    CHECK(catnip_settings_take_result(s) == CATNIP_SETTINGS_STAY,
+          "nobody has left a page still being used");
+    fire(rt, "ui.fire('settings_list', 'click')");
+    CHECK(catnip_settings_take_result(s) == CATNIP_SETTINGS_SAVE, "A keeps the page");
+    CHECK(catnip_settings_take_result(s) == CATNIP_SETTINGS_STAY,
+          "and reading that clears it");
     fire(rt, "ui.fire('settings_screen', 'back')");
-    fire(rt, "ui.fire('settings_list', 'lower')");
-    CHECK(catnip_settings_config(s)->screen_brightness == 100,
-          "B lets go of the column, and down stops meaning anything");
+    CHECK(catnip_settings_take_result(s) == CATNIP_SETTINGS_DISCARD, "B puts it back");
 
     /* Moving the ring is independent of the values. */
     catnip_settings_show(s, &cfg);
     fire(rt, "ui.fire('settings_list', 'next')");
-    fire(rt, "ui.fire('settings_list', 'next')");
-    fire(rt, "ui.fire('settings_list', 'click')");
     fire(rt, "ui.fire('settings_list', 'lower')");
     now = catnip_settings_config(s);
     CHECK(now->screen_brightness == 100, "moving on leaves the last column alone");
@@ -111,15 +101,18 @@ int main(void)
     /* Left off the end stays on the first column rather than coming round. */
     for (int i = 0; i < 5; i++)
         fire(rt, "ui.fire('settings_list', 'prev')");
-    fire(rt, "ui.fire('settings_list', 'click')");
     fire(rt, "ui.fire('settings_list', 'lower')");
     CHECK(catnip_settings_config(s)->screen_brightness == 95,
           "left off the end stays on the first column");
 
-    /* A tap names its own column, where the joystick can only have moved to
-     * one - and it makes it live in the same press. */
+    /* A tap names its own column and only moves the ring there: the same event
+     * as A, and not the same act, because a finger has a column to name and a
+     * button press does not. A tap that also confirmed would leave no way to
+     * choose a column by touch without leaving the page. */
     catnip_settings_show(s, &cfg);
     fire(rt, "ui.fire('settings_list', 'click', 3)");
+    CHECK(catnip_settings_take_result(s) == CATNIP_SETTINGS_STAY,
+          "a tap chooses a column without leaving");
     for (int i = 0; i < 4; i++)
         fire(rt, "ui.fire('settings_list', 'lower')");
     now = catnip_settings_config(s);

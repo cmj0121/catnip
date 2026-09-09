@@ -284,9 +284,23 @@ static void test_traversal(void)
     CHECK(pass(rt) == 0, "a write of the same value emits nothing");
     CHECK_OPS("[]", "even though the node was marked dirty");
 
+    /* The sixth role, and the one that is three times the size of the rest: it
+     * has to survive the trip from a Lua string to the descriptor, or an app
+     * that marked its one big number would be told it said nothing. */
+    run(rt, "ui.get('title').style = 'display'");
+    (void)pass(rt);
+    CHECK(g_seen_style == CATNIP_STYLE_DISPLAY, "display is a role of its own");
+
     run(rt, "ui.get('title').style = 'nonesuch'");
     (void)pass(rt);
     CHECK(g_seen_style == CATNIP_STYLE_BODY, "an unknown style name falls back to body");
+
+    /* And the fallback is still a fallback rather than the newest role, which is
+     * the promise the enum's comment makes: an app written against a later
+     * firmware degrades on an older one instead of failing to open. */
+    run(rt, "ui.get('title').style = 'displa'");
+    (void)pass(rt);
+    CHECK(g_seen_style == CATNIP_STYLE_BODY, "and a near-miss is not display");
 
     catnip_rt_free(rt);
 }
@@ -845,7 +859,7 @@ static void test_ids_and_focus(void)
 
     run(rt, "ui.screen{ ui.label{ id = 'l', text = 'l' },\n"
             "  ui.button{ id = 'b1', text = '1' },\n"
-            "  ui.list{ id = 'm',\n"
+            "  ui.list{ id = 'm', on_click = function() end,\n"
             "    ui.button{ id = 'b2', text = '2' },\n"
             "    ui.button{ id = 'b3', text = '3', disabled = true } } }\n");
     snprintf(g_watch, sizeof(g_watch), "b3");
@@ -858,6 +872,20 @@ static void test_ids_and_focus(void)
     CHECK(n == 3 && order[0] == obj_handle("b1") && order[1] == obj_handle("m") &&
               order[2] == obj_handle("b2"),
           "and what is left is in tree order");
+
+    /* A list nothing is listening to is text in a column, and the ring does not
+     * stop on it: the device info page is a page of facts with two buttons
+     * under them, and a stop on the facts would offer an interaction that does
+     * not exist. The buttons inside it still answer for themselves. */
+    run(rt, "ui.screen{ ui.list{ id = 'facts',\n"
+            "    ui.label{ text = 'a' }, ui.label{ text = 'b' } },\n"
+            "  ui.list{ id = 'keys', layout = 'row',\n"
+            "    ui.button{ id = 'k1', text = '1' },\n"
+            "    ui.button{ id = 'k2', text = '2' } } }\n");
+    (void)pass(rt);
+    n = catnip_render_focus_order(rt, order, 8);
+    CHECK(n == 2 && order[0] == obj_handle("k1") && order[1] == obj_handle("k2"),
+          "a list with no handlers is not a focus stop, and its buttons still are");
 
     catnip_rt_free(rt);
 }
