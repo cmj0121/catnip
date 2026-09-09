@@ -67,6 +67,10 @@ typedef struct {
     catnip_node_layout layout;
     char *image; /* owned copy of the last image name sent, or NULL */
     size_t image_cap;
+    int value;
+    int steps;
+    char *value_text; /* owned copy, like `text`, and compared the same way */
+    size_t value_text_cap;
     int selected;
     unsigned flags;
     char *text;      /* owned copy of the last text sent, or NULL */
@@ -188,6 +192,11 @@ static void text_free(lua_State *L, slot *s)
         s->image = NULL;
         s->image_cap = 0;
     }
+    if (s->value_text) {
+        f(ud, s->value_text, s->value_text_cap, 0);
+        s->value_text = NULL;
+        s->value_text_cap = 0;
+    }
 }
 
 static void str_store(lua_State *L, char **dst, size_t *cap, const char *t)
@@ -214,6 +223,11 @@ static void text_store(lua_State *L, slot *s, const char *t)
 static void image_store(lua_State *L, slot *s, const char *t)
 {
     str_store(L, &s->image, &s->image_cap, t);
+}
+
+static void value_text_store(lua_State *L, slot *s, const char *t)
+{
+    str_store(L, &s->value_text, &s->value_text_cap, t);
 }
 
 /* ---- the node tables ---------------------------------------------------- */
@@ -363,9 +377,11 @@ static void desc_build(ctx *c, int node, catnip_node_desc *d)
 
     memset(d, 0, sizeof(*d));
     d->selected = -1;
+    d->value = -1; /* "this is not a quantity", which is nearly every node */
     d->id = "";
     d->text = "";
     d->image = "";
+    d->value_text = "";
 
     lua_pushstring(L, "kind");
     lua_rawget(L, node);
@@ -396,6 +412,28 @@ static void desc_build(ctx *c, int node, catnip_node_desc *d)
         const char *image = push_raw_str(L, props, "image"); /* stays for the call */
         if (image) d->image = image;
 
+        /* Out of range is clamped rather than refused: an app that computed 105
+         * from a division meant "full", and a bar drawn past its own top is a
+         * rendering bug looking for somewhere to happen. */
+        lua_pushstring(L, "value");
+        lua_rawget(L, props);
+        if (lua_isnumber(L, -1)) {
+            int v = (int)lua_tointeger(L, -1);
+            d->value = v < 0 ? 0 : (v > 100 ? 100 : v);
+        }
+        lua_pop(L, 1);
+
+        const char *vt = push_raw_str(L, props, "value_text"); /* stays for the call */
+        if (vt) d->value_text = vt;
+
+        lua_pushstring(L, "steps");
+        lua_rawget(L, props);
+        if (lua_isnumber(L, -1)) {
+            int v = (int)lua_tointeger(L, -1);
+            d->steps = (v > 0) ? v : 0;
+        }
+        lua_pop(L, 1);
+
         if (d->kind == CATNIP_NODE_LIST) {
             lua_pushstring(L, "layout");
             lua_rawget(L, props);
@@ -403,8 +441,9 @@ static void desc_build(ctx *c, int node, catnip_node_desc *d)
             /* Unknown names fall back to rows, the same promise style roles and
              * icon names make: a layout a later firmware knows costs an older
              * one its arrangement, not the app. */
-            d->layout = (lay && strcmp(lay, "carousel") == 0) ? CATNIP_LAYOUT_CAROUSEL
-                                                              : CATNIP_LAYOUT_ROWS;
+            d->layout = CATNIP_LAYOUT_ROWS;
+            if (lay && strcmp(lay, "carousel") == 0) d->layout = CATNIP_LAYOUT_CAROUSEL;
+            else if (lay && strcmp(lay, "mixer") == 0) d->layout = CATNIP_LAYOUT_MIXER;
             lua_pop(L, 1);
         }
 
@@ -441,7 +480,10 @@ static int desc_same(const slot *s, const catnip_node_desc *d)
 {
     return s->kind == d->kind && s->style == d->style && s->icon == d->icon &&
            s->layout == d->layout && s->selected == d->selected && s->flags == d->flags &&
-           s->text != NULL && strcmp(s->text, d->text) == 0;
+           s->value == d->value && s->steps == d->steps && s->text != NULL &&
+           strcmp(s->text, d->text) == 0 && s->image != NULL &&
+           strcmp(s->image, d->image) == 0 && s->value_text != NULL &&
+           strcmp(s->value_text, d->value_text) == 0;
 }
 
 static void desc_store(lua_State *L, slot *s, const catnip_node_desc *d)
@@ -452,8 +494,11 @@ static void desc_store(lua_State *L, slot *s, const catnip_node_desc *d)
     s->layout = d->layout;
     s->selected = d->selected;
     s->flags = d->flags;
+    s->value = d->value;
+    s->steps = d->steps;
     text_store(L, s, d->text);
     image_store(L, s, d->image);
+    value_text_store(L, s, d->value_text);
 }
 
 static int node_dirty(lua_State *L, int node)

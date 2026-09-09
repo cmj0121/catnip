@@ -16,6 +16,9 @@
 #include "catnip_api.h"
 #include "catnip_config.h"
 #include "catnip_menu.h"
+#include "catnip_device_info.h"
+#include "generated/version.h"
+#include "catnip_settings.h"
 #include "catnip_runtime.h"
 #include "catnip_shell.h"
 #include "catnip_ui.h"
@@ -23,6 +26,8 @@
 #include "device/diag.h"
 #include "device/display.h"
 #include "device/i2cbus.h"
+#include "device/input.h"
+#include "device/press_gesture.h"
 #include "device/ioexp.h"
 #include "device/led.h"
 #include "device/hal_meowkit.h"
@@ -33,6 +38,8 @@
 #include "device/pmu.h"
 #include "device/sd_mount.h"
 #include "device/power.h"
+#include "device/i2cbus.h"
+#include "device/prefs.h"
 #include "device/ui_input.h"
 #include "generated/anim_f01_rgb565.h"
 #include "generated/anim_f02_rgb565.h"
@@ -53,6 +60,28 @@ static const catnip_render_backend *g_be;
  * renderer and input layer that run an app run the menu. It is what finally
  * exercises the whole path end to end. */
 static catnip_menu *g_menu;
+/* The preferences page (#67), and whether it is what is on screen. It is a
+ * mode of the launcher rather than a state of the shell: the shell's states are
+ * about running an app, and this runs nothing - it is another platform screen
+ * beside the menu, reached from the home section by pushing down. */
+static catnip_settings *g_settings;
+static catnip_device_info *g_info;
+/* Which platform screen is up. Three values rather than a flag each, because
+ * two flags can be true at once and this cannot: the launcher, the preference
+ * page and the device info page are one stack, and each is reached by going
+ * down from the one before it. */
+enum catnip_page {
+    PAGE_HOME = 0, /* the launcher carousel */
+    PAGE_PREF,
+    PAGE_INFO,
+};
+static catnip_page g_page;
+/* Something was stepped and has not been written down yet. Kept here rather
+ * than read off the page, because the page's own dirty flag is consumed every
+ * pass to apply the change to the hardware, and saving happens once, later. */
+static bool g_settings_unsaved;
+/* The settings as they now stand. The one copy the rest of this file reads. */
+static catnip_config g_cfg;
 
 static void serial_log(void *ud, const char *msg, size_t len)
 {
@@ -92,6 +121,32 @@ static bool g_animating = true;
 /* Hand the screen to the input diagnostic (#42). The boot animation stops the
  * same way it will when the shell takes over (#33): g_animating goes false and
  * stays false, so nothing repaints the mascot over the page. */
+/* Set across a restart and cleared by the boot that honours it.
+ *
+ * RTC memory is exactly the right lifetime for this: it survives a software
+ * reset and not a power cycle, so "skip the diagnostic this once" means this
+ * once. Without it, leaving the page on a device whose card carries the
+ * marker file would come straight back to the page, and the way out would not
+ * be a way out. RTC_NOINIT_ATTR rather than RTC_DATA_ATTR so a cold boot leaves
+ * whatever noise is in the cell rather than being zeroed into a valid-looking
+ * value - which is why the flag is a magic number and not a bool. */
+RTC_NOINIT_ATTR static uint32_t g_skip_diag;
+#define SKIP_DIAG_MAGIC 0xCA7B0075u
+
+/* B's press timer while the diagnostic page is up. Separate from ui_input's,
+ * which is not running then. */
+static catnip_press g_press_diag;
+
+static void catnip_reboot_to_normal(void)
+{
+    Serial.println("[catnip] diag: leaving, restarting into the shell");
+    Serial.flush();
+    g_skip_diag = SKIP_DIAG_MAGIC;
+    /* Not ESP.restart(): this board switches itself off when the rail's hold
+     * pin is let go, and a bare reset lets go of it. See power.h. */
+    catnip_power_restart();
+}
+
 static void enter_diag(void)
 {
     if (catnip_diag_active()) return;
@@ -214,7 +269,9 @@ static void set_screen(bool on)
      * when it went dark is stale by now, and raising the backlight over it
      * shows the old frame first and the new one a moment later. */
     if (on) draw_current_frame();
-    catnip_display_backlight(on ? 255 : 0);
+    /* The owner's brightness, not full: this is the one place the panel is lit
+     * after boot, so it is the one place that has to remember the setting. */
+    catnip_display_backlight(on ? (uint8_t)(g_cfg.screen_brightness * 255 / 100) : 0);
     Serial.printf("[catnip] screen %s (%lu ms)\n", on ? "on" : "off", millis() - t0);
 }
 
@@ -237,41 +294,28 @@ static void poll_power_button(void)
     if (catnip_pmu_power_key_pressed()) set_screen(!g_screen_on);
 }
 
-/* Read the owner's settings off the card and act on them. Everything here is
- * optional: no file, an unreadable file or a file full of typos all leave the
- * built-in behaviour in place, and say so in the log rather than on screen. */
-#ifndef CATNIP_CONFIG_PATH
-#define CATNIP_CONFIG_PATH "/sd/catnip/config.json"
-#endif
+/* Read the owner's settings and act on them. Where they come from and which
+ * copy wins is device/prefs.h; everything there is optional, so a device with
+ * no card and nothing saved still boots looking like itself. */
+
+/* The settings that hardware has to be told about, told to it. Called at boot
+ * and again on every step the owner makes on the settings page, which is what
+ * makes a brightness visible while it is being chosen rather than after. */
+static void apply_settings(const catnip_config *cfg)
+{
+    catnip_led_configure((uint8_t)(cfg->led_brightness * 255 / 100),
+                         cfg->led_breaths_per_second);
+    if (g_screen_on)
+        catnip_display_backlight((uint8_t)(cfg->screen_brightness * 255 / 100));
+}
 
 static void apply_config(void)
 {
     catnip_config cfg;
-    catnip_config_defaults(&cfg);
+    catnip_prefs_load(&cfg);
+    g_cfg = cfg;
 
-    File f = SD_MMC.open(CATNIP_CONFIG_PATH);
-    if (!f || f.isDirectory()) {
-        Serial.println("[catnip] config: none on the card, using the built-in settings");
-    } else {
-        size_t len = f.size();
-        char *text = (char *)malloc(len + 1);
-        if (text && f.readBytes(text, len) == len) {
-            text[len] = '\0';
-            if (catnip_config_parse(&cfg, text, len)) {
-                Serial.println("[catnip] config: read from " CATNIP_CONFIG_PATH);
-            } else {
-                Serial.println(
-                    "[catnip] config: not valid JSON, using the built-in settings");
-            }
-        } else {
-            Serial.println(
-                "[catnip] config: could not be read, using the built-in settings");
-        }
-        free(text);
-        f.close();
-    }
-
-    catnip_led_configure(cfg.led_brightness, cfg.led_breaths_per_second);
+    apply_settings(&cfg);
     if (cfg.boot_frames_dir[0]) {
         g_sd_frames = catnip_display_load_frames(cfg.boot_frames_dir);
         if (g_sd_frames) {
@@ -297,10 +341,15 @@ static void apply_config(void)
 /* Raise the backlight gradually - an abrupt jump to full reads as a flash. */
 static void fade_in(void)
 {
-    for (int level = 0; level <= 255; level += 5) {
+    int target = g_cfg.screen_brightness * 255 / 100;
+    for (int level = 0; level <= target; level += 5) {
         catnip_display_backlight((uint8_t)level);
         delay(4);
     }
+    /* The last step of the loop lands below the target whenever it is not a
+     * multiple of five, and a backlight one step short of what was asked for is
+     * a setting that never quite takes. */
+    catnip_display_backlight((uint8_t)target);
 }
 
 /* Put the battery on the menu's status line. Wifi is deliberately not shown:
@@ -320,6 +369,107 @@ static void update_status(bool force)
     if (!force && now - g_status_last < 2000) return;
     g_status_last = now;
     catnip_frame_set_battery(catnip_pmu_battery_percent());
+}
+
+static void rebuild_menu(void);
+
+/* Down from the home section: the settings plane. It replaces the menu's tree
+ * with its own, which is all "entering" means here - both are platform screens
+ * on the same renderer, and neither is an app. */
+static void enter_settings(void)
+{
+    if (!g_settings || g_page != PAGE_HOME) return;
+    g_page = PAGE_PREF;
+    g_settings_unsaved = false;
+    catnip_settings_show(g_settings, &g_cfg);
+    catnip_frame_set_title("Preference");
+}
+
+/* And back out of it, saving on the way if anything was stepped. Once, here,
+ * rather than on every step: see prefs.h. */
+static void leave_settings(void)
+{
+    if (g_page != PAGE_PREF) return;
+    g_page = PAGE_HOME;
+    if (g_settings_unsaved) {
+        const catnip_config *cfg = catnip_settings_config(g_settings);
+        if (cfg) {
+            g_cfg = *cfg;
+            catnip_prefs_save(&g_cfg);
+        }
+        g_settings_unsaved = false;
+    }
+    rebuild_menu();
+}
+
+/* What this device is, written out. Asked afresh every time the page is opened
+ * rather than kept: half of it moves (the battery, the free heap, what is
+ * answering on the bus) and a page of facts that were true a while ago is
+ * worse than no page at all.
+ *
+ * The strings are built here and not in catnip_device_info.c because every one
+ * of these questions is the device's to answer, and that file has no business
+ * knowing what a PSRAM is. */
+static void enter_info(void)
+{
+    static char rows[CATNIP_INFO_MAX_ROWS][CATNIP_INFO_ROW_MAX];
+    const char *ptrs[CATNIP_INFO_MAX_ROWS];
+    uint8_t addrs[8];
+    int n = 0;
+    int i;
+
+    if (!g_info) return;
+    g_page = PAGE_INFO;
+
+    snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "catnip %s", CATNIP_VERSION);
+    snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "built %s", CATNIP_BUILD_DATE);
+    snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "%s rev %d, %d MHz", ESP.getChipModel(),
+             ESP.getChipRevision(), (int)ESP.getCpuFreqMHz());
+    snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "flash %u MB",
+             (unsigned)(ESP.getFlashChipSize() / (1024U * 1024U)));
+    snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "psram %u KB free of %u MB",
+             (unsigned)(ESP.getFreePsram() / 1024U),
+             (unsigned)(ESP.getPsramSize() / (1024U * 1024U)));
+    snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "heap %u KB free",
+             (unsigned)(ESP.getFreeHeap() / 1024U));
+    snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "battery %d%%",
+             catnip_pmu_battery_percent());
+    if (catnip_sd_mounted())
+        snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "card %llu MB",
+                 (unsigned long long)(SD_MMC.cardSize() / (1024ULL * 1024ULL)));
+    else snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "card none");
+
+    {
+        uint64_t mac = ESP.getEfuseMac();
+        /* getEfuseMac() returns the six bytes least-significant first, which is
+         * the reverse of how a MAC is written down. */
+        snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "mac %02X:%02X:%02X:%02X:%02X:%02X",
+                 (unsigned)(mac & 0xFF), (unsigned)((mac >> 8) & 0xFF),
+                 (unsigned)((mac >> 16) & 0xFF), (unsigned)((mac >> 24) & 0xFF),
+                 (unsigned)((mac >> 32) & 0xFF), (unsigned)((mac >> 40) & 0xFF));
+    }
+
+    {
+        int found = catnip_i2c_present(addrs, (int)(sizeof(addrs) / sizeof(addrs[0])));
+        int shown = found < (int)(sizeof(addrs) / sizeof(addrs[0]))
+                        ? found
+                        : (int)(sizeof(addrs) / sizeof(addrs[0]));
+        int off = snprintf(rows[n], CATNIP_INFO_ROW_MAX, "i2c");
+        for (i = 0; i < shown && off > 0 && off < CATNIP_INFO_ROW_MAX; i++)
+            off += snprintf(rows[n] + off, (size_t)(CATNIP_INFO_ROW_MAX - off), " %02X",
+                            addrs[i]);
+        if (!found) snprintf(rows[n], CATNIP_INFO_ROW_MAX, "i2c nothing responded");
+        n++;
+    }
+
+    for (i = 0; i < n; i++)
+        ptrs[i] = rows[i];
+    /* The one row that acts rather than reports, and it says what it costs:
+     * catnip_diag_begin() takes the screen and keeps it, so there is no way out
+     * of that page short of a reboot. Saying so on the row is cheaper than
+     * making the page leavable, and much cheaper than not saying so. */
+    catnip_device_info_show(g_info, ptrs, n, "Input diagnostic - hold B to return");
+    catnip_frame_set_title("Device");
 }
 
 /* (Re)draw the menu with the apps the shell found. Called at boot and every
@@ -381,6 +531,12 @@ void setup()
     catnip_i2c_scan();
     if (!catnip_ioexp_begin()) Serial.println("[catnip] WARN: I/O expander not found");
 
+    /* Before the panel is lit, and before the card is even looked for: the
+     * fade below climbs to the owner's brightness, and with an empty g_cfg that
+     * target is zero - a boot that ends in a black screen with nothing wrong.
+     * The real settings arrive a few lines down and correct this. */
+    catnip_config_defaults(&g_cfg);
+
     if (catnip_display_begin()) {
         catnip_display_blit(catnip_splash);
 
@@ -392,14 +548,25 @@ void setup()
 
     /* After the splash, deliberately: the card is the slowest thing in the
      * boot and nothing on screen should wait for it. */
-    if (catnip_sd_mount()) {
-        apply_config();
+    bool card = catnip_sd_mount();
+    /* Outside the card check on purpose: NVS is where a setting lives on a
+     * device with no card, and that is most devices most of the time. Reading
+     * the owner's settings only when a card happened to be in the slot is the
+     * exact failure this page exists to fix. */
+    apply_config();
+    if (card) {
         /* The marker file means the owner wants the input page and nothing
          * else, so the Lua runtime and the shell below are never started: they
          * would only delay the page and then compete with it for the screen.
          * The other way in - typing "diag" - is in loop(), because it has to
          * work on a device with no card in the slot. */
-        if (catnip_diag_marker_present()) {
+        if (g_skip_diag == SKIP_DIAG_MAGIC) {
+            /* Left the page on purpose a moment ago. Cleared here so it is one
+             * boot's reprieve and not a mode - the marker file still means what
+             * it says on the boot after this one. */
+            g_skip_diag = 0;
+            Serial.println("[catnip] diag: marker present, skipped once by request");
+        } else if (catnip_diag_marker_present()) {
             Serial.println("[catnip] diag: " CATNIP_DIAG_MARKER_PATH " is on the card");
             enter_diag();
             return;
@@ -438,6 +605,8 @@ void setup()
      * the boot animation: the first pass draws it, catnip_lvgl_backend_active()
      * turns true, and animate() stands down. */
     g_menu = catnip_menu_new(g_rt);
+    g_settings = catnip_settings_new(g_rt);
+    g_info = catnip_device_info_new(g_rt);
     rebuild_menu();
 
     /* Expect zero apps until the SD card is mounted (#32). */
@@ -470,6 +639,18 @@ void loop()
         catnip_lvgl_step();
         poll_power_button();
         catnip_led_breathe();
+        /* Holding B is the way out, and the way out is a restart: the page took
+         * lv_screen_active() and keeps it, so there is nothing to give back.
+         *
+         * Long B rather than a button on the page, because long B is already
+         * "home, and the platform's alone" everywhere else - and the diagnostic
+         * page's home is a device that has started again. It is read here and
+         * not in diag.cpp so that the page keeps knowing nothing about what is
+         * above it; the switch it is reading is one it also draws, which is its
+         * own confirmation that the press registered. */
+        if (catnip_press_step(&g_press_diag, catnip_input_down(CATNIP_BTN_B),
+                              (unsigned)millis()) == CATNIP_PRESS_LONG)
+            catnip_reboot_to_normal();
         return;
     }
 
@@ -524,7 +705,55 @@ void loop()
     /* The menu and a running app are the same kind of tree; which is up is the
      * shell's state, and the transitions between them are here (#33). */
     bool stepped = false;
-    if (g_shell) {
+    /* The settings page, before the shell's own states: it is not one of them.
+     * While it is up the menu's pick is not read and no app can start, because
+     * the tree on screen is this page's and there is nothing on it to launch. */
+    if (g_page == PAGE_INFO) {
+        /* Nothing on this page changes anything, so there is nothing to apply
+         * and nothing to save. It answers a click in one place only. */
+        if (catnip_device_info_take_action(g_info)) {
+            enter_diag();
+            return;
+        }
+        if (gesture == CATNIP_UI_GESTURE_HOME) {
+            g_page = PAGE_HOME;
+            rebuild_menu();
+        } else if (gesture == CATNIP_UI_GESTURE_BACK) {
+            /* One level, not all of them: back climbs to the page this one was
+             * opened from. */
+            g_page = PAGE_PREF;
+            catnip_settings_show(g_settings, &g_cfg);
+            catnip_frame_set_title("Preference");
+        }
+    } else if (g_page == PAGE_PREF) {
+        if (catnip_settings_take_dirty(g_settings)) {
+            /* Applied on the pass it changed, which is the whole argument for
+             * stepping a value in place: a brightness nobody can see while
+             * choosing it is a brightness chosen twice. Saving waits for the
+             * way out. */
+            const catnip_config *cfg = catnip_settings_config(g_settings);
+            if (cfg) {
+                g_cfg = *cfg;
+                apply_settings(&g_cfg);
+                g_settings_unsaved = true;
+            }
+        }
+        /* B is a negotiation here as everywhere else: the drain above has just
+         * run the page's on_back, and this reads what it answered. It claims B
+         * while a column is live, so the first press lets go of the column and
+         * only the second leaves - one press per level, the same climb every
+         * other screen offers. Home is not a negotiation and takes both levels
+         * at once. */
+        if (gesture == CATNIP_UI_GESTURE_HOME) leave_settings();
+        else if (gesture == CATNIP_UI_GESTURE_BACK && !catnip_render_take_claim(g_rt))
+            leave_settings();
+        /* Down again goes further down, but only when it was not the value of a
+         * live column - which is the page's own two-state model doing the work,
+         * not a second rule bolted on. */
+        else if (gesture == CATNIP_UI_GESTURE_INFO &&
+                 !catnip_settings_editing(g_settings))
+            enter_info();
+    } else if (g_shell) {
         if (catnip_shell_state(g_shell) == CATNIP_SHELL_RUNNING) {
             int st = CATNIP_SHELL_RUNNING;
             stepped = true;
@@ -548,6 +777,13 @@ void loop()
             /* In the menu. A click has latched which app to launch; the launch
              * tears the menu tree down, so one that then fails to load must put
              * the menu back rather than leave a blank screen. */
+            /* Down, on the home carousel, is the settings plane. Checked
+             * before the pick, so a pass that carries both leaves the menu
+             * rather than launching out of a screen that is going away. */
+            if (gesture == CATNIP_UI_GESTURE_SETTINGS) {
+                enter_settings();
+                return;
+            }
             const char *id = catnip_menu_take_pick(g_menu);
             if (id) {
                 char err[64];
@@ -575,6 +811,10 @@ void loop()
     if (g_shell) {
         if (catnip_shell_state(g_shell) == CATNIP_SHELL_RUNNING) {
             if (delivered || stepped) catnip_frame_set_title(catnip_shell_title(g_shell));
+        } else if (g_page == PAGE_INFO) {
+            catnip_frame_set_title("Device");
+        } else if (g_page == PAGE_PREF) {
+            catnip_frame_set_title("Preference");
         } else if (g_menu) {
             catnip_frame_set_title(catnip_menu_focus_name(g_menu));
         }

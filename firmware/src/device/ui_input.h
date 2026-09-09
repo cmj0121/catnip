@@ -49,6 +49,18 @@ enum {
     CATNIP_UI_GESTURE_NONE = 0,
     CATNIP_UI_GESTURE_BACK,
     CATNIP_UI_GESTURE_HOME,
+    /* Down, on the home section's carousel: the settings plane (#67). It is a
+     * gesture and not an event posted to a node because there is no node for
+     * "the settings page" until the platform makes one - the same reason back
+     * and home leave through here. Only a carousel produces it; in a column
+     * down is still the next row, which is why a long list cannot fall into
+     * the settings page by being scrolled too far. */
+    CATNIP_UI_GESTURE_SETTINGS,
+    /* Down again, on the preference page: the device info page (#69). Produced
+     * whenever a mixer is focused, and the platform decides whether it means
+     * anything - the same down is also how a live column's value is lowered,
+     * and only the page knows whether one is live. */
+    CATNIP_UI_GESTURE_INFO,
 };
 
 void catnip_ui_input_begin(void);

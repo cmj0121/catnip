@@ -37,7 +37,9 @@ int main(void)
     {
         catnip_config cfg;
         catnip_config_defaults(&cfg);
-        ok(cfg.led_brightness == 8, "default brightness is the calm one");
+        ok(cfg.led_brightness == 5, "default brightness is the calm one");
+        ok(cfg.screen_brightness == 100, "the screen starts at full");
+        ok(cfg.idle_off_s == 60, "and goes dark after a minute of nothing");
         ok(nearly(cfg.led_breaths_per_second, 0.4f), "default is a breath every 2.5s");
         ok(cfg.boot_frame_ms == 400, "default frame is 400ms");
         ok(cfg.boot_frames_dir[0] == '\0',
@@ -67,7 +69,7 @@ int main(void)
     {
         catnip_config cfg =
             parse("{\"led\":{\"brightness\":9000,\"breaths_per_second\":-3}}", true);
-        ok(cfg.led_brightness == 255, "too bright is clamped, not rejected");
+        ok(cfg.led_brightness == 100, "too bright is clamped, not rejected");
         ok(nearly(cfg.led_breaths_per_second, 0.05f),
            "a negative rhythm is clamped to the slowest");
     }
@@ -75,13 +77,23 @@ int main(void)
     {
         catnip_config cfg = parse(
             "{\"led\":{\"brightness\":\"very\"},\"boot\":{\"frame_ms\":null}}", true);
-        ok(cfg.led_brightness == 8, "a setting of the wrong type keeps its default");
+        ok(cfg.led_brightness == 5, "a setting of the wrong type keeps its default");
         ok(cfg.boot_frame_ms == 400, "so does a null one");
     }
 
     {
-        catnip_config cfg = parse("{\"led\": {\"brightness\": 12,", false);
-        ok(cfg.led_brightness == 8, "a truncated file changes nothing at all");
+        catnip_config cfg =
+            parse("{\"screen\":{\"brightness\":0,\"idle_off_s\":99999}}", true);
+        ok(cfg.screen_brightness == CATNIP_SCREEN_MIN_PCT,
+           "the screen cannot be turned off from the file either");
+        ok(cfg.idle_off_s == 3600, "and an absurd idle time is clamped to an hour");
+    }
+
+    {
+        /* A value that is not the default, so "changed nothing" is a claim with
+         * something behind it. */
+        catnip_config cfg = parse("{\"led\": {\"brightness\": 75,", false);
+        ok(cfg.led_brightness == 5, "a truncated file changes nothing at all");
     }
 
     {

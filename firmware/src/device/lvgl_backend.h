@@ -64,6 +64,24 @@ void catnip_lvgl_backend_focus(catnip_handle h);
  * says which that is. */
 catnip_handle catnip_lvgl_backend_focused(void);
 
+/* Which column of a visible mixer the point (x, y) is over, and how far up its
+ * bar - 0 at the bottom block, 100 at the top.
+ *
+ * This is the one place the platform asks the backend where something is, and
+ * it exists because a drag is the one gesture whose meaning is a position
+ * rather than a direction: "put this setting where my finger is" cannot be
+ * expressed as a step. Nothing else may grow this way - the rule that an app
+ * names things and never places them is unaffected, because an app is not the
+ * one asking.
+ *
+ * Returns 0 when the point is over no such column. */
+int catnip_lvgl_backend_mixer_at(int x, int y, catnip_handle *h, int *pct);
+
+/* The same measurement against one column that has already been chosen, so a
+ * drag keeps the column it started on however far sideways the finger wanders.
+ * Returns -1 when `h` is not a mixer column that is currently drawn. */
+int catnip_lvgl_backend_mixer_pct(catnip_handle h, int y);
+
 #ifdef __cplusplus
 }
 #endif

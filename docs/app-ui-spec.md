@@ -33,7 +33,7 @@ geometry-free tree.
 
 ### What the main region holds
 
-Three shapes, and no fourth. Each is a `list`; what differs is how the platform
+Four shapes, and no fifth. Each is a `list`; what differs is how the platform
 lays it out.
 
 | Shape               | When                                          | Layout                               |
@@ -41,6 +41,29 @@ lays it out.
 | **One icon**        | a landing page — the cat, a splash            | centred, alone                       |
 | **Up to six icons** | a set of things to choose between             | **3x2 grid**, the focused one ringed |
 | **Rows of text**    | anything longer, or anything that needs words | one row per line                     |
+| **Values**          | settings — quantities, not choices            | **vertical bars**, side by side      |
+
+The first three all answer "which one?". **Values** is the fourth because none of
+them can answer "how much?" — a quantity has no natural row and no natural icon,
+and a shape that had to fake one would put the number somewhere it is not the
+point. It is `ui.list{ layout = "mixer" }`: every child carries a `value` (0–100,
+how far up its bar) and a `value_text` (what is printed above it), and **short A
+steps that column to its next value**. Height is the number, so a page of them
+can be read against each other at a glance, and the touch target is a column the
+height of the region rather than a line of text.
+
+```text
+    70%      30 s      5%     2.5 s
+   ╔═══╗    ┌───┐    ┌───┐    ┌───┐
+   ║███║    │   │    │   │    │███│
+   ║███║    │███│    │███│    │███│
+   ╚═══╝    └───┘    └───┘    └───┘
+   Screen   Idle-off   LED    Breath
+```
+
+A value is a **ladder of a few named steps**, not a range, because "the next
+value" needs a finite list to come from. Pick the rungs so that the one after the
+last is somewhere safe to land: the ladder wraps.
 
 More than six icons scrolls rather than paginating: the selection leads and the
 view follows, exactly as a list does, so there is one scrolling model and not
@@ -72,8 +95,8 @@ optional.
    catnip's own solid colour set (`firmware/assets/icons`), not a borrowed symbol font.
 6. **Let `[PAGE]` be derived.** The frame works it out from what the main region
    holds, and there is no API that sets it: a grid counts **pages**, a list
-   counts **rows**, a carousel counts **positions**, and a single icon counts
-   nothing and stays blank. A grid says `2/3` rather than `8/14` because what a
+   counts **rows**, a carousel and a mixer count **positions**, and a single icon
+   counts nothing and stays blank. A grid says `2/3` rather than `8/14` because what a
    user sees there is a position on a page, not an ordinal.
 7. **Short press is primary, long press is secondary — the same on A and B.**
    Short A activates; long A offers options for the selected item. Nothing an
@@ -90,18 +113,18 @@ optional.
 
 ## The gestures
 
-| Gesture          | Meaning                                        | Reaches you as                         |
-| ---------------- | ---------------------------------------------- | -------------------------------------- |
-| Up / Down        | move the selection; the list scrolls to follow | `prev` / `next` to the focused list    |
-| Left / Right     | move the focus between focusable things        | nothing; the platform moves the ring   |
-| Short A          | activate the focused item                      | `on_click(self)`                       |
-| Long A           | options for the **selected item**              | `on_options(self, index)` → action ids |
-| Tap a row        | select and activate it                         | `on_click(self, index)`                |
-| Long-press a row | options for that row                           | `on_options(self, index)` → action ids |
-| Swipe            | the joystick's four directions, by finger      | whatever that direction means          |
-| Short B          | back — pop, climb, or exit                     | `on_back(self)` on the visible screen  |
-| Long B           | home — the cat, from any depth                 | nothing; the platform keeps it         |
-| Hold power       | power off                                      | nothing; the PMIC keeps it             |
+| Gesture          | Meaning                                         | Reaches you as                         |
+| ---------------- | ----------------------------------------------- | -------------------------------------- |
+| Up / Down        | move the selection; the list scrolls to follow  | `prev` / `next` to the focused list    |
+| Left / Right     | move the focus between focusable things         | nothing; the platform moves the ring   |
+| Short A          | activate the focused item — a value's next step | `on_click(self)`                       |
+| Long A           | options for the **selected item**               | `on_options(self, index)` → action ids |
+| Tap a row        | select and activate it                          | `on_click(self, index)`                |
+| Long-press a row | options for that row                            | `on_options(self, index)` → action ids |
+| Swipe            | the joystick's four directions, by finger       | whatever that direction means          |
+| Short B          | back — pop, climb, or exit                      | `on_back(self)` on the visible screen  |
+| Long B           | home — the cat, from any depth                  | nothing; the platform keeps it         |
+| Hold power       | power off                                       | nothing; the PMIC keeps it             |
 
 **A swipe is not a new gesture.** It is the joystick, made with a finger: swipe
 up and down where you would push up and down, left and right the same. Touch and
@@ -212,16 +235,16 @@ to decide.
 
 The manifest carries the knobs; Lua carries the behaviour.
 
-| Knob                                  | Where    | Effect                                         |
-| ------------------------------------- | -------- | ---------------------------------------------- |
-| `name`                                | manifest | default title, and the name on your page       |
-| `icon`                                | manifest | your identity icon; absent → the mascot        |
-| `actions[]`                           | manifest | the action catalogue: `id`, `name`, `icon`     |
-| `frame`                               | manifest | `"standard"` (default) or `"bare"`             |
-| `counter`                             | manifest | `false` if you are not a list                  |
-| `ui.title(s)`                         | Lua      | a title that changes at runtime                |
-| `layout`                              | Lua      | `"grid"` on a list, for icons rather than rows |
-| `on_click` / `on_options` / `on_back` | Lua      | claim short A, long A, short B                 |
+| Knob                                  | Where    | Effect                                              |
+| ------------------------------------- | -------- | --------------------------------------------------- |
+| `name`                                | manifest | default title, and the name on your page            |
+| `icon`                                | manifest | your identity icon; absent → the mascot             |
+| `actions[]`                           | manifest | the action catalogue: `id`, `name`, `icon`          |
+| `frame`                               | manifest | `"standard"` (default) or `"bare"`                  |
+| `counter`                             | manifest | `false` if you are not a list                       |
+| `ui.title(s)`                         | Lua      | a title that changes at runtime                     |
+| `layout`                              | Lua      | on a list: `"grid"` for icons, `"mixer"` for values |
+| `on_click` / `on_options` / `on_back` | Lua      | claim short A, long A, short B                      |
 
 **`frame: "bare"`** drops the top bar and gives you the whole 320x240 — for an app
 that is genuinely a canvas (a game, a clock face) rather than a list. It costs you
@@ -329,6 +352,20 @@ apps you keep. One per step, big.
                         │
                         ▼  settings, and preferences
 ```
+
+The four directions mean four different things here, and that is what makes this
+the home section rather than a list laid out sideways. **Down reaches settings
+from any position on the carousel**, not only from the cat — you never have to
+come back to the middle to change the brightness.
+
+Settings is the platform's own page, in the **Values** shape above, and it is not
+an app: it is not in the grid, it cannot be pinned, and nothing you write can
+replace it. **Down again** — when no column is live — reaches the device info
+page: the version, the chip, what is free, what is answering on the bus. The
+stack goes down and B climbs back up it one level at a time, while long B
+returns to the cat from any depth. **The grid is the exception to "down is settings"**: inside it, down
+is the next row, because a rule that let a long list fall out of itself while
+being scrolled would cost more than the one gesture it saves.
 
 **The grid is everything.** One carousel position is _All apps_, and it opens
 the main region's six-icon shape: a 3x2 grid of every app on the card, scrolling

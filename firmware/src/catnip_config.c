@@ -9,7 +9,9 @@
  * owner sets. The frame rate is bounded because the panel cannot be redrawn
  * faster than about 20 ms, and a frame that lasts a minute is indistinguishable
  * from a device that has frozen. */
-#define DEFAULT_LED_BRIGHTNESS      8
+#define DEFAULT_SCREEN_BRIGHTNESS   100
+#define DEFAULT_IDLE_OFF_S          60
+#define DEFAULT_LED_BRIGHTNESS      5
 #define DEFAULT_LED_BREATHS_PER_SEC 0.4f
 #define DEFAULT_BOOT_FRAME_MS       400
 
@@ -17,11 +19,14 @@
 #define MAX_BREATHS_PER_SEC 10.0f /* faster than this is a flicker, not a breath */
 #define MIN_FRAME_MS        20
 #define MAX_FRAME_MS        10000
+#define MAX_IDLE_OFF_S      3600 /* an hour; past that "never" is the honest word */
 
 void catnip_config_defaults(catnip_config *cfg)
 {
     if (!cfg) return;
     memset(cfg, 0, sizeof(*cfg));
+    cfg->screen_brightness = DEFAULT_SCREEN_BRIGHTNESS;
+    cfg->idle_off_s = DEFAULT_IDLE_OFF_S;
     cfg->led_brightness = DEFAULT_LED_BRIGHTNESS;
     cfg->led_breaths_per_second = DEFAULT_LED_BREATHS_PER_SEC;
     cfg->boot_frames_dir[0] = '\0';
@@ -59,11 +64,21 @@ bool catnip_config_parse(catnip_config *cfg, const char *json, size_t len)
     cJSON *root = cJSON_ParseWithLength(json, len);
     if (!root) return false;
 
+    const cJSON *screen = cJSON_GetObjectItemCaseSensitive(root, "screen");
+    if (cJSON_IsObject(screen)) {
+        double brightness = cfg->screen_brightness;
+        double idle = cfg->idle_off_s;
+        read_number(screen, "brightness", CATNIP_SCREEN_MIN_PCT, 100, &brightness);
+        read_number(screen, "idle_off_s", 0, MAX_IDLE_OFF_S, &idle);
+        cfg->screen_brightness = (uint8_t)brightness;
+        cfg->idle_off_s = (uint16_t)idle;
+    }
+
     const cJSON *led = cJSON_GetObjectItemCaseSensitive(root, "led");
     if (cJSON_IsObject(led)) {
         double brightness = cfg->led_brightness;
         double breaths = cfg->led_breaths_per_second;
-        read_number(led, "brightness", 0, 255, &brightness);
+        read_number(led, "brightness", 0, 100, &brightness);
         read_number(led, "breaths_per_second", MIN_BREATHS_PER_SEC, MAX_BREATHS_PER_SEC,
                     &breaths);
         cfg->led_brightness = (uint8_t)brightness;

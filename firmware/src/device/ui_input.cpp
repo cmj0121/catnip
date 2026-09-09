@@ -44,6 +44,18 @@ catnip_press g_press_a, g_press_centre, g_press_b;
  * joystick does not already have. */
 catnip_swipe g_swipe;
 
+/* The mixer column a drag has taken hold of, and whether this contact has been
+ * classified yet.
+ *
+ * A drag keeps the column it started on. Without that, a finger sweeping
+ * sideways set every column it crossed to whatever height it happened to be at
+ * - one left-swipe changed four settings at once. It is also why only a
+ * contact that began by moving *up or down* becomes a drag at all: a sideways
+ * one is the gesture for changing which column is under the ring, and it must
+ * not also be the gesture for changing a value. */
+catnip_handle g_drag_col = CATNIP_HANDLE_NONE;
+bool g_drag_settled;
+
 void touch_read(lv_indev_t *indev, lv_indev_data_t *data)
 {
     uint16_t x = 0, y = 0;
@@ -159,12 +171,19 @@ int catnip_ui_input_step(catnip_rt *rt)
      * between the focusable things. The events are the same `prev` and `next`
      * a column gets from up and down - only the direction that reaches them
      * changes, because that is the direction the arrangement makes obvious. */
-    bool carousel = catnip_render_layout(rt, g_focus) == CATNIP_LAYOUT_CAROUSEL;
+    int layout = catnip_render_layout(rt, g_focus);
+    bool carousel = layout == CATNIP_LAYOUT_CAROUSEL;
+    /* A mixer is stepped sideways for the same reason a carousel is - its
+     * children are laid out across the region - but the axis it does not use
+     * for that is not spare: up and down are the value of the column under the
+     * ring. So the two shapes share "left and right move the selection" and
+     * part company on what up and down mean. */
+    bool sideways = carousel || layout == CATNIP_LAYOUT_MIXER;
     bool step_back = left || swipe == CATNIP_SWIPE_LEFT;
     bool step_fwd = right || swipe == CATNIP_SWIPE_RIGHT;
 
     int dir = 0;
-    if (!carousel) {
+    if (!sideways) {
         if (step_back) dir += catnip_ui_input_focus_dir(CATNIP_BTN_LEFT);
         if (step_fwd) dir += catnip_ui_input_focus_dir(CATNIP_BTN_RIGHT);
     }
@@ -179,10 +198,59 @@ int catnip_ui_input_step(catnip_rt *rt)
      * ask for the item's options when held. Nothing here depends on the centre
      * alone - A does the same - because #49 suspects the centre's GPIO5 is
      * really IR_RX and dead on this unit. */
-    if (up || swipe == CATNIP_SWIPE_UP || (carousel && step_back))
+    /* On a carousel the four directions mean four different things, which is
+     * what makes it the home section rather than a list laid out sideways:
+     * left and right step through it, and up and down leave it for the planes
+     * either side. So up and down are not posted here at all - a carousel that
+     * also stepped on down would move under the finger that was asking to go
+     * to the settings page. */
+    bool dpad_up = up || swipe == CATNIP_SWIPE_UP;
+    bool dpad_down = down || swipe == CATNIP_SWIPE_DOWN;
+    bool mixer = layout == CATNIP_LAYOUT_MIXER;
+
+    /* A finger dragging over a column sets that column, absolutely. It is the
+     * one gesture whose meaning is a place rather than a direction, so it is
+     * the one that asks the backend where things are - and it is posted to the
+     * *column* rather than to the list, because the answer names one column and
+     * carries a percentage where an index would otherwise go.
+     *
+     * Only once the contact has travelled: a stationary touch is a tap, and a
+     * tap on this page selects rather than sets. */
+    bool dragged = false;
+    if (!catnip_touch_down()) {
+        g_drag_col = CATNIP_HANDLE_NONE;
+        g_drag_settled = false;
+    } else if (!g_drag_settled && swipe != CATNIP_SWIPE_NONE) {
+        /* The one pass on which this contact declares what it is. */
+        g_drag_settled = true;
+        if (mixer && (swipe == CATNIP_SWIPE_UP || swipe == CATNIP_SWIPE_DOWN)) {
+            catnip_handle col = CATNIP_HANDLE_NONE;
+            int pct = 0;
+            if (catnip_lvgl_backend_mixer_at((int)tx, (int)ty, &col, &pct))
+                g_drag_col = col;
+        }
+    }
+    if (mixer && g_drag_col != CATNIP_HANDLE_NONE) {
+        int pct = catnip_lvgl_backend_mixer_pct(g_drag_col, (int)ty);
+        if (pct >= 0) {
+            catnip_render_post(rt, g_drag_col, "drag", pct);
+            dragged = true;
+        }
+    }
+    if ((sideways && step_back) || (!sideways && dpad_up))
         post_if_event(rt, CATNIP_BTN_UP);
-    if (down || swipe == CATNIP_SWIPE_DOWN || (carousel && step_fwd))
+    if ((sideways && step_fwd) || (!sideways && dpad_down))
         post_if_event(rt, CATNIP_BTN_DOWN);
+    /* Up and down on a mixer are the value, not the selection, and they are
+     * their own two names rather than prev/next with a different meaning
+     * depending on the shape - a handler that had to ask what `next` meant
+     * this time would be the wrong kind of clever. */
+    /* A drag has already said where the value goes; a step on top of it would
+     * move it one further than the finger asked for. */
+    if (mixer && !dragged && dpad_up)
+        catnip_render_post(rt, g_focus, "raise", CATNIP_INDEX_NONE);
+    if (mixer && !dragged && dpad_down)
+        catnip_render_post(rt, g_focus, "lower", CATNIP_INDEX_NONE);
     if (a_press == CATNIP_PRESS_SHORT) post_if_event(rt, CATNIP_BTN_A);
     if (c_press == CATNIP_PRESS_SHORT) post_if_event(rt, CATNIP_BTN_CENTRE);
     if (a_press == CATNIP_PRESS_LONG) post_if_long_event(rt, CATNIP_BTN_A);
@@ -205,6 +273,16 @@ int catnip_ui_input_step(catnip_rt *rt)
         return CATNIP_UI_GESTURE_BACK;
     }
 
+    /* After B, so a pass that carries both leaves rather than descends: getting
+     * out is the gesture that must never be the one that loses. */
+    if (carousel && dpad_down) return CATNIP_UI_GESTURE_SETTINGS;
+
+    /* And down on a mixer offers the page below it. Offered rather than
+     * decided: the same press has already been posted as "lower", and whether
+     * that meant anything is the page's to say. A drag is not this - a finger
+     * travelling down a column is setting it, not leaving. */
+    if (mixer && !dragged && dpad_down) return CATNIP_UI_GESTURE_INFO;
+
     return CATNIP_UI_GESTURE_NONE;
 }
 
@@ -221,4 +299,6 @@ void catnip_ui_input_end(void)
      * comes next. */
     g_press_a = g_press_centre = g_press_b = catnip_press{};
     g_swipe = catnip_swipe{};
+    g_drag_col = CATNIP_HANDLE_NONE;
+    g_drag_settled = false;
 }
