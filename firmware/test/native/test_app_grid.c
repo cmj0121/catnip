@@ -72,6 +72,22 @@ int main(void)
     CHECK(catnip_app_grid_take_pick(g) == NULL, "nothing is picked before a press");
     CHECK(catnip_app_grid_take_pin(g) == NULL, "and nothing is pinned");
 
+    /* Nothing is selected on arrival, so A has nothing to act on and must not
+     * invent one - a grid that launched its first app on the first press would
+     * start the wrong app for anyone who pressed A to see what A did. */
+    fire("ui.fire('grid_list', 'click')");
+    CHECK(catnip_app_grid_take_pick(g) == NULL,
+          "A with nothing selected launches nothing");
+    fire("ui.fire('grid_list', 'options')");
+    CHECK(catnip_app_grid_take_pin(g) == NULL, "and long-A pins nothing");
+
+    /* The first direction press is what starts choosing: it lands on the first
+     * cell rather than stepping past it. */
+    fire("ui.fire('grid_list', 'next')");
+    fire("ui.fire('grid_list', 'click')");
+    s = catnip_app_grid_take_pick(g);
+    CHECK(s && strcmp(s, "dino") == 0, "the first direction press selects the first app");
+
     /* A tap carries the cell index: it selects and stops. No pick. */
     fire("ui.fire('grid_list', 'click', 2)");
     CHECK(catnip_app_grid_take_pick(g) == NULL,
@@ -91,12 +107,13 @@ int main(void)
     CHECK(s && strcmp(s, "clock") == 0, "long-A pins the selected app");
     CHECK(catnip_app_grid_take_pin(g) == NULL, "and reading the pin clears it");
 
-    /* Stepping and then A launches the one stepped to. */
+    /* Stepping on from there moves one cell at a time. */
     catnip_app_grid_show(g, apps, 3, true, "");
-    fire("ui.fire('grid_list', 'next')");
+    fire("ui.fire('grid_list', 'next')"); /* selects the first */
+    fire("ui.fire('grid_list', 'next')"); /* steps to the second */
     fire("ui.fire('grid_list', 'click')");
     s = catnip_app_grid_take_pick(g);
-    CHECK(s && strcmp(s, "clock") == 0, "next then A launches the second app");
+    CHECK(s && strcmp(s, "clock") == 0, "and stepping on reaches the second app");
 
     /* A rebuild drops a press nobody read, so a pick made on a grid that is
      * gone cannot launch an app on the screen that replaced it. */

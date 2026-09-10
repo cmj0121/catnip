@@ -813,11 +813,30 @@ void apply_flags(Entry *e, unsigned flags)
     bool off = (flags & CATNIP_NODE_DISABLED) != 0;
     if (off) lv_obj_add_state(e->obj, LV_STATE_DISABLED);
     else lv_obj_remove_state(e->obj, LV_STATE_DISABLED);
+    /* A grid cell in the caption role is an app that is there but not pinned
+     * (#71): it is perfectly launchable, so it must not be drawn as disabled -
+     * it is drawn *quieter*. The role is already the platform's word for
+     * emphasis, and on a cell whose whole content is a picture, emphasis is
+     * opacity rather than ink. Two steps apart from disabled so the three
+     * states - pinned, unpinned, unusable - are told apart at a glance.
+     *
+     * Gated on the grid because a caption elsewhere is a line of text, and
+     * fading somebody's status line would be this rule reaching past what it
+     * was for. */
+    Entry *p = e->row ? map_find(e->parent) : nullptr;
+    bool quiet =
+        !off && p && p->layout == CATNIP_LAYOUT_GRID && e->role == CATNIP_STYLE_CAPTION;
+
     /* LV_STATE_DISABLED changes nothing about an image on its own, and a row
      * whose whole content is a picture would look exactly like a usable one.
      * Said here so every kind dims the same way. */
     lv_obj_set_style_image_opa(e->obj, off ? LV_OPA_30 : LV_OPA_COVER, 0);
-    lv_obj_set_style_opa(e->obj, off ? LV_OPA_50 : LV_OPA_COVER, 0);
+    /* The whole cell's opacity, which is what actually reaches the picture: an
+     * image sits in a child object and `image_opa` on the parent does not
+     * inherit down to it, where `opa` does. Three levels, and they have to stay
+     * far enough apart to be told apart - full for a pinned app, faded for one
+     * that is only in the grid, and fainter still for one that cannot run. */
+    lv_obj_set_style_opa(e->obj, off ? LV_OPA_50 : (quiet ? LV_OPA_60 : LV_OPA_COVER), 0);
 }
 
 /* The whole descriptor, every time, with no second diff. The renderer only
