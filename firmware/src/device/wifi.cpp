@@ -101,10 +101,34 @@ const char *catnip_wifi_ssid(void)
 static bool g_scan_asked;
 static bool g_scan_answered;
 static uint32_t g_scan_last_ask;
+static uint32_t g_scan_started;
+
+/* How long after the last ask the claim expires, and how long a single wait may
+ * last however hard somebody is asking.
+ *
+ * Both of these are the same lesson twice. The ring this drives is full-screen
+ * and opaque, so "busy" is a claim that takes the whole device - and a claim
+ * that takes the whole device must be a claim that can end on its own. It could
+ * not: leaving the prober with a scan outstanding left `asked` true and
+ * `answered` false with nobody left to change either, and the ring sat over
+ * every screen in the device for ever with no press that would clear it. A scan
+ * that never completed did the same thing without anyone leaving.
+ *
+ * So the claim lives only as long as somebody is still asking (a caller that
+ * has gone away stops asking), and never longer than a scan can honestly take.
+ * A 2.4 GHz sweep is about two seconds; eight is generous and still an end. */
+#define SCAN_ASK_GRACE_MS 3000u
+#define SCAN_PATIENCE_MS  8000u
 
 bool catnip_wifi_scanning(void)
 {
-    return g_scan_asked && !g_scan_answered;
+    uint32_t now;
+
+    if (!g_scan_asked || g_scan_answered) return false;
+    now = millis();
+    if ((uint32_t)(now - g_scan_last_ask) > SCAN_ASK_GRACE_MS) return false;
+    if ((uint32_t)(now - g_scan_started) > SCAN_PATIENCE_MS) return false;
+    return true;
 }
 
 void catnip_wifi_rescan(void)
@@ -115,6 +139,7 @@ void catnip_wifi_rescan(void)
     WiFi.scanDelete();
     g_scan_asked = true;
     g_scan_answered = false;
+    g_scan_started = millis();
     WiFi.scanNetworks(true);
 }
 
@@ -123,9 +148,24 @@ int catnip_wifi_scan(catnip_wifi_ap *out, int max)
     int n = WiFi.scanComplete();
     uint32_t now = millis();
 
-    if (!g_scan_asked || (uint32_t)(now - g_scan_last_ask) > 3000u) {
+    /* TEMPORARY: what the radio is actually answering. */
+    {
+        static int last_n = -99;
+        static uint32_t last_log;
+        if (n != last_n || (uint32_t)(now - last_log) > 2000u) {
+            last_n = n;
+            last_log = now;
+            Serial.printf("[catnip] scan: complete=%d mode=%d status=%d asked=%d "
+                          "answered=%d\n",
+                          n, (int)WiFi.getMode(), (int)WiFi.status(), (int)g_scan_asked,
+                          (int)g_scan_answered);
+        }
+    }
+
+    if (!g_scan_asked || (uint32_t)(now - g_scan_last_ask) > SCAN_ASK_GRACE_MS) {
         g_scan_asked = true;
         g_scan_answered = false;
+        g_scan_started = now;
     }
     g_scan_last_ask = now;
 

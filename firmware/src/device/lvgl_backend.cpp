@@ -1102,19 +1102,50 @@ void apply_screen_region(Entry *screen)
     uint32_t n;
     bool carousel = false; /* the whole panel is one cell */
     bool corner = false;   /* something of the content reaches the bottom-left */
+    int visible = 0;       /* how many children are actually drawn */
+    bool sole_label = false;
 
     if (screen->kind != CATNIP_NODE_SCREEN) return;
     n = lv_obj_get_child_count(screen->obj);
     for (uint32_t i = 0; i < n; i++) {
-        Entry *c = map_find((catnip_handle)(intptr_t)lv_obj_get_user_data(
-            lv_obj_get_child(screen->obj, (int32_t)i)));
+        lv_obj_t *obj = lv_obj_get_child(screen->obj, (int32_t)i);
+        Entry *c = map_find((catnip_handle)(intptr_t)lv_obj_get_user_data(obj));
 
+        if (!lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN)) {
+            visible++;
+            sole_label = c && c->kind == CATNIP_NODE_LABEL;
+        }
         if (!c || c->kind != CATNIP_NODE_LIST) continue;
         if (c->layout == CATNIP_LAYOUT_CAROUSEL) carousel = true;
         else if (c->layout != CATNIP_LAYOUT_CANVAS) corner = true;
     }
     /* Nothing but labels: a face, placed around a centrepiece. Both middles,
      * and neither reaches a corner. */
+
+    /* One line on an otherwise empty screen goes in the middle of it.
+     *
+     * A column stacks from the top, which is right for a page of things and
+     * wrong for a page that is one sentence: a line alone at the top of an empty
+     * screen reads as the first item of a list that never arrived. There is
+     * nothing for it to be the first of, so it is the middle instead - the same
+     * argument the single-icon shape makes, and the reason a mascot is centred
+     * rather than stacked.
+     *
+     * Only a label, and only when it is the only thing drawn: an empty list is
+     * still a list, and a screen that recentred itself as its content came and
+     * went would move under the reader. */
+    {
+        lv_flex_align_t want =
+            (visible == 1 && sole_label) ? LV_FLEX_ALIGN_CENTER : LV_FLEX_ALIGN_START;
+        /* Asked first, and not only to save a repaint. Setting any flex
+         * property re-declares the object's layout as flex - which on a canvas
+         * screen undoes relayout_canvas's LV_LAYOUT_NONE and drops every placed
+         * child back into a column. A canvas wants START and already has it, so
+         * asking first is what keeps this from touching it at all. */
+        if (lv_obj_get_style_flex_main_place(screen->obj, 0) != want)
+            lv_obj_set_flex_align(screen->obj, want, LV_FLEX_ALIGN_CENTER,
+                                  LV_FLEX_ALIGN_CENTER);
+    }
 
     /* A bare screen is the whole panel and nothing is drawn over it, so nothing
      * is held back from it - which is the whole of what `frame: "bare"` buys.

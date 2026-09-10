@@ -253,6 +253,32 @@ int main(void)
         }
     }
 
+    /* ---- one line on an empty screen is a middle ------------------------ */
+    /* A column stacks from the top, which is right for a page of things and
+     * wrong for a page that is one sentence: a line alone at the top of an
+     * empty screen reads as the first item of a list that never arrived. */
+    run("ui.screen{ ui.list{ id = 'e_rows', hidden = true, on_prev = function() end },\n"
+        "  ui.label{ id = 'e_say', text = 'nothing on the air', align = 'center' } }\n");
+    pass();
+    pass();
+    shot("empty-page");
+    {
+        lv_obj_t *say = obj("e_say");
+        int mid = CATNIP_SCREEN_H / 2;
+        lv_area_t at;
+
+        /* Absolute panel coordinates. lv_obj_get_y() answers relative to the
+         * parent's *content* area - it subtracts the padding - so a position
+         * compared against the panel's middle has to come from the coords. */
+        if (say) lv_obj_get_coords(say, &at);
+
+        CHECK(say != NULL, "the one line is drawn");
+        CHECK(say && at.y1 < mid && at.y2 > mid,
+              "and it straddles the middle of the panel rather than sitting on top");
+        CHECK(say && lv_obj_get_style_text_align(say, 0) == LV_TEXT_ALIGN_CENTER,
+              "centred across as well as down");
+    }
+
     /* ---- the clock's face, as the app builds it ------------------------- */
     /* Four children with the centrepiece second: the date is named before it so
      * it is the top line, the weekday and the source line after it so they are

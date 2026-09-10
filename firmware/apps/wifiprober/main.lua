@@ -146,6 +146,10 @@ local function refresh()
   rows:set_children(cells)
   if sel > #cells then sel = #cells > 0 and #cells or 1 end
   rows.selected = sel
+  -- An empty list is still a list, and a list is still a shape that stacks from
+  -- the top. Taking it away leaves the message as the only thing on the screen,
+  -- which is what puts it in the middle rather than under an empty box.
+  rows.hidden = (#aps == 0)
   -- Two sentences, because they are two different things: what was found, and
   -- what to do about it. Centred, because on a page with nothing else on it a
   -- line ranged left reads as the first of a list that never arrived.
