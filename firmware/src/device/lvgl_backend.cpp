@@ -77,7 +77,11 @@ struct Entry {
     bool sel_dirty;            /* list only: the highlight has to be re-applied */
     bool laid_out;             /* list only: apply_list_layout has run at least once */
     catnip_text_align align;   /* which edge it asked for, for a canvas to place it by */
-    bool row;                  /* list child: internal flex row of image + label */
+    /* Screen only: how much of the region is currently trimmed off the bottom
+     * because a column of lines could not use it. Remembered so the untrimmed
+     * region can be worked out without putting the pad back to measure it. */
+    int32_t slack;
+    bool row; /* list child: internal flex row of image + label */
     /* The widgets inside a row, held rather than looked up by child index: a
      * mixer column adds two more and the order on screen is not the order they
      * were made in, so an index here would be a second thing to keep in step
@@ -121,7 +125,8 @@ bool g_bare;
 
 void apply_list_layout(Entry *e);
 void apply_screen_region(Entry *screen);
-int32_t row_slack(Entry *screen);
+bool set_pad(lv_obj_t *obj, lv_style_prop_t prop, int32_t want);
+int32_t row_slack(Entry *screen, int32_t applied);
 int page_rows_of(Entry *e);
 
 Entry *map_find(catnip_handle h)
@@ -1092,15 +1097,16 @@ void apply_list_layout(Entry *e)
  * The region is decided every pass from what the screen holds, and what it
  * holds hardly ever changes, so nearly every one of those writes was a repaint
  * of a screen that had not moved. */
-void set_pad(lv_obj_t *obj, lv_style_prop_t prop, int32_t want)
+bool set_pad(lv_obj_t *obj, lv_style_prop_t prop, int32_t want)
 {
     lv_style_value_t now;
     if (lv_obj_get_local_style_prop(obj, prop, &now, 0) == LV_STYLE_RES_FOUND &&
         now.num == want)
-        return;
+        return false;
     lv_style_value_t v;
     v.num = want;
     lv_obj_set_local_style_prop(obj, prop, v, 0);
+    return true;
 }
 
 void apply_screen_region(Entry *screen)
@@ -1162,15 +1168,33 @@ void apply_screen_region(Entry *screen)
 
     int32_t below = hint ? CATNIP_FRAME_HINT_H + 4 : 0;
 
-    set_pad(screen->obj, LV_STYLE_PAD_TOP, bar ? CATNIP_FRAME_BAR_H + 4 : 0);
-    set_pad(screen->obj, LV_STYLE_PAD_LEFT, (g_bare || carousel) ? 0 : 6);
-    set_pad(screen->obj, LV_STYLE_PAD_RIGHT, (g_bare || carousel) ? 0 : 6);
-    /* The frame's share first, then whatever a column of rows cannot use - the
-     * slack has to be measured against the region the frame actually left, so
-     * the two are set in that order and the second reads the first. */
-    set_pad(screen->obj, LV_STYLE_PAD_BOTTOM, below);
-    lv_obj_update_layout(screen->obj);
-    set_pad(screen->obj, LV_STYLE_PAD_BOTTOM, below + row_slack(screen));
+    bool moved = set_pad(screen->obj, LV_STYLE_PAD_TOP, bar ? CATNIP_FRAME_BAR_H + 4 : 0);
+    moved |= set_pad(screen->obj, LV_STYLE_PAD_LEFT, (g_bare || carousel) ? 0 : 6);
+    moved |= set_pad(screen->obj, LV_STYLE_PAD_RIGHT, (g_bare || carousel) ? 0 : 6);
+    /* Settle it only when one of those actually wrote. The region has to be
+     * right before the slack is measured against it - but a relayout on a pass
+     * where nothing changed walks the whole tree for nothing, and this runs for
+     * every screen on every pass. */
+    if (moved) lv_obj_update_layout(screen->obj);
+
+    /* The frame's share, plus whatever a column of lines cannot use.
+     *
+     * One write, and the reason that matters is the reason everything else on
+     * this path is guarded: PAD_BOTTOM is a layout prop, so a write invalidates,
+     * and on this display an invalidation is the whole panel. This used to set
+     * the pad down to `below`, relayout, measure the slack against that, and set
+     * it back up - which meant that on any screen with a leftover, and a
+     * leftover is the ordinary case, *both* writes differed from what was stored
+     * and both fired. Every pass. On every list screen in the device.
+     *
+     * The mutate-to-measure is gone: what the slack has to be measured against
+     * is the untrimmed region, and the untrimmed region is the trimmed one plus
+     * the trim already applied - which is a number this screen can simply
+     * remember. */
+    int32_t slack = row_slack(screen, screen->slack);
+    screen->slack = slack;
+    if (set_pad(screen->obj, LV_STYLE_PAD_BOTTOM, below + slack))
+        lv_obj_update_layout(screen->obj);
 }
 
 /* How many whole lines of a list are on screen at once, or 0 when there is
@@ -1215,7 +1239,7 @@ int page_rows_of(Entry *e)
  * zero either way; a mixed column that did overflow would be cut a little
  * wrong, which is a better failure than a half line and is not a shape anything
  * builds. */
-int32_t row_slack(Entry *screen)
+int32_t row_slack(Entry *screen, int32_t applied)
 {
     uint32_t n = lv_obj_get_child_count(screen->obj);
     Entry *list = nullptr;
@@ -1236,7 +1260,11 @@ int32_t row_slack(Entry *screen)
     rows = lv_obj_get_child_count(list->obj);
     if (rows == 0) return 0;
 
-    avail = lv_obj_get_content_height(list->obj);
+    /* The region as it would be with nothing trimmed off it: what is there now,
+     * plus what was trimmed last time. Asked this way round because measuring it
+     * the other way - putting the pad back and relaying out - is a write, and a
+     * write here is a repaint of the whole panel. */
+    avail = lv_obj_get_content_height(list->obj) + applied;
     gap = lv_obj_get_style_pad_row(list->obj, 0);
     pitch = lv_obj_get_height(lv_obj_get_child(list->obj, 0)) + gap;
     if (pitch <= gap || avail <= 0) return 0;
@@ -1300,12 +1328,11 @@ void apply_selection(Entry *e)
             continue;
         }
         if (on) {
-            /* A page of prose carries the reading position and does not draw
-             * it: a ring round a fact would promise that A there does
-             * something. The scroll still follows it, which is the half of a
-             * selection that a page being read actually uses. */
-            if (e->layout != CATNIP_LAYOUT_TEXT)
-                lv_obj_add_state(child, LV_STATE_CHECKED);
+            /* Only the shapes that reach here, which is rows and a carousel: a
+             * column of lines took the paged branch above and never arrives.
+             * The guard that used to be on this line said so a second time and
+             * could not be false. */
+            lv_obj_add_state(child, LV_STATE_CHECKED);
             scroll_into_view(e->obj, child);
         } else {
             lv_obj_remove_state(child, LV_STATE_CHECKED);
