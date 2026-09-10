@@ -139,9 +139,20 @@ local function refresh()
   for i, ap in ipairs(aps) do
     local name = ap.ssid
     if name == "" then name = "(hidden)" end
+    -- Strength, channel, name - in that order and in that many columns.
+    --
+    -- The name was in the middle and the channel after it, which meant the
+    -- channel sat wherever the name happened to end: a column of numbers that
+    -- was not a column. Both of the things in front of the name are fixed width
+    -- now - four marks and two digits - so the names start in the same place on
+    -- every line and the page can be read down rather than across.
+    --
+    -- Two digits, zero-padded. `ch6` and `ch11` are the same fact at two widths,
+    -- and the `ch` was a label on a column that needs none: every number in that
+    -- position is a channel.
     cells[i] = ui.label{ id = "ap" .. i,
-                         text = string.format("%s  %s  ch%d", bars(ap.rssi), name,
-                                              ap.channel) }
+                         text = string.format("%s  %02d  %s", bars(ap.rssi),
+                                              ap.channel, name) }
   end
   rows:set_children(cells)
   if sel > #cells then sel = #cells > 0 and #cells or 1 end

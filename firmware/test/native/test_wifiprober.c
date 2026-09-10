@@ -251,6 +251,10 @@ int main(void)
     air(3);
     CHECK(hidden("status"), "the line is gone the moment there is something to show");
     CHECK(row_is(1, "near"), "the strongest is first");
+    /* Strength, channel, name - the two in front of the name are fixed width,
+     * so the names line up and the page reads down. */
+    CHECK_STR(row(1), "||||  06  near", "and the line is strength, channel, name");
+    CHECK_STR(row(3), "|...  01  far", "with the channel zero-padded to two digits");
     CHECK(row_is(2, "middling"), "then the next");
     CHECK(row_is(3, "far"), "and the faintest last");
 
