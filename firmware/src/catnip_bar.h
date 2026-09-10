@@ -44,7 +44,12 @@ extern "C" {
 /* More than this on one item is a menu pretending to be a bar. Three is already
  * the modal shape; eight is the point at which the answer is that the app has
  * too many verbs, not that the bar needs to scroll. */
-#define CATNIP_BAR_MAX         CATNIP_ACTIONS_MAX
+#define CATNIP_BAR_MAX CATNIP_ACTIONS_MAX
+
+/* How many cells the bar draws, and where the modal shape starts. One number,
+ * because it is one rule seen from two sides: three is the most that fits
+ * across the panel, and three is more than the two buttons can carry. */
+#define CATNIP_BAR_CELLS       3
 #define CATNIP_ACTION_NAME_MAX 24
 #define CATNIP_ACTION_ICON_MAX 16
 
@@ -62,8 +67,7 @@ typedef struct {
 typedef struct {
     catnip_action items[CATNIP_BAR_MAX];
     int n;
-    int focus; /* which one A runs, in the three-icon shape */
-    bool up;
+    int focus; /* which one A runs, when the bar steps */
     /* Who asked, and about what: the list the long press landed on and the row
      * it was about. Both travel back out with the answer, because an action is
      * always about an item and the app has no other way to be told which. */

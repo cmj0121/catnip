@@ -42,6 +42,38 @@ static void post_if_event(catnip_ui_input *in, catnip_rt *rt, catnip_button butt
  * focus that is not a list, or a list with nothing selected, sends the sentinel
  * and the handler simply finds no row - which is the honest answer when the
  * focus is on a button and there is no item to have options about. */
+/* What an activation means on a page of values, said once for the button and
+ * the finger.
+ *
+ * The two had this written out separately and had already drifted: the finger's
+ * copy had no commit arm, so a tap on a column that was already taken up did
+ * nothing where a press of A kept it. One function, so a rule about the level
+ * cannot be true of one of them and not the other.
+ *
+ * Three answers, in the order they are asked. Twice in quick succession with
+ * nothing between: keep all of it and leave. On a column that is not taken up:
+ * take it up. On one that is: keep this one and let go. */
+static void mixer_press(catnip_ui_input *in, catnip_rt *rt, unsigned now)
+{
+    bool engaged = in->engaged_on == in->focus && in->focus != CATNIP_HANDLE_NONE;
+    bool twice = in->armed && (unsigned)(now - in->armed_at) < CATNIP_DOUBLE_MS;
+
+    if (!engaged) {
+        in->engaged_on = in->focus;
+        /* Only an engage arms the second press. A commit does not, so keeping
+         * one column and then taking up the next is two presses that are never
+         * mistaken for one gesture. */
+        in->armed = true;
+        in->armed_at = now;
+        catnip_render_post(rt, in->focus, "engage",
+                           catnip_render_selected(rt, in->focus));
+        return;
+    }
+    catnip_render_post(rt, in->focus, twice ? "save" : "click", CATNIP_INDEX_NONE);
+    in->engaged_on = CATNIP_HANDLE_NONE;
+    in->armed = false;
+}
+
 static void post_if_long_event(catnip_ui_input *in, catnip_rt *rt, catnip_button button)
 {
     const char *event = catnip_ui_input_long_event(button);
@@ -91,7 +123,7 @@ static void where_is(catnip_rt *rt, catnip_handle focus, bool engaged,
 {
     catnip_handle order[CATNIP_UI_MAX_FOCUS];
     int n = catnip_render_focus_order(rt, order, CATNIP_UI_MAX_FOCUS);
-    int shown = 0, total = 0, per, page;
+    int shown = 0, total = 0, page;
 
     if (n > CATNIP_UI_MAX_FOCUS) n = CATNIP_UI_MAX_FOCUS;
     focus_room(order, n, focus, &w->ring_back, &w->ring_fwd);
@@ -105,8 +137,6 @@ static void where_is(catnip_rt *rt, catnip_handle focus, bool engaged,
      * bar draws - one derivation, so an arrow cannot be lit for a page the
      * header says does not exist. It answers in pages for exactly the shapes
      * that page, which is why nothing here has to know which those are. */
-    per = w->layout == CATNIP_LAYOUT_GRID ? CATNIP_GRID_PAGE : CATNIP_MIXER_PAGE;
-    (void)per;
     if (catnip_render_counter(rt, focus, &shown, &total) && total > 1) {
         page = shown; /* already one-based, and already a page for these shapes */
         w->page_back = page > 1;
@@ -257,8 +287,9 @@ int catnip_ui_input_run(catnip_ui_input *in, catnip_rt *rt, const catnip_ui_samp
      * looking at. */
     layout = catnip_render_layout(rt, in->focus);
     events = catnip_render_events(rt, in->focus);
-    if (in->engaged && (in->focus != in->engaged_on || layout != CATNIP_LAYOUT_MIXER))
-        in->engaged = false;
+    if (in->engaged_on != CATNIP_HANDLE_NONE &&
+        (in->focus != in->engaged_on || layout != CATNIP_LAYOUT_MIXER))
+        in->engaged_on = CATNIP_HANDLE_NONE;
 
     /* What each direction means where the ring is. Asked before the ring moves,
      * because the meaning belongs to the node the press was made on - and asked
@@ -266,8 +297,9 @@ int catnip_ui_input_run(catnip_ui_input *in, catnip_rt *rt, const catnip_ui_samp
      * cannot disagree about whether a direction does anything (#80). */
     {
         catnip_dir_where w;
-        where_is(rt, in->focus, in->engaged, &w);
-        g_hint_engaged = in->engaged;
+        bool engaged = in->engaged_on == in->focus;
+        where_is(rt, in->focus, engaged, &w);
+        g_hint_engaged = engaged;
         m_up = catnip_ui_input_dir(CATNIP_BTN_UP, &w);
         m_down = catnip_ui_input_dir(CATNIP_BTN_DOWN, &w);
         m_left = catnip_ui_input_dir(CATNIP_BTN_LEFT, &w);
@@ -297,7 +329,7 @@ int catnip_ui_input_run(catnip_ui_input *in, catnip_rt *rt, const catnip_ui_samp
         if (step_fwd && m_right == CATNIP_DIR_FOCUS_FWD) dir += 1;
         if (dir) {
             in->focus = catnip_ui_focus_step(order, n, in->focus, dir);
-            in->engaged = false;
+            in->engaged_on = CATNIP_HANDLE_NONE;
         }
     }
 
@@ -319,23 +351,8 @@ int catnip_ui_input_run(catnip_ui_input *in, catnip_rt *rt, const catnip_ui_samp
          *
          * Twice quickly is `save`, for the same reason two presses of A are:
          * "and I am done" is a thing a finger has to be able to say too. */
-        if (in->touch_was_down && !in->drag_settled && layout == CATNIP_LAYOUT_MIXER) {
-            bool twice =
-                in->had_tap && (unsigned)(s->now - in->last_tap) < CATNIP_DOUBLE_MS;
-            if (twice && in->engaged) {
-                catnip_render_post(rt, in->focus, "save", CATNIP_INDEX_NONE);
-                in->engaged = false;
-                in->had_tap = false;
-            } else if (!in->engaged) {
-                in->engaged = true;
-                in->engaged_on = in->focus;
-                in->had_tap = true;
-                in->last_tap = s->now;
-                catnip_render_post(rt, in->focus, "engage",
-                                   catnip_render_selected(rt, in->focus));
-            }
-        }
-        in->touch_was_down = false;
+        if (in->touch_was_down && !in->drag_settled && layout == CATNIP_LAYOUT_MIXER)
+            mixer_press(in, rt, s->now);
         in->drag_col = CATNIP_HANDLE_NONE;
         in->drag_settled = false;
     } else if (!in->drag_settled && swipe != CATNIP_SWIPE_NONE) {
@@ -350,7 +367,9 @@ int catnip_ui_input_run(catnip_ui_input *in, catnip_rt *rt, const catnip_ui_samp
                 in->drag_col = col;
         }
     }
-    if (s->touch_down) in->touch_was_down = true;
+    /* One writer, at the end of the contact's handling, so "was the finger down
+     * last pass" cannot be set on one path and cleared on another. */
+    in->touch_was_down = s->touch_down;
     if (in->drag_col != CATNIP_HANDLE_NONE && env && env->mixer_pct) {
         int pct = env->mixer_pct(env->ud, in->drag_col, s->touch_y);
         if (pct >= 0) {
@@ -433,35 +452,13 @@ int catnip_ui_input_run(catnip_ui_input *in, catnip_rt *rt, const catnip_ui_samp
      * column up, stepping it, and pressing A to keep it is three presses of
      * which two are A, and without this it would be a double press with a
      * joystick push hidden in the middle of it. */
-    if (dpad_up || dpad_down || step_back || step_fwd || dragged) {
-        in->had_a = false;
-        in->had_tap = false;
-    }
+    if (dpad_up || dpad_down || step_back || step_fwd || dragged) in->armed = false;
 
     if (a_press == CATNIP_PRESS_SHORT || c_press == CATNIP_PRESS_SHORT) {
-        bool mixer = layout == CATNIP_LAYOUT_MIXER;
-        bool twice = in->had_a && (unsigned)(s->now - in->last_a) < CATNIP_DOUBLE_MS;
-
-        if (mixer && in->engaged && twice) {
-            catnip_render_post(rt, in->focus, "save", CATNIP_INDEX_NONE);
-            in->engaged = false;
-            in->had_a = false;
-        } else if (mixer && !in->engaged) {
-            in->engaged = true;
-            in->engaged_on = in->focus;
-            /* Only an engage arms the second press. A commit does not, so
-             * keeping one column and then taking up the next is two presses of
-             * A that are never mistaken for one gesture. */
-            in->had_a = true;
-            in->last_a = s->now;
-            catnip_render_post(rt, in->focus, "engage",
-                               catnip_render_selected(rt, in->focus));
-        } else if (mixer) {
-            catnip_render_post(rt, in->focus, "click", CATNIP_INDEX_NONE);
-            in->engaged = false;
-            in->had_a = false;
+        if (layout == CATNIP_LAYOUT_MIXER) {
+            mixer_press(in, rt, s->now);
         } else {
-            in->had_a = false;
+            in->armed = false;
             if (a_press == CATNIP_PRESS_SHORT) post_if_event(in, rt, CATNIP_BTN_A);
             if (c_press == CATNIP_PRESS_SHORT) post_if_event(in, rt, CATNIP_BTN_CENTRE);
         }
@@ -487,9 +484,9 @@ int catnip_ui_input_run(catnip_ui_input *in, catnip_rt *rt, const catnip_ui_samp
          * thing you are on - and on a column the thing you are on is a value.
          * It is why the level costs nothing to learn, and why nothing on the
          * screen has to say which level you are at. */
-        if (in->engaged) {
+        if (in->engaged_on != CATNIP_HANDLE_NONE) {
             catnip_render_post(rt, in->focus, "cancel", CATNIP_INDEX_NONE);
-            in->engaged = false;
+            in->engaged_on = CATNIP_HANDLE_NONE;
             return CATNIP_UI_GESTURE_NONE;
         }
         screen = catnip_render_visible_screen(rt);

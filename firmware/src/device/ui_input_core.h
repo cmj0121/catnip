@@ -102,25 +102,30 @@ typedef struct {
      * left-swipe changed four settings at once. */
     catnip_handle drag_col;
     bool drag_settled;
-    /* Whether the focused column has been taken up - the second level of a page
-     * of values. Kept here rather than in the app because it is what a
-     * *direction* means, and what a direction means is the platform's: the same
-     * function answers the press and lights the arrow, and an app that owned
-     * this would be able to make the two disagree.
+    /* Which column has been taken up - the second level of a page of values -
+     * or CATNIP_HANDLE_NONE for none.
      *
-     * Dropped the moment the ring moves or the shape under it stops being a
-     * page of values, so it can never survive the column it was about. */
-    bool engaged;
+     * Kept here rather than in the app because it is what a *direction* means,
+     * and what a direction means is the platform's: the same function answers
+     * the press and lights the arrow, and an app that owned this would be able
+     * to make the two disagree.
+     *
+     * One field, not a flag beside a handle. "Engaged" is exactly "this handle
+     * is the focus and the shape under it is a page of values", which the pass
+     * checks anyway - a separate bool was that same fact stored twice, with
+     * five sites having to keep the two in step. */
     catnip_handle engaged_on;
-    /* When A was last released short, for telling a second press from a first.
-     * Double A is the only gesture in the device with a shape of its own, and
-     * it exists on one screen: a page of values, where "and I am done" is a
-     * distinct thing to say because you may have set three of them. */
-    unsigned last_a;
-    bool had_a;
-    /* The same for a finger, which says it by tapping twice. */
-    unsigned last_tap;
-    bool had_tap;
+    /* When the column was taken up, and whether it was - for telling a second
+     * press from a first. Double A is the only gesture in the device with a
+     * shape of its own, and it exists on one screen: a page of values, where
+     * "and I am done" is a distinct thing to say because you may have set three
+     * of them.
+     *
+     * One pair, shared by the button and the finger. They were two, and the two
+     * had already drifted: the finger's copy had no commit arm, so a tap on a
+     * column that was already taken up did nothing where a press of A kept it. */
+    unsigned armed_at;
+    bool armed;
     bool touch_was_down;
     /* Who was long-pressed, and about which row. Kept because the answer comes
      * back a drain later - the handler runs after this pass - and by then the

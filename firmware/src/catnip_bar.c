@@ -22,13 +22,11 @@ void catnip_bar_open(catnip_bar *b, const catnip_action *items, int n,
     b->focus = 0;
     b->owner = owner;
     b->index = index;
-    b->up = true;
 }
 
 void catnip_bar_close(catnip_bar *b)
 {
     if (!b) return;
-    b->up = false;
     b->n = 0;
     b->focus = 0;
     b->owner = CATNIP_HANDLE_NONE;
@@ -37,13 +35,16 @@ void catnip_bar_close(catnip_bar *b)
 
 bool catnip_bar_up(const catnip_bar *b)
 {
-    return b && b->up && b->n > 0;
+    /* Having actions on it is the whole of being up: `open` refuses an empty
+     * list and `close` empties it, so a separate flag was the same fact stored
+     * twice with two places to forget one of them. */
+    return b && b->n > 0;
 }
 
 bool catnip_bar_modal(const catnip_bar *b)
 {
     if (!catnip_bar_up(b)) return false;
-    if (b->n >= 3) return true;
+    if (b->n >= CATNIP_BAR_CELLS) return true;
     /* Two, with the second one destructive: B will not carry it, so nothing
      * would reach it and the bar steps instead. */
     return b->n == 2 && b->items[1].destructive;
