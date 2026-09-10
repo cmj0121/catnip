@@ -29,6 +29,7 @@
 #include "catnip_render.h"
 #include "catnip_runtime.h"
 #include "catnip_device_info.h"
+#include "catnip_typescale.h"
 #include "catnip_app_grid.h"
 #include "catnip_menu.h"
 #include "catnip_ui.h"
@@ -433,38 +434,74 @@ int main(void)
                                 "heap 213 KB free",
                                 "mac 8C:BF:EA:11:22:33",
                                 "i2c 18 19 34 38 41 51 68"};
-        const catnip_info_key pref = {"Preference", "settings"};
-        const catnip_info_key diag = {"Diagnostic", "warning"};
         lv_obj_t *facts;
-        lv_obj_t *keys;
-        lv_obj_t *k1;
-        lv_obj_t *k2;
+        lv_obj_t *first;
+        lv_obj_t *last;
 
         CHECK(info != NULL, "the device page is built");
-        catnip_device_info_show(info, rows, 11, &pref, &diag);
+        catnip_device_info_show(info, rows, 11);
+        pass();
         pass();
         shot("device-page");
         facts = obj("info_list");
-        keys = obj("info_keys");
-        k1 = obj("info_left");
-        k2 = obj("info_right");
-        CHECK(facts && keys && k1 && k2, "the facts and both tiles are drawn");
-        /* A list grows by default, because a list is usually the thing on a
-         * screen that should take what is left; a strip is the opposite, and
-         * one that also grew split the screen down the middle. */
-        CHECK(facts && keys && lv_obj_get_height(facts) > lv_obj_get_height(keys),
-              "the facts take the room and the strip takes only what it needs");
-        CHECK(k1 && k2 && lv_obj_get_x(k2) > lv_obj_get_x(k1),
-              "the two tiles sit side by side");
-        CHECK(k1 && k2 && lv_obj_get_width(k1) + lv_obj_get_width(k2) <= CATNIP_SCREEN_W,
-              "and share the width rather than overflowing it");
-        /* An icon over a word, which is what makes it a tile rather than a
-         * caption with a picture in front of it. */
-        CHECK(k1 && lv_obj_get_child_count(k1) == 2 &&
-                  lv_obj_get_y(lv_obj_get_child(k1, 0)) <
-                      lv_obj_get_y(lv_obj_get_child(k1, 1)),
-              "and each is its icon above its word");
+        first = obj("info1");
+        last = obj("info11");
+        CHECK(facts && first, "the facts are drawn");
+        /* Nothing that acts is on it: the two tiles are behind A now, where
+         * every operation in the device is. */
+        CHECK(obj("info_left") == NULL && obj("info_right") == NULL,
+              "and nothing on the page is a button");
+        /* Lines, not rows. A row reserves 20 px in front of its text for an
+         * icon slot; a line of prose starts at the margin, because there is no
+         * icon coming and no column for one to line up with. */
+        CHECK(first && lv_obj_get_x(first) < 20,
+              "a line starts at the margin rather than behind an icon slot");
+        /* And the column takes the region, since it is the only thing on the
+         * screen now. */
+        CHECK(facts && lv_obj_get_height(facts) > CATNIP_SCREEN_H / 2,
+              "the facts take the room that is left");
+        CHECK(last == NULL || lv_obj_get_y(last) > lv_obj_get_y(first),
+              "and they run down it in the order they were given");
+        /* And the bar it puts up, drawn over the facts it was asked from. */
+        {
+            static const char *const kNames[3] = {"Prefs", "Sizes", "Diag"};
+            static const catnip_icon kIcons[3] = {CATNIP_ICON_SETTINGS, CATNIP_ICON_FILE,
+                                                  CATNIP_ICON_WARNING};
+            catnip_frame_show(true);
+            catnip_frame_set_actions(kNames, kIcons, 3, 0);
+            pass();
+            shot("device-page-actions");
+            catnip_frame_set_actions(nullptr, nullptr, 0, 0);
+            catnip_frame_show(false);
+            pass();
+        }
         catnip_device_info_free(info);
+    }
+
+    /* ---- every type size, drawn in itself ------------------------------- */
+    /* The page exists to be looked at, so what is asserted is the one thing a
+     * picture cannot be trusted for: that the four lines really are four
+     * different sizes, largest first. */
+    {
+        catnip_typescale *ts = catnip_typescale_new(g_rt);
+        CHECK(ts != NULL, "the type sample page is built");
+        catnip_typescale_show(ts);
+        pass();
+        pass();
+        shot("type-sizes");
+        {
+            lv_obj_t *big = obj("ts_display");
+            lv_obj_t *t = obj("ts_title");
+            lv_obj_t *b = obj("ts_body");
+            lv_obj_t *c = obj("ts_caption");
+
+            CHECK(big && t && b && c, "one line per size");
+            CHECK(big && t && lv_obj_get_height(big) > lv_obj_get_height(t) && t && b &&
+                      lv_obj_get_height(t) > lv_obj_get_height(b) && b && c &&
+                      lv_obj_get_height(b) > lv_obj_get_height(c),
+                  "and each is smaller than the one above it, which is the whole page");
+        }
+        catnip_typescale_free(ts);
     }
 
     /* ---- the app grid: many apps, wrapping, pinned ones marked --------- */

@@ -1034,8 +1034,9 @@ void apply_list_layout(Entry *e)
         e->obj,
         (carousel || mixer || strip || grid) ? LV_FLEX_ALIGN_CENTER : LV_FLEX_ALIGN_START,
         LV_FLEX_ALIGN_CENTER, grid ? LV_FLEX_ALIGN_START : LV_FLEX_ALIGN_CENTER);
+    bool text = e->layout == CATNIP_LAYOUT_TEXT;
     lv_obj_set_style_border_width(
-        e->obj, (carousel || mixer || strip || canvas || grid) ? 0 : 1, 0);
+        e->obj, (carousel || mixer || strip || canvas || grid || text) ? 0 : 1, 0);
     lv_obj_set_style_pad_all(e->obj, (carousel || canvas) ? 0 : 2, 0);
     if (canvas) lv_obj_set_style_bg_opa(e->obj, LV_OPA_TRANSP, 0);
     if (grid) {
@@ -1203,7 +1204,12 @@ void apply_selection(Entry *e)
             continue;
         }
         if (on) {
-            lv_obj_add_state(child, LV_STATE_CHECKED);
+            /* A page of prose carries the reading position and does not draw
+             * it: a ring round a fact would promise that A there does
+             * something. The scroll still follows it, which is the half of a
+             * selection that a page being read actually uses. */
+            if (e->layout != CATNIP_LAYOUT_TEXT)
+                lv_obj_add_state(child, LV_STATE_CHECKED);
             scroll_into_view(e->obj, child);
         } else {
             lv_obj_remove_state(child, LV_STATE_CHECKED);
@@ -1458,7 +1464,8 @@ int be_create(void *ud, catnip_handle h, catnip_handle parent, int index,
          * full-width rows, each with a hidden icon slot and left-ranged text,
          * stacked inside a container that was then told not to stack. */
         if (parent_entry && parent_entry->kind == CATNIP_NODE_LIST &&
-            parent_entry->layout != CATNIP_LAYOUT_CANVAS)
+            parent_entry->layout != CATNIP_LAYOUT_CANVAS &&
+            parent_entry->layout != CATNIP_LAYOUT_TEXT)
             obj = make_row(parent_obj);
         else obj = make_label(parent_obj);
         break;
@@ -1476,8 +1483,14 @@ int be_create(void *ud, catnip_handle h, catnip_handle parent, int index,
     e->obj = obj;
     e->kind = d->kind;
     e->selected = -1;
+    /* The two shapes whose children are not rows: a canvas places things in a
+     * region, and a column of text is lines rather than rows. Both get plain
+     * labels from make_*(), and this is what has to agree with that - a node
+     * marked as a row whose object is a bare label looks for a name widget that
+     * is not there, and quietly draws nothing. */
     e->row = parent_entry && parent_entry->kind == CATNIP_NODE_LIST &&
-             parent_entry->layout != CATNIP_LAYOUT_CANVAS && d->kind == CATNIP_NODE_LABEL;
+             parent_entry->layout != CATNIP_LAYOUT_CANVAS &&
+             parent_entry->layout != CATNIP_LAYOUT_TEXT && d->kind == CATNIP_NODE_LABEL;
     if (e->row) {
         /* The two widgets make_row() built, remembered here so nothing later
          * has to know what order they ended up in. */
@@ -1485,7 +1498,8 @@ int be_create(void *ud, catnip_handle h, catnip_handle parent, int index,
         e->name = lv_obj_get_child(obj, 1);
     }
 
-    if (parent_entry && parent_entry->kind == CATNIP_NODE_LIST) {
+    if (parent_entry && parent_entry->kind == CATNIP_NODE_LIST &&
+        parent_entry->layout != CATNIP_LAYOUT_TEXT) {
         style_as_row(obj);
         /* A row is a touch target even though it is not focusable: a finger can
          * name a row directly, where the joystick can only step to it. That

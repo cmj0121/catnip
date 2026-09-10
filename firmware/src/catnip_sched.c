@@ -271,13 +271,19 @@ int catnip_sched_dispatch(void *ud, catnip_rt *rt, int node_ref, const char *eve
          * app with no on_back the ordinary case rather than an error. */
         if (nres >= 1 && lua_toboolean(co, 1))
             rc = (nres >= 2 && lua_toboolean(co, 2)) ? 1 : 0;
-        /* And an `options` handler answers with *which actions apply*, which is
-         * a list of ids out of the manifest's catalogue. It is read out here
+        /* And an activation may answer with *which actions apply*, which is a
+         * list of ids out of the manifest's catalogue. It is read out here
          * rather than left for the caller because the coroutine that holds it
-         * is unwound two lines below - and it is read only for `options`, so no
-         * other handler's return value can quietly become a bar. */
+         * is unwound two lines below.
+         *
+         * Both of the events that mean "activate", and only those two. Long A
+         * is the canonical one; short A is for a screen with no selection, where
+         * long A has no item to be about and nothing else short A could mean -
+         * the clock's face and the device page are both that shape. No other
+         * handler's return value can become a bar, which is what keeps a stray
+         * truthy table from putting one up. */
         if (r == LUA_OK && nres >= 2 && lua_istable(co, 2) &&
-            strcmp(event, "options") == 0) {
+            (strcmp(event, "options") == 0 || strcmp(event, "click") == 0)) {
             lua_Integer len = (lua_Integer)lua_rawlen(co, 2);
             for (lua_Integer i = 1; i <= len; i++) {
                 lua_rawgeti(co, 2, i);

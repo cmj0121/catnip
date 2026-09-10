@@ -673,7 +673,13 @@ static void offer_actions(void)
     catnip_handle owner;
 
     if (!g_rt) return;
+    /* The running app's, or the platform page's when nothing is running. Two
+     * sources and one bar: the launcher's own pages declare their actions in C
+     * where an app declares them in JSON, and the thing that draws them cannot
+     * tell the difference - which is the point. The launcher may offer no
+     * operation an app could not have offered the same way. */
     catalogue = catnip_shell_actions(g_shell, &n_catalogue);
+    if (!catalogue) catalogue = catnip_pages_actions(g_pages, &n_catalogue);
     owner = catnip_ui_input_options_asked(&index);
     (void)catnip_bar_offer(catnip_ui_input_bar(), g_rt, catalogue, n_catalogue, owner,
                            index);

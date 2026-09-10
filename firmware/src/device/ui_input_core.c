@@ -1,6 +1,8 @@
 /* ui_input_core.c - see ui_input_core.h. */
 #include "ui_input_core.h"
 
+#include <string.h>
+
 #include "ui_input.h"
 #include "ui_input_map.h"
 
@@ -22,8 +24,16 @@ static void post_if_event(catnip_ui_input *in, catnip_rt *rt, catnip_button butt
     const char *event = catnip_ui_input_event(button);
     catnip_handle to = input_target(in, rt);
 
-    if (event && to != CATNIP_HANDLE_NONE)
-        catnip_render_post(rt, to, event, CATNIP_INDEX_NONE);
+    if (!event || to == CATNIP_HANDLE_NONE) return;
+    /* An activation may be answered with a list of actions, and the answer
+     * comes back a drain later - so who was asked has to be remembered now.
+     * Only the event that can be answered: `prev` and `next` reach this too,
+     * and a page turned is not a question. */
+    if (strcmp(event, "click") == 0) {
+        in->options_on = to;
+        in->options_index = catnip_render_selected(rt, to);
+    }
+    catnip_render_post(rt, to, event, CATNIP_INDEX_NONE);
 }
 
 /* A held switch asks about the *selected item*, so the event carries which row

@@ -167,6 +167,16 @@ typedef enum {
      * carousel (one at a time). Each cell is a focusable child, so the ring
      * walks them in reading order. */
     CATNIP_LAYOUT_GRID,
+    /* A column of lines rather than a column of rows: no icon slot in front of
+     * each, and no ring around the one the cursor is on. It is a page to be
+     * read, not a page to be chosen from, and a highlight on a fact promises
+     * that pressing A there will do something.
+     *
+     * It still scrolls the way everything else does - the selection leads and
+     * the view follows - the selection simply is not drawn. That is not a
+     * hidden mode: on a page where nothing is selectable there is nothing for a
+     * selection to mean, and what is left of it is the reading position. */
+    CATNIP_LAYOUT_TEXT,
 } catnip_node_layout;
 
 /* How many cells a grid shows at once, and in what shape.

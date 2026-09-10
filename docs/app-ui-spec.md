@@ -725,24 +725,37 @@ to come back to the middle to change the brightness.
 
 **Down is the device, and the device answers before it offers.** What down opens
 is a page of facts — the version, the chip, what is free, what the clock says,
-what is answering on the bus — with two tiles under them:
+what is answering on the bus — as one column of prose, and nothing else:
 
 ```text
   ┌──────────── Device ────────────┐
-  │ catnip v0.3.1                  │   the facts scroll: up and down
-  │ built 2026-09-09               │   move through them, and A on a
-  │ clock 2026-09-09 14:03         │   fact does nothing, because a
-  │ battery 82%   card none        │   fact is not a choice
-  ├────────────────────────────────┤
-  │      ⚙            ⚠           │   left and right choose a tile,
-  │  Preference   Diagnostic       │   A goes there
+  │ catnip v0.4.0                  │   the facts scroll: up and down
+  │ clock 2026-09-10 14:18 (ntp)   │   move through them. Nothing is
+  │ battery 82%                    │   ringed, because nothing on this
+  │ card none                      │   page is a choice - what is on
+  │ built 2026-09-10               │   it is a reading position, and
+  │ ESP32-S3 rev 2, 240 MHz        │   the scroll is the half of it
+  │ flash 16 MB                    │   that shows
   └────────────────────────────────┘
+        ╭──────────────────────────╮
+        │ ⚙ Prefs  ▤ Sizes  ⚠ Diag │  ← A, and the platform draws it
+        ╰──────────────────────────╯
 ```
 
-That order is the design: "what is this thing" is answered before "change it",
-and long before "is the joystick broken". Both pages below it are the platform's
-own — neither is in the grid, neither can be pinned, and nothing you write can
-replace either.
+It used to carry two tiles under the facts, and they were the thing this page
+was least entitled to have: **operations drawn on a screen**, on the one page
+whose whole point is that it answers before it offers. They are behind A now,
+where every operation in the device is.
+
+Short A rather than long, and for the same reason the clock's face takes short
+A: there is no selection here for long A to be about, and nothing else short A
+could mean. Long A reaches the same three.
+
+Three doors, so the bar is a modal — left and right step it, A goes through,
+B puts it away. **Sizes** is every type role drawn in itself, largest first,
+because an argument about whether `body` is big enough is otherwise an argument
+about numbers. All three are the platform's own — none is in the grid, none can
+be pinned, and nothing you write can replace any of them.
 
 **Preference** is the **Values** shape above. A keeps and leaves, B puts back and
 leaves, and both come back here rather than to the cat; long B is the one that
