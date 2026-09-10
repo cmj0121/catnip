@@ -1124,11 +1124,16 @@ int catnip_render_counter(catnip_rt *rt, catnip_handle focus, int *n, int *total
         if (total) *total = (rows + CATNIP_MIXER_PAGE - 1) / CATNIP_MIXER_PAGE;
         return 1;
     }
-    /* And a column of lines, which pages too - on boundaries the *drawing*
-     * measured, because how many lines fit is geometry. It is reported here so
+    /* And a column - of rows or of lines - which pages too, on boundaries the
+     * *drawing* measured, because how many fit is geometry. Reported here so
      * the bar and the page cannot disagree: they did, and the header read
-     * "9/14" over a page whose first line was the ninth. */
-    if (list->layout == CATNIP_LAYOUT_TEXT && list->page > 0) {
+     * "9/14" over a page whose first line was the ninth.
+     *
+     * A column used to count its rows, and "row twelve of forty-five" is an
+     * ordinal rather than an answer: what the counter is for is how much more
+     * there is, and pages are the unit a reader can act on. */
+    if ((list->layout == CATNIP_LAYOUT_TEXT || list->layout == CATNIP_LAYOUT_ROWS) &&
+        list->page > 0) {
         if (n) *n = list->selected / list->page + 1;
         if (total) *total = (rows + list->page - 1) / list->page;
         return 1;

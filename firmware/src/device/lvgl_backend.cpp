@@ -37,7 +37,7 @@
 #include "../generated/splash_rgb565.h"
 #include "catnip_mascot_img.h"
 #include "frame.h"
-#include "catnip_font_display.h"
+#include "catnip_font.h"
 #include "lvgl_backend.h"
 #include "lvgl_port.h"
 
@@ -177,7 +177,7 @@ const lv_font_t *role_font(catnip_style_role role, bool canvas, bool strip)
      * one" a thing you see rather than a thing you read. Roles at different
      * sizes would make the line shift under the eye at midnight, which is the
      * one moment nobody is looking at it. */
-    if (strip && role != CATNIP_STYLE_DISPLAY) return &lv_font_montserrat_16;
+    if (strip && role != CATNIP_STYLE_DISPLAY) return &catnip_font_16;
     /* In a canvas *cell* the prose roles differ only in ink. A cell is a
      * fraction of the panel with one thing in it to be looked at, so a heading
      * and a caption at different sizes would only make the labels argue with
@@ -186,7 +186,7 @@ const lv_font_t *role_font(catnip_style_role role, bool canvas, bool strip)
      * one: it has room for the three sizes the roles already mean, which is
      * what a face is - the date in a corner, the time in the middle, and the
      * working underneath in the ink that says it is working. */
-    if (canvas && role != CATNIP_STYLE_DISPLAY) return &lv_font_montserrat_24;
+    if (canvas && role != CATNIP_STYLE_DISPLAY) return &catnip_font_24;
 
     /* 20 / 16 / 10, and body was 14. A list is the screen this device spends
      * most of its time being, and 14 is a size read by leaning in - which on a
@@ -196,13 +196,13 @@ const lv_font_t *role_font(catnip_style_role role, bool canvas, bool strip)
      * all. Caption did not move, because it is working rather than an answer
      * and the gap between it and body is what says so. */
     switch (role) {
-    case CATNIP_STYLE_TITLE: return &lv_font_montserrat_20;
-    case CATNIP_STYLE_CAPTION: return &lv_font_montserrat_10;
+    case CATNIP_STYLE_TITLE: return &catnip_font_20;
+    case CATNIP_STYLE_CAPTION: return &catnip_font_10;
     case CATNIP_STYLE_DISPLAY: return &catnip_font_display;
     /* An unknown name from Lua already arrived as BODY - catnip_render.c
      * resolves it - so this is the fallback for the roles that do not change
      * the size, not for a name nobody recognised. */
-    default: return &lv_font_montserrat_16;
+    default: return &catnip_font_16;
     }
 }
 
@@ -1293,10 +1293,31 @@ void apply_selection(Entry *e)
      * explain why. Where the boundaries fall is geometry, so it is measured
      * rather than declared; the grid's and the mixer's are declared because
      * their shapes are. */
+    /* A column pages, whether its lines carry a ring or not.
+     *
+     * Both did the same thing badly in different ways. A column of rows slid a
+     * viewport one row at a time, so the rows on screen were a different set
+     * every time the page was opened, and the header counted an ordinal - "row
+     * twelve of forty-five" - which is a number nobody can act on. A column of
+     * lines had no ring at all, so a press appeared to do nothing three times
+     * out of four.
+     *
+     * Paged, they are one shape: a page is a whole number of rows on a fixed
+     * boundary, the ring (where the shape draws one) moves within it, and the
+     * page turns under the ring when it steps off - which is exactly what the
+     * grid has always done. */
     bool text = e->layout == CATNIP_LAYOUT_TEXT;
-    int per = grid ? CATNIP_GRID_PAGE : text ? page_rows_of(e) : CATNIP_MIXER_PAGE;
-    int page =
-        ((grid || mixer || text) && per > 0 && e->selected > 0) ? e->selected / per : 0;
+    bool rows = e->layout == CATNIP_LAYOUT_ROWS;
+    int per = grid             ? CATNIP_GRID_PAGE
+              : mixer          ? CATNIP_MIXER_PAGE
+              : (text || rows) ? page_rows_of(e)
+                               : 0;
+    /* Told to the renderer, so the counter in the bar reads the same page this
+     * is about to draw. The declared shapes say nothing: the renderer already
+     * has their constants. */
+    if ((text || rows) && g_rt) catnip_render_set_page(g_rt, e->h, per);
+    bool paged = per > 0 && (grid || mixer || text || rows);
+    int page = (paged && e->selected > 0) ? e->selected / per : 0;
     if (per <= 0) per = 1;
 
     e->sel_dirty = false;
@@ -1305,7 +1326,7 @@ void apply_selection(Entry *e)
         lv_obj_t *child = lv_obj_get_child(e->obj, i);
         bool on = ((int)i == e->selected);
 
-        if (grid || mixer || text) {
+        if (paged) {
             /* On this page or not drawn at all. Hiding takes a child out of the
              * flex flow as well as out of the picture, so the page that is up
              * fills the region exactly as it would if it were all there was -
@@ -1313,7 +1334,10 @@ void apply_selection(Entry *e)
             if ((int)i / per == page) lv_obj_remove_flag(child, LV_OBJ_FLAG_HIDDEN);
             else lv_obj_add_flag(child, LV_OBJ_FLAG_HIDDEN);
 
-            if (on) lv_obj_add_state(child, LV_STATE_CHECKED);
+            /* A ring where the shape draws one. A column of lines does not:
+             * its cursor is a reading position, and a ring round a fact would
+             * promise that pressing A on it did something. */
+            if (on && !text) lv_obj_add_state(child, LV_STATE_CHECKED);
             else lv_obj_remove_state(child, LV_STATE_CHECKED);
             /* And no scrolling into view: the page turned, so it is in view. */
             continue;
