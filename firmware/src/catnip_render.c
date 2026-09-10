@@ -1086,6 +1086,14 @@ int catnip_render_counter(catnip_rt *rt, catnip_handle focus, int *n, int *total
         if (st->slots[i].in_use && st->slots[i].parent == h) rows++;
     if (rows <= 0) return 0;
 
+    /* A grid counts pages, because what a user sees there is a position on a
+     * page rather than an ordinal: `2/3` answers "how much further is there",
+     * and `8/14` answers a question nobody asked of a wall of pictures. */
+    if (list->layout == CATNIP_LAYOUT_GRID) {
+        if (n) *n = list->selected / CATNIP_GRID_PAGE + 1;
+        if (total) *total = (rows + CATNIP_GRID_PAGE - 1) / CATNIP_GRID_PAGE;
+        return 1;
+    }
     if (n) *n = list->selected + 1; /* one-based for display, converted once */
     if (total) *total = rows;
     return 1;

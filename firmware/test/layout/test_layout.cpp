@@ -429,24 +429,40 @@ int main(void)
     catnip_lvgl_backend_set_bare(false);
     {
         catnip_app_grid *g = catnip_app_grid_new(g_rt);
-        catnip_app_entry apps[6];
+        catnip_app_entry apps[8];
         lv_obj_t *c1;
         lv_obj_t *c6;
-        for (int i = 0; i < 6; i++) {
+        lv_obj_t *c7;
+        for (int i = 0; i < 8; i++) {
             memset(&apps[i], 0, sizeof(apps[i]));
             snprintf(apps[i].id, sizeof(apps[i].id), "app%d", i);
             snprintf(apps[i].name, sizeof(apps[i].name), "App %d", i);
             apps[i].compatible = 1;
         }
         CHECK(g != NULL, "the app grid is built");
-        catnip_app_grid_show(g, apps, 6, false, "app3"); /* app3 unpinned */
+        /* Eight, so there is a second page and a first page that is full. */
+        catnip_app_grid_show(g, apps, 8, false, "app3"); /* app3 unpinned */
+        pass();
         pass();
         shot("app-grid");
         c1 = obj("grid1");
         c6 = obj("grid6");
-        CHECK(c1 && c6, "the cells are drawn");
+        c7 = obj("grid7");
+        CHECK(c1 && c6 && c7, "the cells are drawn");
         CHECK(c1 && c6 && lv_obj_get_y(c6) > lv_obj_get_y(c1),
-              "and wrap onto further rows rather than off the edge");
+              "and wrap onto a second row rather than off the edge");
+        /* Six across two rows, and the seventh is on the next page rather than
+         * below the fold: it exists, it is simply not drawn. */
+        CHECK(c7 && lv_obj_has_flag(c7, LV_OBJ_FLAG_HIDDEN),
+              "the seventh is on the next page, not under the sixth");
+        CHECK(c1 && !lv_obj_has_flag(c1, LV_OBJ_FLAG_HIDDEN) && c6 &&
+                  !lv_obj_has_flag(c6, LV_OBJ_FLAG_HIDDEN),
+              "and all six of this page are up");
+        /* Both rows inside the region: a grid pages, so half a row is not a
+         * thing it can show, and the second row must be whole. */
+        CHECK(c6 && lv_obj_get_y(c6) + (int32_t)lv_obj_get_height(c6) <=
+                        CATNIP_SCREEN_H - CATNIP_FRAME_HINT_H,
+              "and the second row is clear of the hint's strip");
         catnip_app_grid_free(g);
     }
 

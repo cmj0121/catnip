@@ -316,7 +316,12 @@ void apply_text(Entry *e, const char *text, catnip_icon icon, const char *image,
              * is - a directory reads faster as pictures than as a column of
              * names. Square, so two rows fit above the fold. */
             lv_obj_set_width(e->obj, 96);
-            lv_obj_set_height(e->obj, 92);
+            /* Two rows have to fit in what the bar and the hint leave, so the
+             * cell is short of square rather than square: 82 twice with a gap
+             * between is 168, and the region is 170. A cell that kept its
+             * squareness would have put the second row half off the bottom -
+             * and a grid pages, so half a row is not a thing it can show. */
+            lv_obj_set_height(e->obj, 82);
             lv_obj_set_style_pad_all(e->obj, 4, 0);
         }
         /* A mixer column is as tall as the region and shares the width evenly
@@ -1118,6 +1123,12 @@ void apply_selection(Entry *e)
     uint32_t n = lv_obj_get_child_count(e->obj);
 
     bool carousel = e->layout == CATNIP_LAYOUT_CAROUSEL;
+    /* Which page of a grid is up. Derived from the selection rather than kept:
+     * the selection is the one piece of state, and a page that was remembered
+     * separately would be a second one to keep in step with it. Nothing is
+     * selected yet means the first page, which is what a grid opens on. */
+    bool grid = e->layout == CATNIP_LAYOUT_GRID;
+    int page = (grid && e->selected > 0) ? e->selected / CATNIP_GRID_PAGE : 0;
 
     e->sel_dirty = false;
     lv_obj_update_layout(e->obj);
@@ -1126,6 +1137,20 @@ void apply_selection(Entry *e)
         lv_obj_t *child = lv_obj_get_child(e->obj, i);
         bool on = ((int)i == e->selected);
 
+        if (grid) {
+            /* On this page or not drawn at all. Hiding takes a cell out of the
+             * flex flow as well as out of the picture, so the six that are up
+             * fill the region exactly as they would if they were all there was
+             * - which is what makes a page a page rather than a viewport. */
+            if ((int)i / CATNIP_GRID_PAGE == page)
+                lv_obj_remove_flag(child, LV_OBJ_FLAG_HIDDEN);
+            else lv_obj_add_flag(child, LV_OBJ_FLAG_HIDDEN);
+
+            if (on) lv_obj_add_state(child, LV_STATE_CHECKED);
+            else lv_obj_remove_state(child, LV_STATE_CHECKED);
+            /* And no scrolling into view: the page turned, so it is in view. */
+            continue;
+        }
         if (carousel) {
             /* Nothing to contrast with, so nothing is highlighted: the one
              * child that is shown is the selection. */

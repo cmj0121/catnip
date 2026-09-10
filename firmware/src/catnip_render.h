@@ -169,6 +169,21 @@ typedef enum {
     CATNIP_LAYOUT_GRID,
 } catnip_node_layout;
 
+/* How many cells a grid shows at once, and in what shape.
+ *
+ * The columns are fixed at three rather than fitted to the width. A grid that
+ * became four columns on a longer card would move every icon whose position a
+ * user had learned, and the position is most of what a grid of pictures is for.
+ *
+ * A seventh cell is the next page, not a longer scroll: the selection steps
+ * cell by cell and the page turns under it when it steps off. Which is why the
+ * counter over a grid reads `2/3` - the pages - and not `8/14`. Here rather
+ * than in the backend because the counter is derived in portable code and the
+ * drawing is not, and the two have to agree about what a page is. */
+#define CATNIP_GRID_COLS 3
+#define CATNIP_GRID_ROWS 2
+#define CATNIP_GRID_PAGE (CATNIP_GRID_COLS * CATNIP_GRID_ROWS)
+
 enum {
     /* Set on the kinds that can take input - button and list - unless the node
      * is hidden or disabled. The backend builds its input group out of these
