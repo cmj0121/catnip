@@ -7,6 +7,7 @@
 
 #include "../catnip_render.h"
 #include "lvgl_backend.h"
+#include "ui_input_core.h"
 
 namespace {
 
@@ -27,15 +28,31 @@ lv_obj_t *g_counter;
  * the platform, it outlives every screen the app pushes and pops, and an app
  * that could place it could place it in the wrong corner. */
 lv_obj_t *g_hint;
-lv_obj_t *g_arrow[4]; /* up, down, left, right - the order of CATNIP_HINT_* */
+unsigned g_hint_mask; /* which directions are lit, for the draw below */
 unsigned g_last_hint = ~0u;
+
+/* The lit ink: an earthy yellow, the colour of a key you press rather than of
+ * text you read. It is deliberately not the body white - the hint is not
+ * writing, it is a picture of the control under your thumb, and giving it its
+ * own colour is what stops it being read as a label. */
+const uint32_t kColHintLit = 0xD9A441;
 
 /* What the bar was last told, so a pass that changes nothing writes nothing.
  * The bar is redrawn from the tree every loop, and lv_label_set_text on an
  * unchanged string still invalidates the area. */
-char g_last_battery[16];
 char g_last_title[40];
 char g_last_counter[16];
+
+/* The left cell is the battery and the status strip together, composed into one
+ * label so the bar stays three cells and the title stays centred (#83). Held as
+ * their pieces here and recomposed whenever either changes, because they are
+ * written by different callers on different cadences - the battery every two
+ * seconds, the strip whenever a card or the radio comes or goes. */
+int g_batt_pct = -1;
+bool g_has_card;
+bool g_has_radio;
+bool g_syncing;
+char g_last_left[48];
 
 void set_if_changed(lv_obj_t *label, char *last, size_t cap, const char *text)
 {
@@ -55,21 +72,76 @@ lv_obj_t *make_cell(lv_obj_t *parent, lv_text_align_t align, uint32_t ink)
     return label;
 }
 
-/* Where each arrow sits in a small cross. A cross rather than a row, because
- * the shape is the message: a row of four arrows is a legend to be read, and a
- * cross is the thing under the user's thumb. */
+/* The four arrows, drawn rather than typed.
+ *
+ * They were four font glyphs placed by hand at fixed offsets, and they could
+ * not be made symmetric: LVGL's UP/DOWN and LEFT/RIGHT symbols have different
+ * advance widths and heights, so four corner coordinates are four independent
+ * guesses at a shared centre. The result leaned, and the bottom arrow ran past
+ * the box and was clipped.
+ *
+ * Drawn, every arrow comes off the same centre with the same three numbers, so
+ * the cross is symmetric by construction - it cannot drift when a font is
+ * swapped, because no font is involved.
+ *
+ * A cross rather than a row, because the shape is the message: a row of four
+ * arrows is a legend to be read, and a cross is the thing under the thumb. */
+void hint_draw(lv_event_t *e)
+{
+    /* Measured from the centre: the tip, how far back the base is, and how wide
+     * the base is. One set of numbers for all four arrows is what makes them
+     * the same arrow pointing four ways. `kGap` is what is left in the middle -
+     * a compact cross keeps it small, so the four read as one control. */
+    const int kTip = 14; /* centre to point */
+    const int kLen = 7;  /* point back to base */
+    const int kHalf = 4; /* half the base */
+    static const struct {
+        int dx, dy;
+        unsigned bit;
+    } kDir[4] = {
+        {0, -1, CATNIP_HINT_UP},
+        {0, 1, CATNIP_HINT_DOWN},
+        {-1, 0, CATNIP_HINT_LEFT},
+        {1, 0, CATNIP_HINT_RIGHT},
+    };
+    lv_obj_t *obj = (lv_obj_t *)lv_event_get_target(e);
+    lv_layer_t *layer = lv_event_get_layer(e);
+    lv_area_t a;
+    int cx, cy;
+
+    lv_obj_get_coords(obj, &a);
+    cx = a.x1 + lv_area_get_width(&a) / 2;
+    cy = a.y1 + lv_area_get_height(&a) / 2;
+
+    for (int i = 0; i < 4; i++) {
+        int dx = kDir[i].dx, dy = kDir[i].dy;
+        /* The perpendicular, which is what the base's two corners are offset
+         * along - the same trick the diagnostic's arrow uses. */
+        int px = -dy, py = dx;
+        int tx = cx + dx * kTip;
+        int ty = cy + dy * kTip;
+        int bx = cx + dx * (kTip - kLen);
+        int by = cy + dy * (kTip - kLen);
+        lv_draw_triangle_dsc_t tri;
+
+        lv_draw_triangle_dsc_init(&tri);
+        /* Lit is the earthy yellow of a key; dimmed is the faint ink every
+         * other "here but not now" on this device uses. */
+        tri.bg_color = lv_color_hex((g_hint_mask & kDir[i].bit) ? kColHintLit
+                                                                : catnip_color_faint());
+        tri.bg_opa = LV_OPA_COVER;
+        tri.p[0].x = (float)tx;
+        tri.p[0].y = (float)ty;
+        tri.p[1].x = (float)(bx + px * kHalf);
+        tri.p[1].y = (float)(by + py * kHalf);
+        tri.p[2].x = (float)(bx - px * kHalf);
+        tri.p[2].y = (float)(by - py * kHalf);
+        lv_draw_triangle(layer, &tri);
+    }
+}
+
 bool ensure_hint(void)
 {
-    static const struct {
-        const char *glyph;
-        int x, y;
-    } kAt[4] = {
-        {LV_SYMBOL_UP, 12, 0},
-        {LV_SYMBOL_DOWN, 12, 18},
-        {LV_SYMBOL_LEFT, 0, 9},
-        {LV_SYMBOL_RIGHT, 24, 9},
-    };
-
     if (g_hint) return true;
     if (!catnip_lvgl_backend_active()) return false;
     g_hint = lv_obj_create(lv_layer_top());
@@ -82,14 +154,7 @@ bool ensure_hint(void)
      * press would be a second, worse set of controls. */
     lv_obj_remove_flag(g_hint, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(g_hint, LV_OBJ_FLAG_HIDDEN);
-
-    for (int i = 0; i < 4; i++) {
-        g_arrow[i] = lv_label_create(g_hint);
-        if (!g_arrow[i]) return false;
-        lv_label_set_text(g_arrow[i], kAt[i].glyph);
-        lv_obj_set_pos(g_arrow[i], kAt[i].x, kAt[i].y);
-        lv_obj_remove_flag(g_arrow[i], LV_OBJ_FLAG_CLICKABLE);
-    }
+    lv_obj_add_event_cb(g_hint, hint_draw, LV_EVENT_DRAW_MAIN, nullptr);
     return true;
 }
 
@@ -164,16 +229,12 @@ void catnip_frame_set_hint(unsigned mask)
 {
     if (!ensure_hint()) return;
     /* Only on a change, for the reason catnip_frame_show() gives at length:
-     * this display renders the whole panel, so a write that changes nothing
+     * this display renders the whole panel, so a repaint that changes nothing
      * still costs 153,600 bytes over the bus. */
     if (mask == g_last_hint) return;
     g_last_hint = mask;
-    for (int i = 0; i < 4; i++) {
-        bool lit = (mask & (1u << i)) != 0;
-        lv_obj_set_style_text_color(
-            g_arrow[i], lv_color_hex(lit ? catnip_color_text() : catnip_color_faint()),
-            0);
-    }
+    g_hint_mask = mask;
+    lv_obj_invalidate(g_hint);
 }
 
 void catnip_frame_set_title(const char *title)
@@ -182,16 +243,44 @@ void catnip_frame_set_title(const char *title)
     set_if_changed(g_title, g_last_title, sizeof(g_last_title), title ? title : "");
 }
 
+/* Battery, then a glyph for each thing the device has or is doing. Absent
+ * rather than dimmed: a card that is not in the slot and a radio that is down
+ * are nothing to show, where a direction that does nothing is a real state the
+ * control hint has to dim. The sync glyph is here only while a sync is in
+ * flight - a badge that never left would say "this device has networking",
+ * which is not news. */
+void compose_left(void)
+{
+    char buf[48];
+    int off = 0;
+
+    if (g_batt_pct < 0) buf[off] = '\0';
+    else off = snprintf(buf, sizeof(buf), "%s %d%%", LV_SYMBOL_BATTERY_FULL, g_batt_pct);
+    if (g_has_card && off < (int)sizeof(buf))
+        off += snprintf(buf + off, sizeof(buf) - off, "  %s", LV_SYMBOL_SD_CARD);
+    if (g_has_radio && off < (int)sizeof(buf))
+        off += snprintf(buf + off, sizeof(buf) - off, " %s", LV_SYMBOL_WIFI);
+    if (g_syncing && off < (int)sizeof(buf))
+        off += snprintf(buf + off, sizeof(buf) - off, " %s", LV_SYMBOL_REFRESH);
+    set_if_changed(g_battery, g_last_left, sizeof(g_last_left), buf);
+}
+
 void catnip_frame_set_battery(int percent)
 {
-    char buf[16];
-
     if (!ensure_bar()) return;
     /* Not measured draws nothing. A battery that reports -1 and a battery at
      * 0% are different facts, and the bar must not turn one into the other. */
-    if (percent < 0) buf[0] = '\0';
-    else snprintf(buf, sizeof(buf), "%s %d%%", LV_SYMBOL_BATTERY_FULL, percent);
-    set_if_changed(g_battery, g_last_battery, sizeof(g_last_battery), buf);
+    g_batt_pct = percent;
+    compose_left();
+}
+
+void catnip_frame_set_status(bool card, bool radio, bool syncing)
+{
+    if (!ensure_bar()) return;
+    g_has_card = card;
+    g_has_radio = radio;
+    g_syncing = syncing;
+    compose_left();
 }
 
 void catnip_frame_step(catnip_rt *rt)

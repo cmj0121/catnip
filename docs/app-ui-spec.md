@@ -141,15 +141,22 @@ Four small arrows in the bottom-left corner, one per direction, **lit when that
 direction does something here and dimmed when it does not**.
 
 ```text
-        ▲          up      dimmed on the cat: the grid it opens is not built yet
+        ▲          up      lit on the cat: it opens the grid of every app
       ◄   ►        left/right   lit: they step the ring
         ▼          down    lit: it reaches the device page
 ```
 
+It is **drawn, not typed** — four triangles off one centre, in an earthy yellow
+when lit and the faint ink when not. Four font glyphs placed by hand cannot be
+made symmetric, because the arrow characters have different widths and heights,
+so a shared centre is the only thing that keeps a cross square. The colour is
+deliberately not the body white: the hint is not writing, it is a picture of the
+control under your thumb.
+
 The dimming is the whole point, and it is why the hint exists at all. Several
-directions do nothing depending on where you are — up on the cat has no grid to
-open, a page of two buttons has nothing for up and down to move, and the ring at
-the last stop has nowhere further right to go. On a device with no hint, a
+directions do nothing depending on where you are — a page of two buttons has
+nothing for up and down to move, and the ring at the last stop has nowhere
+further right to go. On a device with no hint, a
 direction that does nothing is indistinguishable from one that has stopped
 listening, and the second is what a user concludes.
 
@@ -576,12 +583,16 @@ shortlist, and it stops working the moment it is used as a directory.
 The focused icon is ringed, and its name is the header's `[TITLE]` — so an icon
 needs no label under it and the name is still there to read.
 
-**Pinning moves an app between the two.** Long A on a grid icon offers `Pin`;
-long A on a pinned one offers `Unpin`. The list is a file under `/sd/catnip/`,
-because that is where the platform already keeps its own state and `fs.*`
-already exists — no new capability. Pins live with the card they point at: swap
-the card and they go, which is right, since the apps went with it. The
-built-in planes do not depend on the file and are unaffected.
+**Pinning moves an app between the two.** Long A on a grid icon pins it or
+unpins it — the toggle itself, not a menu offering one choice, because a menu
+with a single item is a press spent on nothing.
+
+The set is kept in the config, beside every other setting, and takes the same
+road: NVS first, mirrored to the card when there is one. It records the apps
+kept _off_ the ring rather than the ones on it, so the default — an empty set —
+is every app pinned, which is what a device with no history should show;
+unpinning is the exception a user makes, and the exceptions are what is worth
+storing.
 
 **Short B returns to where you came from** — from an app to the page or grid
 cell it was launched from, from a plane to home. **Long B goes to the cat from
@@ -595,6 +606,12 @@ look like every other. Your manifest `name` is what the header reads while you
 are focused, so it is read on its own rather than in a column — make it stand
 alone.
 
-Touch reaches all of this without any addition: a swipe steps the carousel and
-scrolls the grid the way the joystick does, and a tap on an icon launches it the
-way short A does.
+Touch reaches most of this without any addition: a swipe steps the carousel and
+scrolls the grid the way the joystick does, and a tap picks out an icon.
+
+**In the grid a tap selects and stops there.** Launching is short A and pinning
+is long A, and a finger does neither. The grid is where a stray touch would cost
+the most — start the wrong app, or unpin the one you rely on — and the guard
+against that is not a confirmation but that touch simply cannot reach the act.
+A tap still moves the ring, so a finger is the fast way to _get_ somewhere and
+the joystick is what commits.

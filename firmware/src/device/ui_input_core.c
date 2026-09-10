@@ -275,6 +275,7 @@ int catnip_ui_input_run(catnip_ui_input *in, catnip_rt *rt, const catnip_ui_samp
     /* After B, so a pass that carries both leaves rather than descends: getting
      * out is the gesture that must never be the one that loses. */
     if (m_down == CATNIP_DIR_LEAVE_DOWN && dpad_down) return CATNIP_UI_GESTURE_SETTINGS;
+    if (m_up == CATNIP_DIR_LEAVE_UP && dpad_up) return CATNIP_UI_GESTURE_GRID;
 
     return CATNIP_UI_GESTURE_NONE;
 }

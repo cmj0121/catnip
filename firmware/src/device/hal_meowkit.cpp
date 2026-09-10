@@ -39,7 +39,7 @@
  *                   I2C bus by number, so this waits on a driver that knows
  *                   which pins are the header's.
  *
- *   service.*       wifi and http are another issue's; this one does not touch
+ *   service.http    another issue's; this one does not touch it. wifi is #82,
  *                   the radio.
  *
  *   fs.reset        sd_reset stays NULL, so fs.reset() reports "not available"
@@ -49,6 +49,7 @@
 #include <Arduino.h>
 
 #include "display.h"
+#include "wifi.h"
 #include "hal_meowkit.h"
 #include "imu.h"
 #include "input.h"
@@ -97,6 +98,27 @@ int hal_battery(void *ud)
  * hook was NULL until now, so the call already answered 0; what changes is that
  * the answer can become a time, and that when it is still 0 that is a measured
  * fact rather than an unwired pointer. */
+int hal_wifi_status(void *ud)
+{
+    (void)ud;
+    return catnip_wifi_status() == CATNIP_WIFI_CONNECTED ? 1 : 0;
+}
+
+const char *hal_wifi_ssid(void *ud)
+{
+    (void)ud;
+    /* The SSID only while it is actually joined, so service.wifi.ssid() answers
+     * NULL to an app whenever status() answers 0 - one truth, not two that can
+     * disagree. */
+    return catnip_wifi_status() == CATNIP_WIFI_CONNECTED ? catnip_wifi_ssid() : nullptr;
+}
+
+int hal_wifi_scan(void *ud, catnip_wifi_ap *out, int max)
+{
+    (void)ud;
+    return catnip_wifi_scan(out, max);
+}
+
 long hal_rtc_now(void *ud)
 {
     (void)ud;
@@ -181,6 +203,11 @@ const catnip_hal *catnip_meowkit_hal_begin(void)
     g_hal.imu = hal_imu;
     g_hal.rtc_now = hal_rtc_now;
     g_hal.rtc_set = hal_rtc_set;
+    /* No longer the stubs this file used to apologise for: an app that asks
+     * service.wifi.status() now gets the radio's real answer (#82). */
+    g_hal.wifi_status = hal_wifi_status;
+    g_hal.wifi_ssid = hal_wifi_ssid;
+    g_hal.wifi_scan = hal_wifi_scan;
 
     /* fs.* is the card and nothing else. The root is the mount point itself,
      * because catnip_api.c reaches the card through plain stdio - fopen,

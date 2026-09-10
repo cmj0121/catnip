@@ -24,7 +24,7 @@ const char kNamespace[] = "catnip";
  * blob from a version this firmware does not know is ignored: reading a key
  * whose meaning has moved is worse than falling back to the defaults, because
  * the defaults are at least right about themselves. */
-const uint32_t kSchema = 1;
+const uint32_t kSchema = 3; /* 3: added the unpinned-apps list (#71) */
 
 const char kKeyVersion[] = "ver";
 const char kKeyScreen[] = "screen";
@@ -32,6 +32,10 @@ const char kKeyIdleOff[] = "idle_off";
 const char kKeyLed[] = "led";
 const char kKeyBreaths[] = "breaths";
 const char kKeyBootMs[] = "boot_ms";
+const char kKeySsid[] = "wifi_ssid";
+const char kKeyPsk[] = "wifi_psk";
+const char kKeyTz[] = "tz_off";
+const char kKeyUnpinned[] = "unpinned";
 
 /* The directory the config file lives in, so a first save on a fresh card does
  * not fail for want of it. */
@@ -62,8 +66,13 @@ void load_nvs(catnip_config *cfg)
     cfg->led_brightness = (uint8_t)p.getUChar(kKeyLed, cfg->led_brightness);
     cfg->led_breaths_per_second = p.getFloat(kKeyBreaths, cfg->led_breaths_per_second);
     cfg->boot_frame_ms = (uint16_t)p.getUShort(kKeyBootMs, cfg->boot_frame_ms);
+    p.getString(kKeySsid, cfg->wifi_ssid, sizeof(cfg->wifi_ssid));
+    p.getString(kKeyPsk, cfg->wifi_psk, sizeof(cfg->wifi_psk));
+    cfg->tz_offset_min = (int16_t)p.getShort(kKeyTz, cfg->tz_offset_min);
+    p.getString(kKeyUnpinned, cfg->unpinned, sizeof(cfg->unpinned));
     p.end();
-    Serial.println("[catnip] prefs: read from NVS");
+    Serial.printf("[catnip] prefs: read from NVS (wifi ssid '%s', tz %+d min)\n",
+                  cfg->wifi_ssid, (int)cfg->tz_offset_min);
 }
 
 /* The card's file, on top of whatever NVS said. See prefs.h for why this one
@@ -108,6 +117,13 @@ void save_nvs(const catnip_config *cfg)
     p.putUChar(kKeyLed, cfg->led_brightness);
     p.putFloat(kKeyBreaths, cfg->led_breaths_per_second);
     p.putUShort(kKeyBootMs, cfg->boot_frame_ms);
+    /* Preferences.getString into a buffer wants the key to exist; putString
+     * with an empty value writes "", which is exactly the "forget this network"
+     * a blank ssid on the card asks for. */
+    p.putString(kKeySsid, cfg->wifi_ssid);
+    p.putString(kKeyPsk, cfg->wifi_psk);
+    p.putShort(kKeyTz, cfg->tz_offset_min);
+    p.putString(kKeyUnpinned, cfg->unpinned);
     p.end();
     Serial.println("[catnip] prefs: saved to NVS");
 }
@@ -121,9 +137,12 @@ void save_card(const catnip_config *cfg)
     cJSON *screen = root ? cJSON_AddObjectToObject(root, "screen") : NULL;
     cJSON *led = root ? cJSON_AddObjectToObject(root, "led") : NULL;
     cJSON *boot = root ? cJSON_AddObjectToObject(root, "boot") : NULL;
+    cJSON *wifi = root ? cJSON_AddObjectToObject(root, "wifi") : NULL;
+    cJSON *clock = root ? cJSON_AddObjectToObject(root, "clock") : NULL;
+    cJSON *apps = root ? cJSON_AddObjectToObject(root, "apps") : NULL;
     char *text = NULL;
 
-    if (!root || !screen || !led || !boot) {
+    if (!root || !screen || !led || !boot || !wifi || !clock || !apps) {
         cJSON_Delete(root);
         return;
     }
@@ -132,6 +151,14 @@ void save_card(const catnip_config *cfg)
     cJSON_AddNumberToObject(led, "brightness", cfg->led_brightness);
     cJSON_AddNumberToObject(led, "breaths_per_second", cfg->led_breaths_per_second);
     cJSON_AddNumberToObject(boot, "frame_ms", cfg->boot_frame_ms);
+    /* Written back exactly as read, because the card is where they came from -
+     * the owner typed the network into this file, and the device is mirroring
+     * its own copy back so a card and NVS never disagree about which one is in
+     * effect. */
+    cJSON_AddStringToObject(wifi, "ssid", cfg->wifi_ssid);
+    cJSON_AddStringToObject(wifi, "psk", cfg->wifi_psk);
+    cJSON_AddNumberToObject(clock, "tz_offset_min", cfg->tz_offset_min);
+    cJSON_AddStringToObject(apps, "unpinned", cfg->unpinned);
     /* `boot.frames` is not written. It names a directory the owner chose and
      * this page cannot change it, so writing it back would be this firmware
      * repeating something it was told - and dropping it, the day a field is

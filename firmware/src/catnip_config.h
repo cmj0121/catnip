@@ -31,6 +31,17 @@ extern "C" {
  * the same reason. */
 #define CATNIP_SCREEN_MIN_PCT 20
 
+/* Room for a WPA2 network and its passphrase, each with its null. 32 is the
+ * SSID limit the standard sets; 63 is the longest a WPA2 pre-shared key can be,
+ * and a 64th slot for the terminator. A key given as 64 hex digits fits too. */
+#define CATNIP_WIFI_SSID_MAX 33
+#define CATNIP_WIFI_PSK_MAX  64
+
+/* Enough for a good many app ids, comma-separated. A device with more unpinned
+ * apps than fit simply keeps the first that fit pinned-off; the rest fall back
+ * to shown, which is the safe direction. */
+#define CATNIP_UNPINNED_MAX 256
+
 typedef struct {
     /* Backlight, 20-100%. See CATNIP_SCREEN_MIN_PCT for the floor. */
     uint8_t screen_brightness;
@@ -55,6 +66,31 @@ typedef struct {
      * An empty directory means the built-in mascot. */
     char boot_frames_dir[CATNIP_CONFIG_PATH_MAX];
     uint16_t boot_frame_ms;
+
+    /* The network to join, and the key to join it with (#82). Empty ssid means
+     * "no network configured", which is a device that never brings the radio
+     * up - most devices, most of the time. The key is kept beside the settings
+     * because it arrives the same way they do, on the card, and is cached to
+     * NVS for the same reason: a device with no card in the slot still has to
+     * reach the clock server on the next boot. */
+    char wifi_ssid[CATNIP_WIFI_SSID_MAX];
+    char wifi_psk[CATNIP_WIFI_PSK_MAX];
+
+    /* Minutes to add to UTC to get local wall time (#84). +480 is Taipei. The
+     * RTC holds local time - what the owner set and what the face shows - so
+     * this is what the NTP sync adds to the UTC it receives before writing the
+     * registers. A signed number of minutes rather than a POSIX TZ string,
+     * because this device has neither the flash nor the audience for one and
+     * Taiwan, where it ships, has no daylight saving to describe. */
+    int16_t tz_offset_min;
+
+    /* The apps kept *off* the carousel (#71), as a comma-separated list of ids.
+     * Off rather than on, so the default - an empty string - is every app
+     * pinned, which is what a fresh device should show: unpinning is the
+     * exception a user makes, and the exceptions are what is worth storing. An
+     * app whose id is in here appears only in the grid that `up` opens, not on
+     * the ring. */
+    char unpinned[CATNIP_UNPINNED_MAX];
 } catnip_config;
 
 /* Fill in the built-in settings. Always succeeds. */

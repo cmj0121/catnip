@@ -21,6 +21,11 @@
 #define MAX_FRAME_MS        10000
 #define MAX_IDLE_OFF_S      3600 /* an hour; past that "never" is the honest word */
 
+/* Twelve hours each way covers every real zone (UTC-12 to UTC+14, the two ends
+ * of the line), with a little past +14 so the exact edge is not on the clamp. */
+#define MIN_TZ_OFFSET_MIN (-12 * 60)
+#define MAX_TZ_OFFSET_MIN (14 * 60)
+
 void catnip_config_defaults(catnip_config *cfg)
 {
     if (!cfg) return;
@@ -57,6 +62,19 @@ static void read_path(const cJSON *parent, const char *name, char *out, size_t o
     strcpy(out, item->valuestring);
 }
 
+/* Read a string field, same rule as a path: one too long to fit is dropped
+ * rather than truncated, because a passphrase with its tail cut off is a
+ * passphrase that silently will not connect. An explicit empty string is
+ * written through, because "" is how a card clears a credential NVS is
+ * holding. */
+static void read_str(const cJSON *parent, const char *name, char *out, size_t out_size)
+{
+    const cJSON *item = cJSON_GetObjectItemCaseSensitive(parent, name);
+    if (!cJSON_IsString(item) || !item->valuestring) return;
+    if (strlen(item->valuestring) >= out_size) return;
+    strcpy(out, item->valuestring);
+}
+
 bool catnip_config_parse(catnip_config *cfg, const char *json, size_t len)
 {
     if (!cfg || !json) return false;
@@ -83,6 +101,23 @@ bool catnip_config_parse(catnip_config *cfg, const char *json, size_t len)
                     &breaths);
         cfg->led_brightness = (uint8_t)brightness;
         cfg->led_breaths_per_second = (float)breaths;
+    }
+
+    const cJSON *wifi = cJSON_GetObjectItemCaseSensitive(root, "wifi");
+    if (cJSON_IsObject(wifi)) {
+        read_str(wifi, "ssid", cfg->wifi_ssid, sizeof(cfg->wifi_ssid));
+        read_str(wifi, "psk", cfg->wifi_psk, sizeof(cfg->wifi_psk));
+    }
+
+    const cJSON *apps = cJSON_GetObjectItemCaseSensitive(root, "apps");
+    if (cJSON_IsObject(apps))
+        read_str(apps, "unpinned", cfg->unpinned, sizeof(cfg->unpinned));
+
+    const cJSON *clock = cJSON_GetObjectItemCaseSensitive(root, "clock");
+    if (cJSON_IsObject(clock)) {
+        double tz = cfg->tz_offset_min;
+        read_number(clock, "tz_offset_min", MIN_TZ_OFFSET_MIN, MAX_TZ_OFFSET_MIN, &tz);
+        cfg->tz_offset_min = (int16_t)tz;
     }
 
     const cJSON *boot = cJSON_GetObjectItemCaseSensitive(root, "boot");

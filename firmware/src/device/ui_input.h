@@ -57,6 +57,10 @@ enum {
      * down is still the next row, which is why a long list cannot fall into
      * the settings page by being scrolled too far. */
     CATNIP_UI_GESTURE_SETTINGS,
+    /* Up, on the home carousel: the grid of every app (#71). Like SETTINGS
+     * (down), a gesture and not an event, because there is no node for "the
+     * grid" until the platform makes one. Only a carousel produces it. */
+    CATNIP_UI_GESTURE_GRID,
 };
 
 void catnip_ui_input_begin(void);

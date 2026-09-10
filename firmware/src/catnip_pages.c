@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "catnip_pins.h"
 #include "catnip_render.h"
 #include "device/rtc_time.h"
 #include "device/ui_input.h"
@@ -16,6 +17,7 @@ struct catnip_pages {
     catnip_pages_env env;
 
     catnip_menu *menu;
+    catnip_app_grid *grid;
     catnip_settings *settings;
     catnip_device_info *info;
 
@@ -50,9 +52,10 @@ catnip_pages *catnip_pages_new(catnip_rt *rt, catnip_shell *shell, catnip_config
     if (env) p->env = *env;
 
     p->menu = catnip_menu_new(rt);
+    p->grid = catnip_app_grid_new(rt);
     p->settings = catnip_settings_new(rt);
     p->info = catnip_device_info_new(rt);
-    if (!p->menu || !p->settings || !p->info) {
+    if (!p->menu || !p->grid || !p->settings || !p->info) {
         catnip_pages_free(p);
         return NULL;
     }
@@ -62,6 +65,7 @@ catnip_pages *catnip_pages_new(catnip_rt *rt, catnip_shell *shell, catnip_config
 void catnip_pages_free(catnip_pages *p)
 {
     if (!p) return;
+    catnip_app_grid_free(p->grid);
     catnip_device_info_free(p->info);
     catnip_settings_free(p->settings);
     catnip_menu_free(p->menu);
@@ -102,7 +106,8 @@ void catnip_pages_rebuild(catnip_pages *p)
      * between one and the next, and an app that needs it has to grey out when
      * it does. */
     catnip_menu_show(p->menu, apps, n,
-                     p->env.card_present ? p->env.card_present(p->env.ud) : false);
+                     p->env.card_present ? p->env.card_present(p->env.ud) : false,
+                     p->cfg->unpinned);
     /* The launcher does not introduce itself in its own bar: it *is* the frame,
      * so the header is empty rather than naming the device at a user holding
      * it. An app that takes over says who it is; the launcher has nothing to
@@ -145,6 +150,20 @@ void catnip_pages_glance(catnip_pages *p)
     snprintf(p->shown_time, sizeof(p->shown_time), "%s", hm);
     snprintf(date, sizeof(date), "%04d-%02u-%02u", (int)y, (unsigned)mo, (unsigned)d);
     catnip_menu_set_glance(p->menu, hm, date, kDay[wd]);
+}
+
+/* The grid of every app (#71), reached by pushing up from the ring. Built from
+ * the shell's whole list, not the pinned subset the carousel shows. */
+static void enter_grid(catnip_pages *p)
+{
+    int n = p->shell ? catnip_shell_count(p->shell) : 0;
+    const catnip_app_entry *apps =
+        (p->shell && n > 0) ? catnip_shell_app(p->shell, 0) : NULL;
+    bool card = p->env.card_present ? p->env.card_present(p->env.ud) : false;
+
+    p->page = CATNIP_PAGE_GRID;
+    catnip_app_grid_show(p->grid, apps, n, card, p->cfg->unpinned);
+    call_title(p, "Apps");
 }
 
 /* What this device is, written out. The strings come from the board because
@@ -211,8 +230,10 @@ static void leave_settings(catnip_pages *p, bool keep, bool home)
 
 const char *catnip_pages_take_launch(catnip_pages *p)
 {
-    if (!p || p->page != CATNIP_PAGE_HOME) return NULL;
-    return catnip_menu_take_pick(p->menu);
+    if (!p) return NULL;
+    if (p->page == CATNIP_PAGE_GRID) return catnip_app_grid_take_pick(p->grid);
+    if (p->page == CATNIP_PAGE_HOME) return catnip_menu_take_pick(p->menu);
+    return NULL;
 }
 
 bool catnip_pages_step(catnip_pages *p, int gesture)
@@ -270,12 +291,39 @@ bool catnip_pages_step(catnip_pages *p, int gesture)
         return true;
     }
 
+    if (p->page == CATNIP_PAGE_GRID) {
+        /* Long-A pins or unpins the selected app: toggle the set, write it down
+         * the same road every setting takes, and redraw the grid so the marker
+         * moves at once. The carousel is rebuilt from the new set the next time
+         * it is shown - on the way back out. */
+        const char *pin = catnip_app_grid_take_pin(p->grid);
+        if (pin) {
+            catnip_pins_toggle(p->cfg->unpinned, sizeof(p->cfg->unpinned), pin);
+            if (p->env.save) p->env.save(p->env.ud, p->cfg);
+            enter_grid(p); /* redraw with the marker in its new place */
+            return true;
+        }
+        /* A pick is read by the caller through take_launch, which tears the
+         * grid down to launch. Out of the grid without a pick is the ring. */
+        if (gesture == CATNIP_UI_GESTURE_HOME || gesture == CATNIP_UI_GESTURE_BACK) {
+            catnip_pages_rebuild(p);
+            return true;
+        }
+        /* A launch was latched: let the caller see it via take_launch, and stay
+         * here until it does. */
+        return true;
+    }
+
     /* On the ring. Down opens the hub: what this device is, and the two places
-     * you would go having read it. Checked before the pick, so a pass that
-     * carries both leaves the menu rather than launching out of a screen that
-     * is going away. */
+     * you would go having read it; up opens the grid of every app. Checked
+     * before the pick, so a pass that carries both leaves the menu rather than
+     * launching out of a screen that is going away. */
     if (gesture == CATNIP_UI_GESTURE_SETTINGS) {
         enter_info(p);
+        return true;
+    }
+    if (gesture == CATNIP_UI_GESTURE_GRID) {
+        enter_grid(p);
         return true;
     }
     return false;

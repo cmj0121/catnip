@@ -260,11 +260,13 @@ void apply_text(Entry *e, const char *text, catnip_icon icon, const char *image)
     bool big = false;
     bool mixer = false;
     bool strip = false;
+    bool grid = false;
     if (e->row) {
         Entry *p = map_find(e->parent);
         big = p && p->layout == CATNIP_LAYOUT_CAROUSEL;
         mixer = p && p->layout == CATNIP_LAYOUT_MIXER;
         strip = p && p->layout == CATNIP_LAYOUT_ROW;
+        grid = p && p->layout == CATNIP_LAYOUT_GRID;
         img = e->img;
         label = e->name;
     } else if (e->kind == CATNIP_NODE_LABEL) {
@@ -282,11 +284,23 @@ void apply_text(Entry *e, const char *text, catnip_icon icon, const char *image)
     if (e->row) {
         /* A carousel cell is the whole region: the picture over its name,
          * centred. A row is a line: the glyph before its name, ranged left. */
-        lv_obj_set_flex_flow(e->obj,
-                             (big || mixer) ? LV_FLEX_FLOW_COLUMN : LV_FLEX_FLOW_ROW);
-        lv_obj_set_flex_align(e->obj,
-                              (big || mixer) ? LV_FLEX_ALIGN_CENTER : LV_FLEX_ALIGN_START,
-                              LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        /* A grid cell is a tile like a carousel cell - the picture over its
+         * name - but small and fixed-width, so a row of them packs across and
+         * wraps. */
+        lv_obj_set_flex_flow(e->obj, (big || mixer || grid) ? LV_FLEX_FLOW_COLUMN
+                                                            : LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(
+            e->obj, (big || mixer || grid) ? LV_FLEX_ALIGN_CENTER : LV_FLEX_ALIGN_START,
+            LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        if (grid) {
+            /* Three across, so the cell is a third of the panel less the gaps:
+             * an icon and nothing else, the way the stock firmware's app screen
+             * is - a directory reads faster as pictures than as a column of
+             * names. Square, so two rows fit above the fold. */
+            lv_obj_set_width(e->obj, 96);
+            lv_obj_set_height(e->obj, 92);
+            lv_obj_set_style_pad_all(e->obj, 4, 0);
+        }
         /* A mixer column is as tall as the region and shares the width evenly
          * with its neighbours, which is the whole point of the shape: height is
          * the number, so every column has to have the same height to be read
@@ -330,14 +344,18 @@ void apply_text(Entry *e, const char *text, catnip_icon icon, const char *image)
          * slots, and this is the path a directory of four hundred rows walks. */
         bool has_picture =
             big && (icon != CATNIP_ICON_NONE || catnip_app_icon_find(image) != nullptr);
-        if (has_picture) lv_obj_add_flag(label, LV_OBJ_FLAG_HIDDEN);
+        /* A grid is pictures, not words: the name is hidden and the icon is the
+         * whole cell, which is what makes it a 3x2 of apps rather than a list
+         * with icons. An app with no icon of its own falls back to the
+         * placeholder glyph, so the cell is never empty. */
+        if (has_picture || grid) lv_obj_add_flag(label, LV_OBJ_FLAG_HIDDEN);
         else lv_obj_remove_flag(label, LV_OBJ_FLAG_HIDDEN);
 
         /* Whether this child is a line in a page or a thing in a region. A page
          * ranges its text left and lets it fill the width; everything else is
          * as wide as itself and centred. Named once rather than spelled out as
          * the same three-way disjunction at each of the three sites below. */
-        bool in_page = !(big || mixer || strip);
+        bool in_page = !(big || mixer || strip || grid);
         lv_obj_set_flex_grow(label, in_page ? 1 : 0);
         lv_obj_set_width(label, in_page ? LV_PCT(100) : LV_SIZE_CONTENT);
         lv_obj_set_style_text_align(
@@ -403,6 +421,11 @@ void apply_text(Entry *e, const char *text, catnip_icon icon, const char *image)
      * LV_IMAGE_ALIGN_STRETCH works its factor out from the source it can see
      * when it is set, so asking for it before there is one scales the picture
      * by nothing and draws a blank. */
+    int grid_px = 0;
+    {
+        Entry *pp = e->row ? map_find(e->parent) : nullptr;
+        if (pp && pp->layout == CATNIP_LAYOUT_GRID) grid_px = 64;
+    }
     const void *app_img = catnip_app_icon_find(image);
     if (app_img) {
         lv_anim_delete(img, NULL);
@@ -412,9 +435,14 @@ void apply_text(Entry *e, const char *text, catnip_icon icon, const char *image)
          * costs a transform on every draw - and a transform is the one thing
          * between "the decoder accepted it" and "it is on the glass" that has
          * no way to report that it did nothing. */
-        lv_obj_set_size(img, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-        lv_image_set_inner_align(img, LV_IMAGE_ALIGN_DEFAULT);
-        lv_image_set_scale(img, 256);
+        if (grid_px) {
+            lv_obj_set_size(img, grid_px, grid_px);
+            lv_image_set_inner_align(img, LV_IMAGE_ALIGN_STRETCH);
+        } else {
+            lv_obj_set_size(img, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+            lv_image_set_inner_align(img, LV_IMAGE_ALIGN_DEFAULT);
+            lv_image_set_scale(img, 256);
+        }
         lv_image_set_src(img, app_img);
         lv_obj_remove_flag(img, LV_OBJ_FLAG_HIDDEN);
     } else if (icon == CATNIP_ICON_MASCOT) {
@@ -445,8 +473,10 @@ void apply_text(Entry *e, const char *text, catnip_icon icon, const char *image)
         lv_obj_remove_flag(img, LV_OBJ_FLAG_HIDDEN);
     } else if (icon >= CATNIP_ICON_FOLDER && icon <= CATNIP_ICON_CLOSE) {
         /* The same twelve shapes at whichever size the shape on screen calls
-         * for: beside a word in a row, alone in the middle of a carousel. */
-        lv_obj_set_size(img, big ? 64 : 14, big ? 64 : 14);
+         * for: beside a word in a row, alone in the middle of a carousel, or a
+         * grid tile between the two. */
+        int px = big ? 64 : grid_px ? grid_px : 14;
+        lv_obj_set_size(img, px, px);
         /* The box is the source's own size, so nothing is scaled; said out
          * loud because the same object may have been the mascot a moment ago -
          * and if it was, its animation is still running and would keep putting
@@ -783,11 +813,30 @@ void apply_flags(Entry *e, unsigned flags)
     bool off = (flags & CATNIP_NODE_DISABLED) != 0;
     if (off) lv_obj_add_state(e->obj, LV_STATE_DISABLED);
     else lv_obj_remove_state(e->obj, LV_STATE_DISABLED);
+    /* A grid cell in the caption role is an app that is there but not pinned
+     * (#71): it is perfectly launchable, so it must not be drawn as disabled -
+     * it is drawn *quieter*. The role is already the platform's word for
+     * emphasis, and on a cell whose whole content is a picture, emphasis is
+     * opacity rather than ink. Two steps apart from disabled so the three
+     * states - pinned, unpinned, unusable - are told apart at a glance.
+     *
+     * Gated on the grid because a caption elsewhere is a line of text, and
+     * fading somebody's status line would be this rule reaching past what it
+     * was for. */
+    Entry *p = e->row ? map_find(e->parent) : nullptr;
+    bool quiet =
+        !off && p && p->layout == CATNIP_LAYOUT_GRID && e->role == CATNIP_STYLE_CAPTION;
+
     /* LV_STATE_DISABLED changes nothing about an image on its own, and a row
      * whose whole content is a picture would look exactly like a usable one.
      * Said here so every kind dims the same way. */
     lv_obj_set_style_image_opa(e->obj, off ? LV_OPA_30 : LV_OPA_COVER, 0);
-    lv_obj_set_style_opa(e->obj, off ? LV_OPA_50 : LV_OPA_COVER, 0);
+    /* The whole cell's opacity, which is what actually reaches the picture: an
+     * image sits in a child object and `image_opa` on the parent does not
+     * inherit down to it, where `opa` does. Three levels, and they have to stay
+     * far enough apart to be told apart - full for a pinned app, faded for one
+     * that is only in the grid, and fainter still for one that cannot run. */
+    lv_obj_set_style_opa(e->obj, off ? LV_OPA_50 : (quiet ? LV_OPA_60 : LV_OPA_COVER), 0);
 }
 
 /* The whole descriptor, every time, with no second diff. The renderer only
@@ -877,20 +926,30 @@ void apply_list_layout(Entry *e)
      * the ground. Left out when the layout was added, which is why the clock's
      * cell came up wearing a list's frame. */
     bool canvas = e->layout == CATNIP_LAYOUT_CANVAS;
+    /* A wrapping grid of tiles - the app grid (#71). It runs across like a strip
+     * but wraps to a new line, which is the one thing a strip will not do. */
+    bool grid = e->layout == CATNIP_LAYOUT_GRID;
 
-    /* Rows and a carousel run down the region; a mixer and a strip run across
-     * it. What separates those two is what their children are - a mixer's are
-     * columns as tall as the region, a strip's are whatever their own text
-     * needs. */
-    lv_obj_set_flex_flow(e->obj,
-                         (mixer || strip) ? LV_FLEX_FLOW_ROW : LV_FLEX_FLOW_COLUMN);
+    /* Rows and a carousel run down the region; a mixer, a strip and a grid run
+     * across it. A grid is the only one that wraps. */
+    lv_obj_set_flex_flow(e->obj, grid               ? LV_FLEX_FLOW_ROW_WRAP
+                                 : (mixer || strip) ? LV_FLEX_FLOW_ROW
+                                                    : LV_FLEX_FLOW_COLUMN);
+    /* The last argument stacks wrapped lines, and only a grid has more than one:
+     * its rows pack from the top so the grid opens on its first row rather than
+     * centred with the ends clipped. */
     lv_obj_set_flex_align(
-        e->obj, (carousel || mixer || strip) ? LV_FLEX_ALIGN_CENTER : LV_FLEX_ALIGN_START,
-        LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_border_width(e->obj, (carousel || mixer || strip || canvas) ? 0 : 1,
-                                  0);
+        e->obj,
+        (carousel || mixer || strip || grid) ? LV_FLEX_ALIGN_CENTER : LV_FLEX_ALIGN_START,
+        LV_FLEX_ALIGN_CENTER, grid ? LV_FLEX_ALIGN_START : LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_border_width(
+        e->obj, (carousel || mixer || strip || canvas || grid) ? 0 : 1, 0);
     lv_obj_set_style_pad_all(e->obj, (carousel || canvas) ? 0 : 2, 0);
     if (canvas) lv_obj_set_style_bg_opa(e->obj, LV_OPA_TRANSP, 0);
+    if (grid) {
+        lv_obj_set_style_pad_row(e->obj, 4, 0);
+        lv_obj_set_style_pad_column(e->obj, 4, 0);
+    }
     if (strip) {
         /* As tall as its contents and as wide as the region, so it centres
          * against the same edges everything else on the screen does. Growing is

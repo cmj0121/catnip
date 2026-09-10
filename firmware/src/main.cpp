@@ -46,6 +46,8 @@
 #include "device/rtc_time.h"
 #include "device/ui_input.h"
 #include "device/ui_input_core.h"
+#include "device/net_time.h"
+#include "device/wifi.h"
 #include "generated/anim_f01_rgb565.h"
 #include "generated/anim_f02_rgb565.h"
 #include "generated/splash_rgb565.h"
@@ -331,6 +333,18 @@ static void apply_config(void)
         if (breath_ms < 4) breath_ms = 4;
         g_frame_ms = breath_ms / 4;
     }
+}
+
+/* Join the network named in the config, and set the clock from it. Does
+ * nothing when no network is configured - which is a device that never brings
+ * the radio up, most devices most of the time. The clock sync brings the radio
+ * up and leaves it up (see net_time.cpp), so this both connects and, if the
+ * server answers, corrects the time. */
+static void maybe_join_network(void)
+{
+    if (!g_cfg.wifi_ssid[0]) return;
+    Serial.printf("[catnip] wifi: '%s' configured, connecting\n", g_cfg.wifi_ssid);
+    catnip_net_time_sync(g_cfg.wifi_ssid, g_cfg.wifi_psk, g_cfg.tz_offset_min);
 }
 
 /* Raise the backlight gradually - an abrupt jump to full reads as a flash. */
@@ -621,7 +635,13 @@ void setup()
     if (card && catnip_diag_marker_present()) {
         Serial.println("[catnip] diag: " CATNIP_DIAG_MARKER_PATH " is on the card");
         enter_diag();
+        return;
     }
+
+    /* Join the configured network, if there is one, and set the clock from it
+     * (#82/#84). At boot and again whenever a card is inserted - see the card
+     * poll in loop(). The radio stays up once joined, so the header shows it. */
+    maybe_join_network();
 }
 
 void loop()
@@ -665,10 +685,22 @@ void loop()
      * it and a card that left takes them away, and either way the list on
      * screen is wrong until it is rebuilt. */
     if (catnip_sd_poll()) {
-        catnip_meowkit_hal_set_fs(catnip_sd_mounted());
+        bool mounted = catnip_sd_mounted();
+        catnip_meowkit_hal_set_fs(mounted);
         if (g_shell && catnip_shell_state(g_shell) != CATNIP_SHELL_RUNNING) {
             catnip_shell_refresh(g_shell);
             catnip_pages_rebuild(g_pages);
+        }
+        /* A card that just arrived brings the owner's settings with it - the
+         * network among them (#82). Re-read them and act on the network, so a
+         * Wi-Fi card plugged into a running device joins without a reboot,
+         * which is the whole point of putting it on the card. */
+        if (mounted) {
+            catnip_config cfg;
+            catnip_prefs_load(&cfg);
+            g_cfg = cfg;
+            apply_settings(&g_cfg);
+            maybe_join_network();
         }
     }
 
@@ -763,6 +795,11 @@ void loop()
 
     if (g_rt && g_be) catnip_render(g_rt, g_be);
 
+    /* Carry any clock sync forward (#84): it joins the network, asks the time
+     * and writes the RTC over several passes, dropping the radio when it is
+     * done. Cheap when idle - it returns at once unless a sync is in flight. */
+    catnip_net_time_poll();
+
     /* The frame, last: the counter it draws is read off the tree the pass above
      * has just reconciled, so it can never show the previous frame's numbers.
      * It is hidden until there is a screen to wrap - a bar over a black panel
@@ -781,6 +818,13 @@ void loop()
     catnip_frame_show_hint(catnip_lvgl_backend_active() && !catnip_shell_bare(g_shell) &&
                            catnip_shell_hints(g_shell));
     catnip_frame_set_hint(catnip_ui_input_hint(g_rt, catnip_ui_input_focused()));
+    /* The status strip in the bar (#83): a card when one is in the slot, the
+     * radio when it is up, and the sync glyph only while a sync is actually in
+     * flight - a badge that was always there would be saying "this device has
+     * networking", which is not information. */
+    catnip_frame_set_status(catnip_sd_mounted(),
+                            catnip_wifi_status() == CATNIP_WIFI_CONNECTED,
+                            catnip_net_time_busy());
     /* Running an app, the shell answers what the header reads - a title the app
      * set, else its manifest name - and only after app code could have run,
      * since that is the only thing that can change the answer and the question

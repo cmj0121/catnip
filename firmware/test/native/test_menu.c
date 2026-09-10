@@ -57,7 +57,7 @@ int main(void)
 
     catnip_app_entry apps[3] = {app("clock", "Clock"), app("files", "File Browser"),
                                 app("paint", "Paint")};
-    catnip_menu_show(m, apps, 3, true);
+    catnip_menu_show(m, apps, 3, true, NULL);
     CHECK(catnip_menu_take_pick(m) == NULL, "nothing is picked before a click");
 
     /* The carousel opens on home, which is the mascot and not an app. */
@@ -80,7 +80,7 @@ int main(void)
      * launch was made from - that is what makes short B return you to the app
      * you just left - and these cases are about starting from the cat. */
     catnip_menu_home(m);
-    catnip_menu_show(m, apps, 3, true);
+    catnip_menu_show(m, apps, 3, true, NULL);
     catnip_rt_dostring(rt, "ui.fire('menu_list', 'prev')", "=t");
     catnip_rt_dostring(rt, "ui.fire('menu_list', 'click')", "=t");
     pick = catnip_menu_take_pick(m);
@@ -89,7 +89,7 @@ int main(void)
 
     /* And forward off the end arrives back at home, which launches nothing. */
     catnip_menu_home(m);
-    catnip_menu_show(m, apps, 3, true);
+    catnip_menu_show(m, apps, 3, true, NULL);
     for (int i = 0; i < 4; i++)
         catnip_rt_dostring(rt, "ui.fire('menu_list', 'next')", "=t");
     catnip_rt_dostring(rt, "ui.fire('menu_list', 'click')", "=t");
@@ -98,7 +98,7 @@ int main(void)
     /* A rebuilt menu picks from the new list, not the old one. */
     catnip_app_entry two[2] = {app("a", "Alpha"), app("b", "Beta")};
     catnip_menu_home(m);
-    catnip_menu_show(m, two, 2, true);
+    catnip_menu_show(m, two, 2, true, NULL);
     catnip_rt_dostring(rt, "ui.fire('menu_list', 'next')", "=t");
     catnip_rt_dostring(rt, "ui.fire('menu_list', 'next')", "=t");
     catnip_rt_dostring(rt, "ui.fire('menu_list', 'click')", "=t");
@@ -113,14 +113,14 @@ int main(void)
     catnip_app_entry needs[1] = {app("files", "File Browser")};
     needs[0].needs_fs = 1;
     catnip_menu_home(m);
-    catnip_menu_show(m, needs, 1, false);
+    catnip_menu_show(m, needs, 1, false, NULL);
     catnip_rt_dostring(rt, "ui.fire('menu_list', 'next')", "=t");
     catnip_rt_dostring(rt, "ui.fire('menu_list', 'click')", "=t");
     CHECK(catnip_menu_take_pick(m) == NULL,
           "an app that needs a card will not launch without one");
 
     catnip_menu_home(m);
-    catnip_menu_show(m, needs, 1, true);
+    catnip_menu_show(m, needs, 1, true, NULL);
     catnip_rt_dostring(rt, "ui.fire('menu_list', 'next')", "=t");
     catnip_rt_dostring(rt, "ui.fire('menu_list', 'click')", "=t");
     pick = catnip_menu_take_pick(m);
@@ -128,13 +128,13 @@ int main(void)
 
     /* No apps at all still has home, and home launches nothing. */
     catnip_menu_home(m);
-    catnip_menu_show(m, NULL, 0, true);
+    catnip_menu_show(m, NULL, 0, true, NULL);
     catnip_rt_dostring(rt, "ui.fire('menu_list', 'next')", "=t");
     catnip_rt_dostring(rt, "ui.fire('menu_list', 'click')", "=t");
     CHECK(catnip_menu_take_pick(m) == NULL, "an empty carousel latches no pick");
 
     /* The status line takes text without a screen having to know its shape. */
-    catnip_menu_show(m, apps, 3, true);
+    catnip_menu_show(m, apps, 3, true, NULL);
     /* The battery moved into the frame's bar, which is the platform's and not
      * the menu's - so there is no status line here to set any more. */
 
@@ -143,15 +143,15 @@ int main(void)
      * you had just been looking at was the one exception. Found by id, so an
      * app that is no longer installed quietly means home. */
     catnip_menu_home(m);
-    catnip_menu_show(m, apps, 3, true);
+    catnip_menu_show(m, apps, 3, true, NULL);
     catnip_rt_dostring(rt, "ui.fire('menu_list', 'click', 3)", "=t");
     CHECK(catnip_menu_take_pick(m) != NULL, "a pick is latched");
-    catnip_menu_show(m, apps, 3, true);
+    catnip_menu_show(m, apps, 3, true, NULL);
     CHECK(strcmp(catnip_menu_focus_name(m), "File Browser") == 0,
           "and the rebuild opens on the app that was launched");
 
     catnip_app_entry gone[1] = {app("clock", "Clock")};
-    catnip_menu_show(m, gone, 1, true);
+    catnip_menu_show(m, gone, 1, true, NULL);
     CHECK(strcmp(catnip_menu_focus_name(m), "") == 0,
           "an app that is no longer there means home");
 

@@ -483,6 +483,7 @@ static void desc_build(ctx *c, int node, catnip_node_desc *d)
             else if (lay && strcmp(lay, "mixer") == 0) d->layout = CATNIP_LAYOUT_MIXER;
             else if (lay && strcmp(lay, "row") == 0) d->layout = CATNIP_LAYOUT_ROW;
             else if (lay && strcmp(lay, "canvas") == 0) d->layout = CATNIP_LAYOUT_CANVAS;
+            else if (lay && strcmp(lay, "grid") == 0) d->layout = CATNIP_LAYOUT_GRID;
             lua_pop(L, 1);
         }
 

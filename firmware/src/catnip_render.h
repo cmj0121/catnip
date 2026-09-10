@@ -152,6 +152,12 @@ typedef enum {
      * for it - the cell is the whole region, and a face is what belongs in a
      * whole region. */
     CATNIP_LAYOUT_CANVAS,
+    /* A wrapping grid of equal cells - a row that runs on until it fills the
+     * width, then starts another. The app grid (#71) is what asked for it: all
+     * of a device's apps at once is neither a column (one long scroll) nor a
+     * carousel (one at a time). Each cell is a focusable child, so the ring
+     * walks them in reading order. */
+    CATNIP_LAYOUT_GRID,
 } catnip_node_layout;
 
 enum {

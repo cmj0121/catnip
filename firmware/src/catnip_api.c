@@ -161,6 +161,39 @@ static int l_wifi_ssid(lua_State *L)
     return 1;
 }
 
+/* Nearby access points, or nil while a scan is still running - which is the
+ * signal to ask again, not that the air is empty. Each entry is a table with
+ * ssid, rssi and channel; the list is sorted strongest first, as the driver
+ * returns it. */
+static int l_wifi_scan(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+    catnip_wifi_ap aps[24];
+    int n;
+
+    if (!h || !h->wifi_scan) {
+        lua_pushnil(L);
+        return 1;
+    }
+    n = h->wifi_scan(h->ud, aps, (int)(sizeof(aps) / sizeof(aps[0])));
+    if (n < 0) {
+        lua_pushnil(L); /* still scanning */
+        return 1;
+    }
+    lua_createtable(L, n, 0);
+    for (int i = 0; i < n; i++) {
+        lua_createtable(L, 0, 3);
+        lua_pushstring(L, aps[i].ssid);
+        lua_setfield(L, -2, "ssid");
+        lua_pushinteger(L, aps[i].rssi);
+        lua_setfield(L, -2, "rssi");
+        lua_pushinteger(L, aps[i].channel);
+        lua_setfield(L, -2, "channel");
+        lua_rawseti(L, -2, i + 1);
+    }
+    return 1;
+}
+
 static int l_http_get(lua_State *L)
 {
     const catnip_hal *h = hal_of(L);
@@ -433,6 +466,7 @@ int catnip_api_open(catnip_rt *rt, const catnip_hal *hal)
                                           {NULL, NULL}};
     static const luaL_Reg service_funcs[] = {{"wifi_status", l_wifi_status},
                                              {"wifi_ssid", l_wifi_ssid},
+                                             {"wifi_scan", l_wifi_scan},
                                              {"http_get", l_http_get},
                                              {NULL, NULL}};
     static const luaL_Reg fs_funcs[] = {{"read", l_fs_read},     {"write", l_fs_write},
@@ -448,9 +482,11 @@ int catnip_api_open(catnip_rt *rt, const catnip_hal *hal)
 
     /* Reshape service into nested wifi/http tables + kv, over the C funcs. */
     static const char SERVICE_LUA[] =
-        "service.wifi = { status = service.wifi_status, ssid = service.wifi_ssid }\n"
+        "service.wifi = { status = service.wifi_status, ssid = service.wifi_ssid,\n"
+        "                 scan = service.wifi_scan }\n"
         "service.http = { get = service.http_get }\n"
-        "service.wifi_status, service.wifi_ssid, service.http_get = nil, nil, nil\n";
+        "service.wifi_status, service.wifi_ssid, service.wifi_scan = nil, nil, nil\n"
+        "service.http_get = nil\n";
     if (luaL_dostring(L, SERVICE_LUA) != LUA_OK) {
         catnip_rt_report_error(rt, L);
         return -1;

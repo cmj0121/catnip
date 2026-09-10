@@ -42,7 +42,11 @@ catnip_menu *catnip_menu_new(catnip_rt *rt);
  * fs.* raises rather than answering "empty" to a device with no card, so
  * starting such an app would only fault it back to this screen, which reads as
  * the device ignoring the press. */
-void catnip_menu_show(catnip_menu *m, const catnip_app_entry *apps, int n, bool fs_ready);
+/* `unpinned` is the comma-separated set of app ids kept off the ring (#71): an
+ * app appears on the carousel unless its id is in it. NULL or "" shows every
+ * app, which is the default a fresh device has. */
+void catnip_menu_show(catnip_menu *m, const catnip_app_entry *apps, int n, bool fs_ready,
+                      const char *unpinned);
 
 /* The id of the app the user activated since the last call, or NULL when none.
  * Reading it clears the latch, so it reports a pick to exactly one caller. The

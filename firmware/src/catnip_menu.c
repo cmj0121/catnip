@@ -1,6 +1,8 @@
 /* catnip_menu.c - see catnip_menu.h. */
 #include "catnip_menu.h"
 
+#include "catnip_pins.h"
+
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
@@ -183,10 +185,17 @@ catnip_menu *catnip_menu_new(catnip_rt *rt)
     return m;
 }
 
-void catnip_menu_show(catnip_menu *m, const catnip_app_entry *apps, int n, bool fs_ready)
+void catnip_menu_show(catnip_menu *m, const catnip_app_entry *apps, int n, bool fs_ready,
+                      const char *unpinned)
 {
     lua_State *L;
     int i;
+    /* The apps to show on the ring: every one whose id is not in the unpinned
+     * set. Filtered into a local list first, so everything below - the ordering,
+     * the id and name arrays, the focus - works over the pinned apps and knows
+     * nothing about the ones left in the grid. */
+    const catnip_app_entry *pinned[MENU_MAX_APPS];
+    int np = 0;
 
     if (!m) return;
     L = catnip_rt_lua(m->rt);
@@ -194,6 +203,11 @@ void catnip_menu_show(catnip_menu *m, const catnip_app_entry *apps, int n, bool 
 
     if (n < 0) n = 0;
     if (n > MENU_MAX_APPS) n = MENU_MAX_APPS;
+    for (i = 0; i < n; i++)
+        if (!catnip_pins_contains(unpinned ? unpinned : "", apps[i].id))
+            pinned[np++] = &apps[i];
+    apps = NULL; /* everything below uses the filtered list; guard against a slip */
+    n = np;
     m->n = n;
     m->pick = -1;
     m->focus = 1;
@@ -215,12 +229,12 @@ void catnip_menu_show(catnip_menu *m, const catnip_app_entry *apps, int n, bool 
                                * order, so nothing after this needs it */
     int k = 0;
     for (i = 0; i < n; i++)
-        if (apps[i].glance[0] == '\0') order[k++] = i;
+        if (pinned[i]->glance[0] == '\0') order[k++] = i;
     for (i = 0; i < n; i++)
-        if (apps[i].glance[0] != '\0') order[k++] = i;
+        if (pinned[i]->glance[0] != '\0') order[k++] = i;
 
     for (i = 0; i < n; i++) {
-        const catnip_app_entry *a = &apps[order[i]];
+        const catnip_app_entry *a = pinned[order[i]];
         snprintf(m->ids[i], sizeof(m->ids[i]), "%s", a->id);
         snprintf(m->names[i], sizeof(m->names[i]), "%s", a->name);
         m->has_glance[i] = a->glance[0] != '\0';
