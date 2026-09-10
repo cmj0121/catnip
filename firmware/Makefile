@@ -78,7 +78,7 @@ LVGL_LIB := $(BUILD)/liblvgl.a
 # reimplementation would be a test of the reimplementation.
 GUI_SRC  := $(SRCDIR)/device/lvgl_backend.cpp $(SRCDIR)/device/frame.cpp
 GUI_CSRC := $(SRCDIR)/device/catnip_icon_img.c $(SRCDIR)/device/catnip_mascot_img.c \
-            $(SRCDIR)/device/catnip_font_display.c test/host/host_lvgl.c \
+            $(SRCDIR)/device/catnip_font.c test/host/host_lvgl.c \
             test/host/host_png.c
 LAYOUT_SRC := $(wildcard test/layout/*.cpp)
 LAYOUT_BIN := $(patsubst test/layout/%.cpp,$(BUILD)/%,$(LAYOUT_SRC))

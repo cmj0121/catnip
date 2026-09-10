@@ -12,6 +12,7 @@
 
 #include "../catnip_render.h"
 #include "board.h"
+#include "catnip_font.h"
 #include "lvgl_backend.h"
 #include "ui_input_core.h"
 
@@ -257,7 +258,7 @@ bool ensure_actions(void)
         g_act_icon[i] = lv_image_create(cell);
         g_act_name[i] = lv_label_create(cell);
         if (!g_act_icon[i] || !g_act_name[i]) return false;
-        lv_obj_set_style_text_font(g_act_name[i], &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_font(g_act_name[i], &catnip_font_16, 0);
         /* An ellipsis rather than a clip. A name cut off mid-glyph reads as a
          * different word, and the one thing a user must be able to trust about
          * this bar is which of the three they are about to run - so a name too
@@ -317,7 +318,7 @@ bool ensure_busy(void)
     }
     g_busy_word = lv_label_create(g_busy);
     if (!g_busy_word) return false;
-    lv_obj_set_style_text_font(g_busy_word, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(g_busy_word, &catnip_font_16, 0);
     lv_obj_set_style_text_color(g_busy_word, lv_color_hex(catnip_color_faint()), 0);
     /* Under the ring rather than at the foot of the panel: the two are one
      * thing being said, and a word alone at the bottom of an empty screen would
