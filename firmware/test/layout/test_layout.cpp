@@ -257,11 +257,20 @@ int main(void)
      * bottom line starts at the panel's edge rather than clearing a corner
      * nothing is drawn in. */
     catnip_lvgl_backend_set_bare(true);
-    run("ui.screen{ id = 'face',\n"
-        "  ui.label{ id = 'date', text = '2026-09-10', style = 'body' },\n"
+    run("local days = {}\n"
+        "for i, d in ipairs({ 'S', 'M', 'T', 'W', 'T', 'F', 'S' }) do\n"
+        "  days[i] = ui.label{ id = 'day' .. i, text = d,\n"
+        "                      style = i == 5 and 'body' or 'caption' }\n"
+        "end\n"
+        "local week = ui.list{ id = 'week', layout = 'row', align = 'center' }\n"
+        "ui.screen{ id = 'face',\n"
+        "  ui.label{ id = 'date', text = '2026-09-10', style = 'title',\n"
+        "           align = 'left' },\n"
         "  ui.label{ id = 'time', text = '14:32', style = 'display' },\n"
-        "  ui.label{ id = 'week', text = ' S  M  T  W [T] F  S ', style = 'body' },\n"
-        "  ui.label{ id = 'src', text = 'NTP 14:30', style = 'body' } }\n");
+        "  week,\n"
+        "  ui.label{ id = 'src', text = 'NTP 14:30', style = 'body' } }\n"
+        "week:set_children(days)\n");
+    pass();
     pass();
     shot("clock-face");
     {
@@ -274,6 +283,20 @@ int main(void)
         CHECK(date && week && src && time_, "the face is drawn");
         CHECK(date && lv_obj_get_y(date) < floor_,
               "the one named before the centrepiece is the top line");
+        /* And in the corner it asked for. A line with nothing else on it is
+         * both the first and the last thing on its line, and the order alone
+         * cannot break that tie - `align` is what does. */
+        CHECK(date && lv_obj_get_x(date) < CATNIP_SCREEN_W / 4,
+              "and `align` put it at the left end rather than the middle");
+        /* Seven letters at one size, so the line does not shift at midnight
+         * when today moves from one of them to the next. */
+        {
+            lv_obj_t *d1 = obj("day1");
+            lv_obj_t *d5 = obj("day5");
+            CHECK(d1 && d5, "the strip is seven letters");
+            CHECK(d1 && d5 && lv_obj_get_height(d1) == lv_obj_get_height(d5),
+                  "the lit one is the same size as the rest, and differs only in ink");
+        }
         CHECK(week && src && lv_obj_get_y(week) > floor_ && lv_obj_get_y(src) > floor_,
               "and the two named after it are the bottom line");
         /* The bottom line fits on the panel, both of it. Everything on a face
@@ -287,12 +310,31 @@ int main(void)
               "which runs first-to-the-left, last-to-the-right");
         CHECK(src && lv_obj_get_x(src) + (int)lv_obj_get_width(src) > CATNIP_SCREEN_W / 2,
               "so the source line ends up in the bottom-right corner");
-        /* The corner rule, from the other side. A list reserves it because its
-         * rows reach it; a bare face reserves nothing, because nothing is drawn
-         * over one - and reserving it anyway would be the platform taking 34 px
-         * for a hint it is not going to draw. */
-        CHECK(week && lv_obj_get_x(week) < CATNIP_FRAME_HINT_W,
-              "and nothing is held back for a hint a bare screen never gets");
+        /* The strip is centred on the panel and the source line is hard against
+         * the right edge: the two share the bottom line, and the one that is
+         * looked at rather than read is the one in the middle of it. */
+        CHECK(week && lv_obj_get_x(week) > CATNIP_SCREEN_W / 4 &&
+                  lv_obj_get_x(week) + (int)lv_obj_get_width(week) <
+                      3 * CATNIP_SCREEN_W / 4,
+              "and `align` put the strip in the middle of the bottom line");
+        CHECK(src &&
+                  lv_obj_get_x(src) + (int)lv_obj_get_width(src) >= CATNIP_SCREEN_W - 12,
+              "with the source line hard against the right edge");
+    }
+    /* The corner rule, from the other side, on a face that says no `align` at
+     * all. A list reserves the hint's corner because its rows reach it; a bare
+     * face reserves nothing, because nothing is drawn over one - and reserving
+     * it anyway would be the platform taking 34 px for a hint it is not going
+     * to draw. */
+    run("ui.screen{ id = 'plain_face',\n"
+        "  ui.label{ id = 'pf_time', text = '14:32', style = 'display' },\n"
+        "  ui.label{ id = 'pf_a', text = 'left' },\n"
+        "  ui.label{ id = 'pf_b', text = 'right' } }\n");
+    pass();
+    {
+        lv_obj_t *a = obj("pf_a");
+        CHECK(a && lv_obj_get_x(a) < CATNIP_FRAME_HINT_W,
+              "a bare face holds nothing back for a hint it never gets");
     }
     catnip_lvgl_backend_set_bare(false);
 

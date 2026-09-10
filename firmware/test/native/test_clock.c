@@ -225,6 +225,21 @@ static int press_back(void)
     return exited;
 }
 
+/* Which role a named node is in - what decides its ink, which is how the strip
+ * says which letter is today. */
+static const char *style_of(const char *id)
+{
+    static char buf[32];
+    lua_State *L = catnip_rt_lua(g_rt);
+    char q[96];
+    snprintf(q, sizeof(q), "local n = ui.get('%s') S = n and n.style or ''", id);
+    catnip_rt_dostring(g_rt, q, "=q");
+    lua_getglobal(L, "S");
+    snprintf(buf, sizeof(buf), "%s", lua_tostring(L, -1) ? lua_tostring(L, -1) : "");
+    lua_pop(L, 1);
+    return buf;
+}
+
 /* What a named node says, read the way a user reads it. */
 static const char *text_of(const char *id)
 {
@@ -290,13 +305,16 @@ int main(void)
     CHECK(live("face_time"), "the root screen shows a time");
     CHECK(live("face_date") && live("face_week") && live("face_src"),
           "with a date, a weekday strip and a source line around it");
+    CHECK(live("day1") && live("day7"), "and the strip is seven letters, not one line");
     CHECK(!live("setter"), "and no setter until one is asked for");
     CHECK_STR(text_of("face_time"), "14:32", "the time reads as the RTC says");
     CHECK_STR(text_of("face_date"), "2026-09-10", "and the date beside it");
-    /* Thursday: the fifth of seven, counting from Sunday. Brackets rather than
-     * brightness, so the assertion is on the text and not on a colour. */
-    CHECK_STR(text_of("face_week"), " S  M  T  W [T] F  S ",
-              "and today is the bracketed letter in the strip");
+    /* Thursday: the fifth of seven, counting from Sunday. Which one is lit is a
+     * role and not a colour, so the assertion is on the role - the platform is
+     * what turns `body` into the bright ink. */
+    CHECK_STR(style_of("day5"), "body", "today's letter is the bright one");
+    CHECK_STR(style_of("day4"), "caption", "and yesterday's is not");
+    CHECK_STR(text_of("day5"), "T", "Thursday, the fifth counting from Sunday");
 
     printf("where the time came from lives on the face and only here\n");
     CHECK_STR(text_of("face_src"), "", "nothing said when nothing synced it");
@@ -353,8 +371,8 @@ int main(void)
     g_ntp_last = 0;
     advance(2000);
     CHECK_STR(text_of("face_time"), "--:--", "no confident midnight");
-    CHECK_STR(text_of("face_week"), " S  M  T  W  T  F  S ",
-              "and no letter bracketed, because none of them is today");
+    CHECK_STR(style_of("day5"), "caption",
+              "and no letter is lit, because none of them is today");
     CHECK_STR(text_of("face_src"), "press A to set it", "it says what to press");
 
     printf("setting it is two levels, and B climbs back out of both\n");

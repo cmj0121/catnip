@@ -602,39 +602,53 @@ a clock being looked at should have nothing on it that is about the device.
 
 ```text
 ┌────────────────────────────────────────────────┐
-│                  2026-09-10                    │  body
+│  2026-09-10                                    │  title
 │                                                │
 │                   14:32                        │  display
 │                                                │
-│  S M T W [T] F S                  NTP 14:30    │  body
+│           S M T W [T] F S         NTP 14:30    │  a strip, and body
 └────────────────────────────────────────────────┘
 ```
 
 Three layers, three sizes, and **none of them asks to be read twice**: the date
-waits above for whoever wants it, the time meets the eye in the middle, and the
-weekday is a row of letters with today's in brackets. The strip earns its place
-by not needing to be read at all — seven positions, and the marked one is the
-answer.
+waits in the corner for whoever wants it, the time meets the eye in the middle,
+and the weekday is seven letters with today's the bright one. The strip earns
+its place by not needing to be read at all — seven positions, and the lit one is
+the answer.
 
 ```lua
+local letters = {}
+for i, d in ipairs{ "S", "M", "T", "W", "T", "F", "S" } do
+  letters[i] = ui.label{ id = "day" .. i, text = d, style = "caption" }
+end
+local week = ui.list{ id = "week", layout = "row", align = "center" }
+
 ui.screen{
-  ui.label{ id = "date", text = "2026-09-10", style = "body" },
+  ui.label{ id = "date", text = "2026-09-10", style = "title", align = "left" },
   ui.label{ id = "time", text = "14:32",      style = "display" },
-  ui.label{ id = "week", text = "S M T W [T] F S", style = "body" },
+  week,
   ui.label{ id = "src",  text = "NTP 14:30",  style = "body" },
 }
+week:set_children(letters)      -- and today's is set to `body`
 ```
 
-**The order is the whole layout.** The date is named before the centrepiece, so
-it is the line above; the strip and the source line are named after it, so they
-are the line below, first-to-the-left and last-to-the-right. Nothing says a
-corner and the source line still lands in one.
+**Seven nodes, because a node carries one role.** "These seven letters, with
+today's brighter than the rest" is seven roles or it is nothing, and that is
+what `layout = "row"` is for. A strip gives all of them **one size** and lets
+them differ only in ink, so the line does not shift under the eye at midnight —
+which is the one moment nobody is watching it.
 
-**No `align` here, and the corner is why.** A line at the foot of a _list_ asks
-for `align = "right"` to clear the control hint; a bare face has no hint drawn
-over it and no corner to clear, and the canvas has already put the last child at
-the right edge. Asking twice would cost the wide box that ranging text right
-takes, and that box would sit on top of the strip.
+**The order is the layout, and `align` breaks the ties the order cannot.** The
+date is named before the centrepiece, so it is the line above; the strip and the
+source line are named after it, so they are the line below, first-to-the-left
+and last-to-the-right — which is why the source line lands in the bottom-right
+corner with nothing saying a coordinate.
+
+The two that _do_ say `align` are the two the order could not settle. A line
+with nothing else on it is both the first and the last thing on its line, so
+"centred" was a guess: `align = "left"` is what puts the date in the corner. And
+the strip is the first of two on the bottom line, which would range it left,
+where the thing that is looked at rather than read belongs in the middle.
 
 **Where the time came from lives here and only here.** Not on the carousel, where
 it would be three quarters of what is on screen; and not on the setter, where a

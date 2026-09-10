@@ -68,16 +68,25 @@ local function weekday(z) return (z + 4) % 7 end
 
 -- ---------------------------------------------------------------- the face --
 
--- The strip is one label rather than seven, and today is marked by brackets
--- rather than by brightness. Seven nodes would be seven roles to keep in step
--- for one letter's worth of difference; the brackets say the same thing in the
--- one role the line already has, and say it in a form that survives a theme.
-local function strip(wd)
-  local out = {}
-  for i, d in ipairs(DAYS) do
-    out[i] = (i == wd + 1) and ("[" .. d .. "]") or (" " .. d .. " ")
+-- Seven letters, and today is the bright one. It is seven nodes because a node
+-- carries one role and "these seven, with today's brighter than the rest" is
+-- seven roles - which is exactly what `layout = "row"` exists for. The strip
+-- gives them all one size, so the line does not shift under the eye at
+-- midnight, and lets them differ in ink, which is the whole of what is being
+-- said.
+--
+-- It was one label with brackets round today, which said the same thing in one
+-- node and said it louder than it deserved: the strip earns its place by not
+-- needing to be read at all, and punctuation is read.
+local letters = {}
+for i, d in ipairs(DAYS) do
+  letters[i] = ui.label{ id = "day" .. i, text = d, style = "caption" }
+end
+
+local function light(wd)
+  for i = 1, #letters do
+    letters[i].style = (i == wd + 1) and "body" or "caption"
   end
-  return table.concat(out, "")
 end
 
 -- Where the time came from, and only here.
@@ -106,9 +115,19 @@ end
 -- waits in a corner for whoever wants it, the time meets the eye in the middle,
 -- the strip is read without being read at all, and the source line is working
 -- rather than an answer - so it is the one in the caption role.
-local face_date = ui.label{ id = "face_date", text = "", style = "body" }
+-- Top-left and a step up from the body: it is the heading of the face, the one
+-- line that says which day all of this is about, and it waits in a corner for
+-- whoever wants it. `align` is what puts it in that corner - a line with
+-- nothing else on it is both the first and the last thing on its line, and the
+-- canvas would otherwise centre it on a guess.
+local face_date = ui.label{ id = "face_date", text = "", style = "title",
+                            align = "left" }
 local face_time = ui.label{ id = "face_time", text = "--:--", style = "display" }
-local face_week = ui.label{ id = "face_week", text = "", style = "body" }
+-- Centred at the foot, with the source line to its right: the two share the
+-- bottom line and the strip is the one that should be in the middle of it,
+-- because it is the one that is looked at rather than read.
+local face_week = ui.list{ id = "face_week", layout = "row", align = "center" }
+face_week:set_children(letters)
 -- In the body role, not the caption one. A caption is a footnote, and where the
 -- time came from is not a footnote: on the one screen where a doubt about the
 -- time can be settled, it is the sentence that settles it, so it is written in
@@ -131,7 +150,7 @@ local function paint_face()
   if now == 0 then
     face_time.text = "--:--"
     face_date.text = ""
-    face_week.text = strip(-1)
+    light(-1)
     face_src.text = "press A to set it"
     return
   end
@@ -140,7 +159,7 @@ local function paint_face()
   face_time.text = string.format("%02d:%02d", (now % 86400) // 3600,
                                  (now % 3600) // 60)
   face_date.text = string.format("%04d-%02d-%02d", y, m, d)
-  face_week.text = strip(weekday(days))
+  light(weekday(days))
   face_src.text = source_line()
 end
 

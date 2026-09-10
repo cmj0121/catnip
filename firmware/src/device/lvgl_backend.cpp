@@ -76,6 +76,7 @@ struct Entry {
     catnip_style_role role;    /* kept because a canvas places by role */
     bool sel_dirty;            /* list only: the highlight has to be re-applied */
     bool laid_out;             /* list only: apply_list_layout has run at least once */
+    catnip_text_align align;   /* which edge it asked for, for a canvas to place it by */
     bool row;                  /* list child: internal flex row of image + label */
     /* The widgets inside a row, held rather than looked up by child index: a
      * mixer column adds two more and the order on screen is not the order they
@@ -162,8 +163,14 @@ void mark_list(catnip_handle parent)
 
 /* ---- style roles -------------------------------------------------------- */
 
-const lv_font_t *role_font(catnip_style_role role, bool canvas)
+const lv_font_t *role_font(catnip_style_role role, bool canvas, bool strip)
 {
+    /* A strip is seven letters that have to line up, so its prose roles are one
+     * size and differ only in ink - which is what makes "today's is the bright
+     * one" a thing you see rather than a thing you read. Roles at different
+     * sizes would make the line shift under the eye at midnight, which is the
+     * one moment nobody is looking at it. */
+    if (strip && role != CATNIP_STYLE_DISPLAY) return &lv_font_montserrat_16;
     /* In a canvas *cell* the prose roles differ only in ink. A cell is a
      * fraction of the panel with one thing in it to be looked at, so a heading
      * and a caption at different sizes would only make the labels argue with
@@ -247,16 +254,25 @@ bool on_canvas(const Entry *e)
     return p && p->kind == CATNIP_NODE_LIST && p->layout == CATNIP_LAYOUT_CANVAS;
 }
 
+/* Whether this node is one letter of a strip. */
+bool in_strip(const Entry *e)
+{
+    Entry *p = map_find(e->parent);
+
+    return p && p->kind == CATNIP_NODE_LIST && p->layout == CATNIP_LAYOUT_ROW;
+}
+
 void apply_style(Entry *e, catnip_style_role role)
 {
     bool canvas = on_canvas(e);
+    bool strip = in_strip(e);
 
     if (e->kind == CATNIP_NODE_BUTTON) {
         uint32_t fill = role_fill(role);
         lv_obj_t *label = button_label(e->obj);
 
         lv_obj_set_style_bg_color(e->obj, lv_color_hex(fill), 0);
-        lv_obj_set_style_text_font(label, role_font(role, canvas), 0);
+        lv_obj_set_style_text_font(label, role_font(role, canvas, strip), 0);
         /* Black on the two loud fills and white on the quiet one, so the text
          * stays legible whichever role a button is given. */
         lv_obj_set_style_text_color(
@@ -265,7 +281,7 @@ void apply_style(Entry *e, catnip_style_role role)
     }
     lv_obj_t *text = e->row ? e->name : e->obj;
     if (!text) return;
-    lv_obj_set_style_text_font(text, role_font(role, canvas), 0);
+    lv_obj_set_style_text_font(text, role_font(role, canvas, strip), 0);
     lv_obj_set_style_text_color(text, lv_color_hex(role_ink(role)), 0);
 }
 
@@ -821,6 +837,30 @@ void relayout_canvas(Entry *screen)
         lv_obj_set_width(obj, LV_SIZE_CONTENT);
         lv_obj_set_height(obj, LV_SIZE_CONTENT);
 
+        /* Which end of its line a child asked for, when it asked. The order it
+         * was named in is the default and is right nearly always; `align` is
+         * what breaks the tie the default cannot - a line with one thing on it
+         * is both the first and the last thing on it, and "centred" was a guess
+         * at which of the two was meant. */
+        Entry *ce = map_find((catnip_handle)(intptr_t)lv_obj_get_user_data(obj));
+        catnip_text_align want = ce ? ce->align : CATNIP_TEXT_ALIGN_DEFAULT;
+        bool bottom = (int32_t)i > centre;
+
+        if ((int32_t)i != centre && want != CATNIP_TEXT_ALIGN_DEFAULT) {
+            lv_align_t at = want == CATNIP_TEXT_ALIGN_LEFT
+                                ? (bottom ? LV_ALIGN_BOTTOM_LEFT : LV_ALIGN_TOP_LEFT)
+                            : want == CATNIP_TEXT_ALIGN_RIGHT
+                                ? (bottom ? LV_ALIGN_BOTTOM_RIGHT : LV_ALIGN_TOP_RIGHT)
+                                : (bottom ? LV_ALIGN_BOTTOM_MID : LV_ALIGN_TOP_MID);
+            /* The hint's corner is still not free on a screen that reserves it,
+             * so a bottom-left that was asked for gets the same offset the
+             * order-derived one gets. */
+            lv_obj_align(
+                obj, at,
+                (at == LV_ALIGN_BOTTOM_LEFT && !g_bare) ? CATNIP_FRAME_HINT_W : 0, 0);
+            continue;
+        }
+
         if ((int32_t)i == centre) {
             lv_obj_align(obj, LV_ALIGN_CENTER, 0, 0);
         } else if ((int32_t)i > centre) {
@@ -898,9 +938,10 @@ void apply_desc(Entry *e, const catnip_node_desc *d)
      * role it is in - and only then, because that is the only thing about a
      * node that can move it. Every other update used to pay a scan of the map
      * to look up a parent and discover it was not a canvas. */
-    bool role_moved = e->role != d->style;
+    bool role_moved = e->role != d->style || e->align != d->align;
     apply_style(e, d->style);
     e->role = d->style;
+    e->align = d->align;
     if (role_moved) relayout_canvas(map_find(e->parent));
     apply_flags(e, d->flags);
     if (e->kind == CATNIP_NODE_LIST) {
