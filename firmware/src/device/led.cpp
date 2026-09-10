@@ -63,7 +63,12 @@ void catnip_led_begin(void)
 
 void catnip_led_dim(bool dim)
 {
+    if (dim == g_dim) return;
     g_dim = dim;
+    /* Repaint at the level the breath is already at: the colour changes with
+     * the dim now, and waiting for the next step of a 2.6-second breath to show
+     * it would read as the button not having worked. */
+    catnip_led_level(g_level);
 }
 
 void catnip_led_configure(uint8_t peak, float breaths_per_second)
@@ -107,9 +112,14 @@ void catnip_led_busy(bool on)
 
 void catnip_led_level(uint8_t brightness)
 {
-    uint8_t r = g_busy ? BUSY_R : g_r;
-    uint8_t g = g_busy ? BUSY_G : g_g;
-    uint8_t b = g_busy ? BUSY_B : g_b;
+    /* Three things this light can be saying, and they are asked in the order
+     * they matter. A dark screen first: a device with nothing on the panel is
+     * the one a person is most likely to think has died, and white is the
+     * colour that is plainly *not* the resting one. Then working. Then whatever
+     * colour is in use, which is the brand's until an app asks for another. */
+    uint8_t r = g_dim ? 0xFF : g_busy ? BUSY_R : g_r;
+    uint8_t g = g_dim ? 0xFF : g_busy ? BUSY_G : g_g;
+    uint8_t b = g_dim ? 0xFF : g_busy ? BUSY_B : g_b;
 
     g_level = brightness;
     /* Scale the colour rather than fading to white: a WS2812 has three separate

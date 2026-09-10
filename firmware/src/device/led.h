@@ -22,10 +22,15 @@ void catnip_led_begin(void);
  * file; calling this is optional and the built-in values are used until it is. */
 void catnip_led_configure(uint8_t peak, float breaths_per_second);
 
-/* Dim the breathing to a glimmer, or restore it. Used while the screen is off:
- * the light still has to say the device is alive, but a dark screen with a
- * bright LED next to it draws the eye to the one thing that is meant to be
- * ignored. */
+/* Dim the breathing to a glimmer *and turn it white*, or put both back. Used
+ * while the screen is off.
+ *
+ * Dim, because the light still has to say the device is alive and a bright LED
+ * next to a dark screen draws the eye to the one thing that is meant to be
+ * ignored. White, because a dark panel is the state a person is most likely to
+ * read as a device that has died, and the answer to that is a colour that is
+ * plainly not the resting one - the brand green at a glimmer looks like the
+ * brand green, only further away. */
 void catnip_led_dim(bool dim);
 
 /* 0 is off, 255 is full brightness. The part is an RGB LED; this scales the
