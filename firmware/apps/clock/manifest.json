@@ -5,6 +5,7 @@
   "author": "cmj",
   "catnip_api": "1.0",
   "entry": "main.lua",
+  "icon": "icon.png",
   "glance": "time",
   "counter": false,
   "permissions": []
