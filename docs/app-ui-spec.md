@@ -3,8 +3,9 @@
 **Languages:** English · [繁體中文](app-ui-spec.zh-TW.md)
 
 What an app provides, what the platform provides, and how the two meet. All of
-it works today except where a line says otherwise; _What this asks for that is
-not built_ at the foot of the page is the list of those, together.
+it works today except where a line says otherwise; _What this asked for, and
+where each of it landed_ at the foot of the page maps the recent changes onto
+the code.
 
 ## The canvas
 
@@ -156,6 +157,12 @@ _Three icons_ — a modal, because three does not map onto two buttons. While it
 up the bar takes left and right for itself: they step between the three, A runs
 the focused one, B puts the bar away. Up and down still belong to the content
 underneath, which stays visible.
+
+**The shape is not a thing an app chooses.** A bar is a modal exactly when it
+cannot be said as two buttons, and that is one rule with two ways of being true:
+there are three of them, or there are two and the second cannot go on B. An
+action nothing can reach is not an action, so a pair whose right-hand side is
+destructive steps rather than binding.
 
 A tap runs an icon directly in either shape. That is the finger's only route to
 Cancel, which is the reason the bar carries a visible one at all.
@@ -368,7 +375,7 @@ climb. To leave from inside a handler, call `sys.exit()`.
              └─ pushed screen ◄── short B pops it (context menu, dialog)
 ```
 
-**Long A.** _Revised; not built._
+**Long A.**
 
 **No operation is ever on the screen.** Not Delete, not Open, not Reset — no app
 draws a button for a thing it can do, and neither does the platform. Operations
@@ -824,28 +831,29 @@ against that is not a confirmation but that touch simply cannot reach the act.
 A tap still moves the ring, so a finger is the fast way to _get_ somewhere and
 the joystick is what commits.
 
-## What this asks for that is not built
+## What this asked for, and where each of it landed
 
-_The five screens_ is a description of where the device is going, not only of
-where it is. Six things in it are the platform's to change and one is an app's,
-and they are separable — each is worth having on its own, and none of them waits
-on another:
+_The five screens_ was a description of where the device was going. All seven of
+the changes it asked for are in, and the table is kept as the map of where each
+one landed rather than as a list of what is owed:
 
-| #   | Change                                                                        | Where                                  |
-| --- | ----------------------------------------------------------------------------- | -------------------------------------- |
-| 1   | ~~The grid pages instead of scrolling; three columns, fixed~~ — built         | `catnip_app_grid.c`, the grid layout   |
-| 2   | ~~The list region is cut to a whole number of rows~~ — built                  | the frame's region maths               |
-| 3   | ~~`body` 14 → 16, `title` 16 → 20~~ — built                                   | `lvgl_backend.cpp` role → font         |
-| 4   | ~~The setting screen: paged, two levels of focus, double A~~ — built          | the preference page and the input pass |
-| 5   | The hint reserves its corner where content reaches it — built; the bar is not | the frame                              |
-| 6   | The action bar: the two-icon and three-icon shapes                            | new                                    |
-| 7   | ~~The clock becomes three screens~~ — built                                   | `apps/clock/main.lua`, `manifest.json` |
+| #   | Change                                                                                  | Where                                       |
+| --- | --------------------------------------------------------------------------------------- | ------------------------------------------- |
+| 1   | ~~The grid pages instead of scrolling; three columns, fixed~~ — built                   | `catnip_app_grid.c`, the grid layout        |
+| 2   | ~~The list region is cut to a whole number of rows~~ — built                            | the frame's region maths                    |
+| 3   | ~~`body` 14 → 16, `title` 16 → 20~~ — built                                             | `lvgl_backend.cpp` role → font              |
+| 4   | ~~The setting screen: paged, two levels of focus, double A~~ — built                    | the preference page and the input pass      |
+| 5   | ~~The hint reserves its corner where content reaches it, and rides on the bar~~ — built | the frame                                   |
+| 6   | ~~The action bar: the two-icon and three-icon shapes~~ — built                          | `catnip_bar.c`, `frame.cpp`, the input pass |
+| 7   | ~~The clock becomes three screens~~ — built                                             | `apps/clock/main.lua`, `manifest.json`      |
 
-**One app changes, and it is the clock.** The File Browser and the WiFi Prober
-are both list screens and neither has a line to edit: every one of 1–5 is the
-platform's side of a seam these two already sit behind, which is the argument
-for the seam. An app that had to be edited to get a taller `body` would mean the
-roles never worked.
+**Two apps changed, and neither had to.** The clock became three screens
+because it _is_ three screens; the File Browser changed because it was building
+its own options menu and the bar took that over — it lost sixty lines and gained
+a manifest catalogue. The WiFi Prober has not been touched at all: every one of
+1–6 is the platform's side of a seam it already sits behind, which is the
+argument for the seam. An app that had to be edited to get a taller `body` would
+mean the roles never worked.
 
 Each of 1–6 is testable at the host layer that already exists — `test/native`
 for what the input pass and the page machine decide, `test/layout` for what LVGL

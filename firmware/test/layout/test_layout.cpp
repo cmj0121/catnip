@@ -466,6 +466,70 @@ int main(void)
         catnip_app_grid_free(g);
     }
 
+    /* ---- the action bar, and the hint riding on it ---------------------- */
+    /* What long A produces. Two things are checked and both are geometry the
+     * rules turn on: it sits at the foot of the panel with the content still
+     * visible above it, and the hint is lifted onto its shoulder rather than
+     * left underneath it. */
+    {
+        static const char *const kNames[3] = {"View", "Delete", "Reset card"};
+        static const catnip_icon kIcons[3] = {CATNIP_ICON_FILE, CATNIP_ICON_TRASH,
+                                              CATNIP_ICON_WARNING};
+        lv_obj_t *hint_obj;
+        int hint_y_down, hint_y_up;
+
+        catnip_frame_show(true);
+        catnip_frame_show_hint(true);
+        catnip_frame_set_hint(CATNIP_HINT_LEFT | CATNIP_HINT_RIGHT);
+        catnip_frame_set_actions(nullptr, nullptr, 0, 0);
+        pass();
+        /* The hint by its size, which is the one thing about it that is fixed:
+         * nothing in the node model owns it either, and after the bar exists it
+         * is no longer the last child of the top layer. */
+        hint_obj = nullptr;
+        for (uint32_t i = 0; i < lv_obj_get_child_count(lv_layer_top()); i++) {
+            lv_obj_t *c = lv_obj_get_child(lv_layer_top(), (int32_t)i);
+            if ((int)lv_obj_get_width(c) == CATNIP_FRAME_HINT_W &&
+                (int)lv_obj_get_height(c) == CATNIP_FRAME_HINT_H)
+                hint_obj = c;
+        }
+        hint_y_down = hint_obj ? (int)lv_obj_get_y(hint_obj) : 0;
+
+        catnip_frame_set_actions(kNames, kIcons, 3, 1);
+        pass();
+        shot("action-bar");
+        {
+            lv_obj_t *act = nullptr;
+            uint32_t n_top = lv_obj_get_child_count(lv_layer_top());
+            /* The bar is the widest thing on the top layer that is not the
+             * top bar: found by size rather than by a handle, because nothing
+             * in the node model owns it - that is the point of it. */
+            for (uint32_t i = 0; i < n_top; i++) {
+                lv_obj_t *c = lv_obj_get_child(lv_layer_top(), (int32_t)i);
+                if (lv_obj_get_y(c) > CATNIP_SCREEN_H / 2 &&
+                    lv_obj_get_width(c) > CATNIP_SCREEN_W / 2)
+                    act = c;
+            }
+            CHECK(act != NULL, "the action bar is drawn");
+            CHECK(act && lv_obj_get_y(act) + (int32_t)lv_obj_get_height(act) <=
+                             CATNIP_SCREEN_H,
+                  "at the foot of the panel, inside it");
+            CHECK(act && lv_obj_get_y(act) > CATNIP_SCREEN_H / 2,
+                  "and only across the bottom, so the content stays visible above it");
+            CHECK(act && lv_obj_get_child_count(act) == 3, "with a cell per action");
+        }
+        hint_y_up = hint_obj ? (int)lv_obj_get_y(hint_obj) : 0;
+        CHECK(hint_obj && hint_y_up < hint_y_down,
+              "and the hint has been lifted onto its shoulder rather than left under it");
+
+        catnip_frame_set_actions(nullptr, nullptr, 0, 0);
+        pass();
+        CHECK(hint_obj && (int)lv_obj_get_y(hint_obj) == hint_y_down,
+              "putting the bar away puts the hint back in its corner");
+        catnip_frame_show_hint(false);
+        catnip_frame_show(false);
+    }
+
     /* ---- the control hint, drawn over a page ---------------------------- */
     {
         /* Three lit, one dim - the state the cat is in - so the shot shows both

@@ -21,6 +21,11 @@ struct catnip_shell {
     int resident; /* the app's setup is done but its UI lives on its handlers */
     int bare;     /* the running app asked for the whole panel; see the header */
     int hints;    /* the running app takes the control hint; see the header */
+    /* Copied from the manifest at launch rather than read back from it, for the
+     * same reason `bare` is: the manifest is parsed once and this outlives it,
+     * and the bar is put up after the app is already running. */
+    catnip_action actions[CATNIP_BAR_MAX];
+    int n_actions;
 };
 
 catnip_shell *catnip_shell_new(catnip_rt *rt, const char *apps_root, catnip_now_fn now,
@@ -99,6 +104,9 @@ int catnip_shell_launch(catnip_shell *s, int index, char *errbuf, size_t errlen)
      */
     s->bare = m.bare;
     s->hints = m.hints;
+    s->n_actions = m.n_actions;
+    for (int i = 0; i < m.n_actions && i < CATNIP_BAR_MAX; i++)
+        s->actions[i] = m.actions[i];
 
     rc = catnip_sched_start(s->sched, code, m.id);
     free(code);
@@ -173,6 +181,13 @@ int catnip_shell_step(catnip_shell *s)
 int catnip_shell_bare(const catnip_shell *s)
 {
     return (s && s->state == CATNIP_SHELL_RUNNING) ? s->bare : 0;
+}
+
+const catnip_action *catnip_shell_actions(const catnip_shell *s, int *n)
+{
+    int have = (s && s->state == CATNIP_SHELL_RUNNING) ? s->n_actions : 0;
+    if (n) *n = have;
+    return have ? s->actions : NULL;
 }
 
 int catnip_shell_hints(const catnip_shell *s)

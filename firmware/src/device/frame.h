@@ -25,6 +25,7 @@
 
 #include <stdbool.h>
 
+#include "../catnip_render.h"
 #include "../catnip_runtime.h"
 
 #ifdef __cplusplus
@@ -91,6 +92,32 @@ void catnip_frame_set_status(bool card, bool radio, bool syncing);
  * draws no percentage at all rather than a plausible wrong one - the same rule
  * device.battery() answers -1 by. */
 void catnip_frame_set_battery(int percent);
+
+/* The action bar (long A), drawn rising from the bottom over whatever is on
+ * screen - the content stays visible underneath, because an action is always
+ * about something the user can still see.
+ *
+ * Up to three cells, each `[icon] [name]`, with `focus` ringed. In the
+ * two-icon shape nothing is ringed: the left one *is* A and the right one *is*
+ * B, so a ring would be pointing at a button that is already under a thumb.
+ *
+ * Drawn here rather than by an app for the reason the top bar is: consistency
+ * is a property of having one drawer, and the one thing a user must be able to
+ * carry between apps is what the dangerous gesture looks like.
+ *
+ * `names`/`icons` are borrowed for the length of the call. `n` of 0 puts it
+ * away. */
+void catnip_frame_set_actions(const char *const *names, const catnip_icon *icons, int n,
+                              int focus);
+
+/* Which cell a tap at (x, y) landed on, or -1. The bar is the one piece of
+ * chrome a finger may press: it is the finger's only route to Cancel, since
+ * back and home have no touch. */
+int catnip_frame_action_at(int x, int y);
+
+/* How tall the action bar is when it is up - what the control hint is lifted by
+ * so it sits on the bar's shoulder rather than under it. */
+#define CATNIP_FRAME_ACT_H 44
 
 /* One pass of the bar against what is on screen: reads the counter the renderer
  * derives for the list being navigated and draws `N/total`, or blanks that

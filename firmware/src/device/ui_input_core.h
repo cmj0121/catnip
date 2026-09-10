@@ -27,6 +27,7 @@
 
 #include <stdbool.h>
 
+#include "../catnip_bar.h"
 #include "../catnip_render.h"
 #include "../catnip_runtime.h"
 #include "input.h"
@@ -64,7 +65,16 @@ typedef struct {
     int (*mixer_pct)(void *ud, catnip_handle col, int y);
     /* This contact has become a swipe, so it must not also arrive as a tap. */
     void (*cancel_touch)(void *ud);
+    /* Which cell of the action bar a tap at (x, y) landed on, or -1. The bar is
+     * the one piece of chrome a finger may press: it is the finger's only route
+     * to Cancel, since back and home have no touch. */
+    int (*action_at)(void *ud, int x, int y);
     void *ud;
+    /* The action bar, when one is up. While it is, A and B are its own and, in
+     * the modal shape, so are left and right - and the content underneath keeps
+     * up and down, because it is still there to be read. NULL is the ordinary
+     * case: no bar, and nothing about this changes any other press. */
+    catnip_bar *bar;
 } catnip_ui_env;
 
 /* Everything one input pass has to remember between passes: how long each
@@ -107,6 +117,12 @@ typedef struct {
     unsigned last_tap;
     bool had_tap;
     bool touch_was_down;
+    /* Who was long-pressed, and about which row. Kept because the answer comes
+     * back a drain later - the handler runs after this pass - and by then the
+     * ring may have moved. An action is always about the item it was asked of,
+     * not about wherever the user is standing when it is run. */
+    catnip_handle options_on;
+    int options_index;
 } catnip_ui_input;
 
 /* How close two short presses of A have to be to be one double press. Long
@@ -115,6 +131,10 @@ typedef struct {
  * done" - which is the mistake this window is guarding, since both are things a
  * user does on this page. */
 #define CATNIP_DOUBLE_MS 400u
+
+/* Who the last long press asked for options, and about which row. Reads
+ * CATNIP_HANDLE_NONE when nothing has. */
+catnip_handle catnip_ui_input_options_target(const catnip_ui_input *in, int *index);
 
 /* One pass. Posts prev / next / click / options to the focused node, moves the
  * focus cursor, and returns one of the CATNIP_UI_GESTURE_* values in

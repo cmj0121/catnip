@@ -6,5 +6,29 @@
   "catnip_api": "1.0",
   "entry": "main.lua",
   "icon": "icon.png",
-  "permissions": ["fs.read", "fs.delete", "fs.reset"]
+  "permissions": ["fs.read", "fs.delete", "fs.reset"],
+  "actions": [
+    {
+      "id": "open",
+      "name": "Open",
+      "icon": "folder"
+    },
+    {
+      "id": "view",
+      "name": "View",
+      "icon": "file"
+    },
+    {
+      "id": "delete",
+      "name": "Delete",
+      "icon": "trash",
+      "destructive": true
+    },
+    {
+      "id": "format",
+      "name": "Reset",
+      "icon": "warning",
+      "destructive": true
+    }
+  ]
 }

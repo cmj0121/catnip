@@ -73,7 +73,7 @@ int catnip_sched_step(catnip_sched *s);
  * this file's contract to change and not the renderer's; #48 does it, and then
  * the only thing that changes here is which function is installed. */
 int catnip_sched_dispatch(void *ud, catnip_rt *rt, int node_ref, const char *event,
-                          int index);
+                          int index, const char *arg);
 
 void catnip_sched_free(catnip_sched *s);
 

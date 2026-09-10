@@ -247,6 +247,23 @@ static int press_back(void)
     return exited;
 }
 
+/* Run one of the actions the bar would have carried: the id, back to the list
+ * it was asked of, with the row it was about. Exactly what the input pass posts
+ * when A is pressed on a cell of the bar - the bar itself is chrome, and this
+ * test is about the app. */
+static int run_action(const char *id)
+{
+    catnip_handle h = obj_handle("rows");
+    if (h == CATNIP_HANDLE_NONE) {
+        printf("  FAIL - no live list to run '%s' on\n", id);
+        failures++;
+        return -1;
+    }
+    catnip_render_post_action(g_rt, h, g_rows_sel, id);
+    catnip_render_drain(g_rt);
+    return pass();
+}
+
 /* How many nodes named <prefix>1, <prefix>2, ... are live. The options menu's
  * length is the assertion, and its length is what "built for this item" means. */
 static int row_count(const char *prefix)
@@ -486,51 +503,62 @@ int main(void)
     CHECK_OPS("[-file_name-file_text-viewer!screen]",
               "the platform pops it, and the browser is shown again, never rebuilt");
 
-    printf("a long press offers what can be done to that item\n");
-    CHECK(select_row("b.txt") >= 0, "b.txt is on the screen");
-    (void)press_at("rows", "options", g_rows_sel);
-    CHECK(obj_handle("menu_rows") != CATNIP_HANDLE_NONE, "the options are a pushed list");
-    CHECK(obj_handle("row1") == row1, "and the browser under them keeps its widgets");
-    /* A file offers View, Delete and Reset card; a folder offers Open and Reset
-     * card. The menu is built when it is asked for precisely because of this. */
-    CHECK(row_count("act") == 3, "a file offers three actions");
-    CHECK(press_back() == 0, "B closes the menu, not the app");
+    printf("a long press answers which actions apply, and builds nothing\n");
+    {
+        char ids[CATNIP_ACTIONS_MAX][CATNIP_ACTION_ID_MAX];
+        int n;
 
-    CHECK(select_row("docs") >= 0, "and the folder is selectable");
-    (void)press_at("rows", "options", g_rows_sel);
-    CHECK(row_count("act") == 2, "a folder offers two - it cannot be deleted or viewed");
-    CHECK(press_back() == 0, "B closes that menu too");
+        CHECK(select_row("b.txt") >= 0, "b.txt is on the screen");
+        (void)press_at("rows", "options", g_rows_sel);
+        /* No screen was pushed and no widget was made. What the long press
+         * produced is a list of ids out of the manifest, which the platform
+         * turns into a bar - and the browser under it is untouched, which is
+         * the whole reason the bar is the platform's. */
+        CHECK(obj_handle("menu_rows") == CATNIP_HANDLE_NONE,
+              "the app pushed no menu of its own");
+        CHECK(obj_handle("row1") == row1, "and the browser keeps every widget it had");
+        CHECK(catnip_ui_depth(g_rt) == 1, "nothing was pushed at all");
 
-    printf("deleting a file asks first\n");
+        n = catnip_render_take_actions(g_rt, ids, CATNIP_ACTIONS_MAX);
+        CHECK(n == 3, "a file offers three actions");
+        CHECK(n == 3 && strcmp(ids[0], "view") == 0 && strcmp(ids[1], "delete") == 0,
+              "view and delete, in the order the app named them");
+        CHECK(catnip_render_take_actions(g_rt, ids, CATNIP_ACTIONS_MAX) == 0,
+              "and reading the answer clears it, so one press is one bar");
+
+        CHECK(select_row("docs") >= 0, "and the folder is selectable");
+        (void)press_at("rows", "options", g_rows_sel);
+        n = catnip_render_take_actions(g_rt, ids, CATNIP_ACTIONS_MAX);
+        CHECK(n == 2, "a folder offers two - it cannot be deleted or viewed");
+        CHECK(n == 2 && strcmp(ids[0], "open") == 0, "and the first of them is Open");
+    }
+
+    printf("running one is an id coming back to the list it was asked of\n");
     CHECK(select_row("b.txt") >= 0, "b.txt is still on the screen");
     (void)press_at("rows", "options", g_rows_sel);
-    (void)press_at("menu_rows", "click", 1); /* Delete */
+    (void)run_action("delete");
     CHECK(obj_handle("confirm_text") != CATNIP_HANDLE_NONE,
           "the question is a pushed screen, not a mode the browser renders");
     CHECK(obj_handle("confirm_no") == CATNIP_HANDLE_NONE,
           "and it carries no Cancel button, because B is cancel");
     CHECK(obj_handle("row1") == row1, "so the list keeps its widgets while it is up");
     (void)press_back(); /* the question */
-    (void)press_back(); /* the menu it was asked from */
     catnip_rt_dostring(g_rt, "GONE = not fs.exists('b.txt')", "=q");
     lua_getglobal(L, "GONE");
     CHECK(!lua_toboolean(L, -1), "backing out of the question leaves the file alone");
     lua_pop(L, 1);
 
     CHECK(select_row("b.txt") >= 0, "b.txt is still there");
-    (void)press_at("rows", "options", g_rows_sel);
-    (void)press_at("menu_rows", "click", 1); /* Delete */
+    (void)run_action("delete");
     (void)press("confirm_yes", "click");
     catnip_rt_dostring(g_rt, "GONE = not fs.exists('b.txt')", "=q");
     lua_getglobal(L, "GONE");
     CHECK(lua_toboolean(L, -1), "confirming deletes it");
     lua_pop(L, 1);
-    CHECK(catnip_ui_depth(g_rt) == 1,
-          "and confirming closes the question and the menu behind it");
+    CHECK(catnip_ui_depth(g_rt) == 1, "and confirming closes the question behind it");
 
     printf("resetting the card\n");
-    (void)press_at("rows", "options", g_rows_sel);
-    (void)press_at("menu_rows", "click", row_count("act") - 1); /* Reset card is last */
+    (void)run_action("format");
     (void)press("confirm_yes", "click");
     /* #46: sd_reset is not wired up, so this is the only outcome the app can
      * reach today, and it says so rather than refreshing as though it had
@@ -541,8 +569,7 @@ int main(void)
     /* With a card that can be reset, the call still reaches the HAL. There is
      * nothing to assert after it: #46 reboots the device on success. */
     hal.sd_reset = m_sd_reset;
-    (void)press_at("rows", "options", g_rows_sel);
-    (void)press_at("menu_rows", "click", row_count("act") - 1);
+    (void)run_action("format");
     (void)press("confirm_yes", "click");
     CHECK(g_reset_calls == 1, "reset SD reached the HAL");
 

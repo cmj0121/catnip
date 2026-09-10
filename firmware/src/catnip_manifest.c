@@ -104,6 +104,36 @@ int catnip_manifest_parse(const char *json, catnip_manifest *out, char *errbuf,
         }
     }
 
+    /* The catalogue. An entry with no id is not an action - there would be
+     * nothing for `on_options` to name it by - and one with no name is dropped
+     * for the same reason a button with nothing written on it is: a bar the
+     * user cannot read is worse than one button fewer. */
+    const cJSON *acts = cJSON_GetObjectItemCaseSensitive(root, "actions");
+    if (cJSON_IsArray(acts)) {
+        const cJSON *a = NULL;
+        cJSON_ArrayForEach(a, acts)
+        {
+            if (out->n_actions >= CATNIP_BAR_MAX) break;
+            if (!cJSON_IsObject(a)) continue;
+            catnip_action *slot = &out->actions[out->n_actions];
+            const cJSON *danger;
+
+            memset(slot, 0, sizeof(*slot));
+            copy_str(slot->id, sizeof(slot->id),
+                     cJSON_GetObjectItemCaseSensitive(a, "id"));
+            copy_str(slot->name, sizeof(slot->name),
+                     cJSON_GetObjectItemCaseSensitive(a, "name"));
+            copy_str(slot->icon, sizeof(slot->icon),
+                     cJSON_GetObjectItemCaseSensitive(a, "icon"));
+            /* Only the literal true, the mirror of `hints`: "I did not think
+             * about this" and "this is safe" want the same answer, and marking
+             * an action dangerous is a thing an author does deliberately. */
+            danger = cJSON_GetObjectItemCaseSensitive(a, "destructive");
+            slot->destructive = cJSON_IsTrue(danger);
+            if (slot->id[0] && slot->name[0]) out->n_actions++;
+        }
+    }
+
 done:
     cJSON_Delete(root);
     return rc;

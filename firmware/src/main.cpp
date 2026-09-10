@@ -22,6 +22,8 @@
 #include "catnip_settings.h"
 #include "catnip_runtime.h"
 #include "catnip_shell.h"
+#include "catnip_bar.h"
+#include "catnip_icon_map.h"
 #include "catnip_ui.h"
 #include "device/board.h"
 #include "device/diag.h"
@@ -653,6 +655,52 @@ void setup()
     maybe_join_network();
 }
 
+/* Long A's answer, turned into a bar.
+ *
+ * The app was asked which of its actions apply and answered with ids out of its
+ * own manifest; this is where those become two or three buttons. It runs after
+ * the drain, because the handler that answers runs in the drain - and it runs
+ * every pass, because the answer is latched and reading it is what clears it.
+ *
+ * An app that answered with nothing gets no bar, which is the ordinary case for
+ * a page whose long press does the thing itself - the grid pins an app rather
+ * than offering to. */
+static void offer_actions(void)
+{
+    const catnip_action *catalogue;
+    int n_catalogue = 0;
+    int index = CATNIP_INDEX_NONE;
+    catnip_handle owner;
+
+    if (!g_rt) return;
+    catalogue = catnip_shell_actions(g_shell, &n_catalogue);
+    owner = catnip_ui_input_options_asked(&index);
+    (void)catnip_bar_offer(catnip_ui_input_bar(), g_rt, catalogue, n_catalogue, owner,
+                           index);
+}
+
+/* And what it looks like. Names and glyphs are read off the bar every pass; the
+ * frame's own guard is what keeps that from repainting a panel that has not
+ * changed. */
+static void draw_actions(void)
+{
+    const catnip_bar *bar = catnip_ui_input_bar();
+    const char *names[3];
+    catnip_icon icons[3];
+    int n;
+
+    if (!catnip_bar_up(bar)) {
+        catnip_frame_set_actions(nullptr, nullptr, 0, 0);
+        return;
+    }
+    n = bar->n > 3 ? 3 : bar->n;
+    for (int i = 0; i < n; i++) {
+        names[i] = bar->items[i].name;
+        icons[i] = catnip_icon_from_name(bar->items[i].icon);
+    }
+    catnip_frame_set_actions(names, icons, n, bar->focus);
+}
+
 /* Whether the panel belongs to the running app right now.
  *
  * Two answers, in order: the visible screen's own `frame`, and the manifest's
@@ -816,6 +864,10 @@ void loop()
     const bool bare = app_is_bare();
     catnip_lvgl_backend_set_bare(bare);
 
+    /* After the drain that ran the app's handlers and before the tree is drawn,
+     * because a bar put up now is a bar the user sees this frame. */
+    offer_actions();
+
     if (g_rt && g_be) catnip_render(g_rt, g_be);
 
     /* Carry any clock sync forward (#84): it joins the network, asks the time
@@ -841,6 +893,10 @@ void loop()
     catnip_frame_show_hint(catnip_lvgl_backend_active() && !bare &&
                            catnip_shell_hints(g_shell));
     catnip_frame_set_hint(catnip_ui_input_hint(g_rt, catnip_ui_input_focused()));
+    /* And the bar of actions, if one is up. It is drawn after the hint because
+     * putting it up lifts the hint onto its shoulder, and the hint has to exist
+     * to be lifted. */
+    draw_actions();
     /* The status strip in the bar (#83): a card when one is in the slot, the
      * radio when it is up, and the sync glyph only while a sync is actually in
      * flight - a badge that was always there would be saying "this device has

@@ -1,6 +1,8 @@
 /* frame.cpp - see frame.h. */
 #include "frame.h"
 
+#include "catnip_icon_img.h"
+
 #include <lvgl.h>
 #include <stdio.h>
 #include <string.h>
@@ -29,6 +31,14 @@ lv_obj_t *g_counter;
  * that could place it could place it in the wrong corner. */
 lv_obj_t *g_hint;
 unsigned g_hint_mask; /* which directions are lit, for the draw below */
+/* The action bar: the panel, and one cell per action. Built once and reused,
+ * because a bar rebuilt on every long press would blink at exactly the moment
+ * somebody is looking at it. */
+lv_obj_t *g_act;
+lv_obj_t *g_act_cell[3];
+lv_obj_t *g_act_icon[3];
+lv_obj_t *g_act_name[3];
+int g_act_n;
 unsigned g_last_hint = ~0u;
 
 /* The lit ink: an earthy yellow, the colour of a key you press rather than of
@@ -191,7 +201,123 @@ bool ensure_bar(void)
     return g_battery && g_title && g_counter;
 }
 
+/* The bar itself, and three cells inside it. Three because that is the modal
+ * shape and the modal shape is the most there is: more than three on one item
+ * is a menu pretending to be a bar, and the answer to that is fewer verbs. */
+bool ensure_actions(void)
+{
+    if (g_act) return true;
+    if (!catnip_lvgl_backend_active()) return false;
+
+    g_act = lv_obj_create(lv_layer_top());
+    if (!g_act) return false;
+    lv_obj_set_size(g_act, LV_PCT(100) - 16, CATNIP_FRAME_ACT_H);
+    lv_obj_align(g_act, LV_ALIGN_BOTTOM_MID, 0, -6);
+    lv_obj_set_style_bg_color(g_act, lv_color_hex(kColBarBg), 0);
+    lv_obj_set_style_bg_opa(g_act, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(g_act, 1, 0);
+    lv_obj_set_style_border_color(g_act, lv_color_hex(catnip_color_faint()), 0);
+    lv_obj_set_style_radius(g_act, 10, 0);
+    lv_obj_set_style_pad_all(g_act, 4, 0);
+    lv_obj_set_flex_flow(g_act, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(g_act, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_remove_flag(g_act, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(g_act, LV_OBJ_FLAG_HIDDEN);
+
+    for (int i = 0; i < 3; i++) {
+        lv_obj_t *cell = lv_obj_create(g_act);
+        if (!cell) return false;
+        lv_obj_set_height(cell, LV_PCT(100));
+        lv_obj_set_flex_grow(cell, 1);
+        lv_obj_set_style_bg_opa(cell, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(cell, 0, 0);
+        lv_obj_set_style_border_width(cell, 2, LV_STATE_CHECKED);
+        lv_obj_set_style_border_color(cell, lv_color_hex(kColHintLit), LV_STATE_CHECKED);
+        lv_obj_set_style_radius(cell, 8, 0);
+        lv_obj_set_style_pad_all(cell, 2, 0);
+        lv_obj_set_style_pad_column(cell, 4, 0);
+        lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                              LV_FLEX_ALIGN_CENTER);
+        lv_obj_remove_flag(cell, LV_OBJ_FLAG_SCROLLABLE);
+        g_act_cell[i] = cell;
+
+        g_act_icon[i] = lv_image_create(cell);
+        g_act_name[i] = lv_label_create(cell);
+        if (!g_act_icon[i] || !g_act_name[i]) return false;
+        lv_obj_set_style_text_font(g_act_name[i], &lv_font_montserrat_16, 0);
+        /* An ellipsis rather than a clip. A name cut off mid-glyph reads as a
+         * different word, and the one thing a user must be able to trust about
+         * this bar is which of the three they are about to run - so a name too
+         * long for its third of the panel says so. Short names are the app's
+         * job, and this is what happens when one is not. */
+        lv_label_set_long_mode(g_act_name[i], LV_LABEL_LONG_DOT);
+        lv_obj_set_flex_grow(g_act_name[i], 1);
+        lv_obj_set_style_text_color(g_act_name[i], lv_color_hex(catnip_color_text()), 0);
+    }
+    return true;
+}
+
 } /* namespace */
+
+void catnip_frame_set_actions(const char *const *names, const catnip_icon *icons, int n,
+                              int focus)
+{
+    if (!ensure_actions()) return;
+    if (n < 0) n = 0;
+    if (n > 3) n = 3;
+
+    for (int i = 0; i < 3; i++) {
+        if (i < n) {
+            lv_obj_remove_flag(g_act_cell[i], LV_OBJ_FLAG_HIDDEN);
+            lv_label_set_text(g_act_name[i], names && names[i] ? names[i] : "");
+            catnip_icon ic = icons ? icons[i] : CATNIP_ICON_NONE;
+            if (ic == CATNIP_ICON_NONE) {
+                lv_obj_add_flag(g_act_icon[i], LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_remove_flag(g_act_icon[i], LV_OBJ_FLAG_HIDDEN);
+                lv_image_set_src(g_act_icon[i],
+                                 &catnip_icon_img_14[ic - CATNIP_ICON_FOLDER]);
+            }
+            /* Ringed only in the modal shape. With two, the left one is A and
+             * the right one is B: a ring there would be pointing at a button
+             * that is already under a thumb, and would invite a user to move it
+             * with directions the bar has deliberately not taken. */
+            if (n >= 3 && i == focus) lv_obj_add_state(g_act_cell[i], LV_STATE_CHECKED);
+            else lv_obj_remove_state(g_act_cell[i], LV_STATE_CHECKED);
+        } else {
+            lv_obj_add_flag(g_act_cell[i], LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
+    /* The same guard the bar and the hint give at length: on a display that
+     * renders the whole panel, an invalidation that changes nothing still costs
+     * 153,600 bytes over the bus. */
+    if ((n > 0) != (g_act_n > 0)) {
+        if (n > 0) lv_obj_remove_flag(g_act, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(g_act, LV_OBJ_FLAG_HIDDEN);
+    }
+    g_act_n = n;
+    /* The hint rides on the bar: it is lifted by exactly the bar's height, so
+     * it stays the lowest, leftmost thing that is not the bar. The bar keeps
+     * its full width because three cells need it, so it is the hint that
+     * moves. */
+    if (g_hint)
+        lv_obj_align(g_hint, LV_ALIGN_BOTTOM_LEFT, 2,
+                     n > 0 ? -(CATNIP_FRAME_ACT_H + 10) : -2);
+}
+
+int catnip_frame_action_at(int x, int y)
+{
+    if (!g_act || g_act_n <= 0) return -1;
+    for (int i = 0; i < g_act_n; i++) {
+        lv_area_t a;
+        lv_obj_get_coords(g_act_cell[i], &a);
+        if (x >= a.x1 && x <= a.x2 && y >= a.y1 && y <= a.y2) return i;
+    }
+    return -1;
+}
 
 void catnip_frame_show(bool on)
 {

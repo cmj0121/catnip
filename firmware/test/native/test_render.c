@@ -474,8 +474,10 @@ static void test_screen_stack(void)
 /* ---- the event queue ---------------------------------------------------- */
 
 static char g_fired[512];
-static int t_dispatch(void *ud, catnip_rt *rt, int node_ref, const char *event, int index)
+static int t_dispatch(void *ud, catnip_rt *rt, int node_ref, const char *event, int index,
+                      const char *arg)
 {
+    (void)arg;
     (void)ud;
     (void)index;
     lua_State *L = catnip_rt_lua(rt);

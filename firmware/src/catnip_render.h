@@ -192,6 +192,12 @@ typedef enum {
  * turns one rather than squeezing five. */
 #define CATNIP_MIXER_PAGE 5
 
+/* How long an action id may be. Here rather than in catnip_bar.h because that
+ * header includes this one, and the renderer is what carries the ids back. */
+#define CATNIP_ACTION_ID_MAX 24
+/* And how many one long press may produce. */
+#define CATNIP_ACTIONS_MAX 8
+
 enum {
     /* Set on the kinds that can take input - button and list - unless the node
      * is hidden or disabled. The backend builds its input group out of these
@@ -462,7 +468,7 @@ int catnip_render_drain(catnip_rt *rt);
  * negative for a handler that faulted or was not there at all. `back` is what
  * that distinction is for - see catnip_render_take_claim(). */
 typedef int (*catnip_render_dispatch_fn)(void *ud, catnip_rt *rt, int node_ref,
-                                         const char *event, int index);
+                                         const char *event, int index, const char *arg);
 void catnip_render_set_dispatch(catnip_rt *rt, catnip_render_dispatch_fn fn, void *ud);
 
 /* The handle of the screen the backend was last told to show, or
@@ -520,6 +526,25 @@ int catnip_render_counter(catnip_rt *rt, catnip_handle focus, int *n, int *total
  * this 0, which is what makes "an app that wrote no on_back" the default rather
  * than a special case. */
 int catnip_render_take_claim(catnip_rt *rt);
+
+/* Run one of the actions the platform put on the bar. It arrives as
+ * `on_action(self, id, index)` on the list that was long-pressed: which action,
+ * and which of its rows it is about. The id rather than a number because that
+ * is what the app named it by in its manifest, and a number would be a position
+ * in a list the app no longer has. */
+int catnip_render_post_action(catnip_rt *rt, catnip_handle h, int index, const char *id);
+
+/* What the last `options` handler answered with: the action ids it named, in
+ * the order it named them. Returns how many were written into `ids` and clears
+ * the answer, so one long press produces one bar.
+ *
+ * Latched rather than returned, for the same reason the claim is: the caller
+ * that wants the answer - whatever puts the bar up - is not the caller that
+ * drains, and the handler runs somewhere between the two. */
+int catnip_render_take_actions(catnip_rt *rt, char (*ids)[CATNIP_ACTION_ID_MAX], int max);
+
+/* Record one id from inside a dispatcher. Nothing else calls this. */
+void catnip_render_put_action(catnip_rt *rt, const char *id);
 
 #ifdef __cplusplus
 }

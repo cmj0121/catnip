@@ -40,7 +40,9 @@ static void post_if_long_event(catnip_ui_input *in, catnip_rt *rt, catnip_button
     if (!event || to == CATNIP_HANDLE_NONE) return;
     /* A screen has no selection to be about, and catnip_render_selected answers
      * the sentinel for one, so the index is right either way. */
-    catnip_render_post(rt, to, event, catnip_render_selected(rt, to));
+    in->options_on = to;
+    in->options_index = catnip_render_selected(rt, to);
+    catnip_render_post(rt, to, event, in->options_index);
 }
 
 /* Whether a column is engaged, for the hint - which is asked by the frame with
@@ -121,6 +123,12 @@ unsigned catnip_ui_input_hint(catnip_rt *rt, catnip_handle focus)
     return mask;
 }
 
+catnip_handle catnip_ui_input_options_target(const catnip_ui_input *in, int *index)
+{
+    if (index) *index = in ? in->options_index : CATNIP_INDEX_NONE;
+    return in ? in->options_on : CATNIP_HANDLE_NONE;
+}
+
 catnip_handle catnip_ui_input_focus(const catnip_ui_input *in)
 {
     return in ? in->focus : CATNIP_HANDLE_NONE;
@@ -129,7 +137,14 @@ catnip_handle catnip_ui_input_focus(const catnip_ui_input *in)
 void catnip_ui_input_reset(catnip_ui_input *in)
 {
     static const catnip_ui_input kZero = {0};
-    if (in) *in = kZero;
+    if (!in) return;
+    *in = kZero;
+    /* Zero is a live handle, so the two that hold one have to be said. */
+    in->focus = CATNIP_HANDLE_NONE;
+    in->drag_col = CATNIP_HANDLE_NONE;
+    in->engaged_on = CATNIP_HANDLE_NONE;
+    in->options_on = CATNIP_HANDLE_NONE;
+    in->options_index = CATNIP_INDEX_NONE;
 }
 
 int catnip_ui_input_run(catnip_ui_input *in, catnip_rt *rt, const catnip_ui_sample *s,
@@ -170,6 +185,50 @@ int catnip_ui_input_run(catnip_ui_input *in, catnip_rt *rt, const catnip_ui_samp
      * activate the row it started on. */
     if (swipe != CATNIP_SWIPE_NONE && env && env->cancel_touch)
         env->cancel_touch(env->ud);
+
+    /* The action bar, while one is up, owns A and B - and left and right too
+     * when there are three of them, because three does not map onto two
+     * buttons. Up and down are deliberately left alone: the content is still on
+     * screen underneath, and an action is always about something the user can
+     * still see.
+     *
+     * Handled before the ring is settled and before any meaning is worked out,
+     * because none of that is what a press means right now. Long B still falls
+     * through below: home is the platform's and no bar may swallow it. */
+    if (env && catnip_bar_up(env->bar) && b_press != CATNIP_PRESS_LONG) {
+        catnip_bar *bar = env->bar;
+        int cell = -1;
+
+        if (catnip_bar_modal(bar)) {
+            if (left || swipe == CATNIP_SWIPE_LEFT) catnip_bar_step(bar, -1);
+            if (right || swipe == CATNIP_SWIPE_RIGHT) catnip_bar_step(bar, 1);
+        }
+        /* A finger runs a cell directly, in both shapes. It is the only way a
+         * touch user reaches Cancel, which is why the bar draws a visible one
+         * at all. */
+        if (!s->touch_down && in->touch_was_down && !in->drag_settled && env->action_at)
+            cell = env->action_at(env->ud, s->touch_x, s->touch_y);
+        in->touch_was_down = s->touch_down;
+
+        if (cell >= 0) {
+            catnip_render_post_action(rt, bar->owner, bar->index,
+                                      catnip_bar_tap(bar, cell));
+            catnip_bar_close(bar);
+        } else if (a_press == CATNIP_PRESS_SHORT || c_press == CATNIP_PRESS_SHORT) {
+            catnip_render_post_action(rt, bar->owner, bar->index,
+                                      catnip_bar_activate(bar));
+            catnip_bar_close(bar);
+        } else if (b_press == CATNIP_PRESS_SHORT) {
+            /* B runs the negative one when there is one and it is safe to bind
+             * B to, and otherwise only puts the bar away. Either way the bar
+             * goes: B is how you leave, and leaving is the one thing it must
+             * always do. */
+            const char *id = catnip_bar_cancel(bar);
+            if (id) catnip_render_post_action(rt, bar->owner, bar->index, id);
+            catnip_bar_close(bar);
+        }
+        return CATNIP_UI_GESTURE_NONE;
+    }
 
     n = catnip_render_focus_order(rt, order, CATNIP_UI_MAX_FOCUS);
     if (n > CATNIP_UI_MAX_FOCUS) n = CATNIP_UI_MAX_FOCUS;

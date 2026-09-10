@@ -85,6 +85,11 @@ int catnip_shell_bare(const catnip_shell *s);
  * explaining". An app can want either without the other. */
 int catnip_shell_hints(const catnip_shell *s);
 
+/* The running app's action catalogue, and how many are in it. NULL and 0 when
+ * nothing is running - which is also the honest answer for the launcher's own
+ * pages: they are the platform's, and the platform has no manifest. */
+const catnip_action *catnip_shell_actions(const catnip_shell *s, int *n);
+
 /* Act on a short B, after the drain that ran the app's on_back. Returns the
  * shell state.
  *
