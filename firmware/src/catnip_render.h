@@ -525,6 +525,15 @@ unsigned catnip_render_events(catnip_rt *rt, catnip_handle h);
  * once, and would let two apps disagree about what `total` counts. */
 int catnip_render_counter(catnip_rt *rt, catnip_handle focus, int *n, int *total);
 
+/* Tell the renderer how many children of `h` the backend can show at once.
+ *
+ * For the shapes whose page is measured rather than declared - a column of
+ * lines, whose page is however many fit. The counter needs the number and
+ * cannot work it out: how many lines fit is geometry, and geometry is the
+ * backend's. Everything else pages by a declared constant and says nothing
+ * here. */
+void catnip_render_set_page(catnip_rt *rt, catnip_handle h, int rows);
+
 /* Whether the handler of a claimable post returned something truthy, cleared as
  * it is read.
  *

@@ -65,6 +65,9 @@ typedef struct {
     catnip_style_role style;
     catnip_icon icon;
     catnip_node_layout layout;
+    /* How many children the drawing can show at once, for the shapes whose page
+     * is measured rather than declared. 0 until something says. */
+    int page;
     char *image; /* owned copy of the last image name sent, or NULL */
     size_t image_cap;
     int value;
@@ -1031,6 +1034,15 @@ int catnip_render_focus_order(catnip_rt *rt, catnip_handle *out, int max)
 
 /* ---- input -------------------------------------------------------------- */
 
+void catnip_render_set_page(catnip_rt *rt, catnip_handle h, int rows)
+{
+    lua_State *L = catnip_rt_lua(rt);
+    render_state *st = L ? state_peek(L) : NULL;
+    slot *sl = st ? slot_of(st, h) : NULL;
+
+    if (sl) sl->page = rows;
+}
+
 void catnip_render_set_dispatch(catnip_rt *rt, catnip_render_dispatch_fn fn, void *ud)
 {
     lua_State *L = catnip_rt_lua(rt);
@@ -1110,6 +1122,15 @@ int catnip_render_counter(catnip_rt *rt, catnip_handle focus, int *n, int *total
     if (list->layout == CATNIP_LAYOUT_MIXER) {
         if (n) *n = list->selected / CATNIP_MIXER_PAGE + 1;
         if (total) *total = (rows + CATNIP_MIXER_PAGE - 1) / CATNIP_MIXER_PAGE;
+        return 1;
+    }
+    /* And a column of lines, which pages too - on boundaries the *drawing*
+     * measured, because how many lines fit is geometry. It is reported here so
+     * the bar and the page cannot disagree: they did, and the header read
+     * "9/14" over a page whose first line was the ninth. */
+    if (list->layout == CATNIP_LAYOUT_TEXT && list->page > 0) {
+        if (n) *n = list->selected / list->page + 1;
+        if (total) *total = (rows + list->page - 1) / list->page;
         return 1;
     }
     if (n) *n = list->selected + 1; /* one-based for display, converted once */
