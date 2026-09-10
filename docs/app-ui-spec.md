@@ -175,6 +175,12 @@ the way the bar's height is: a canvas's bottom line starts to the right of it, a
 a column leaves room below. **A `frame: "bare"` app reserves neither**, because
 no bar and no hint are drawn over one.
 
+**A line at the foot of a page can move out of its way.** A column ranges its
+text left, which puts the start of the bottom line right where the hint is, so a
+label may ask for `align = "right"` and sit at the other end instead. It exists
+for that: a canvas gets the same thing free from the order its children are
+named in, and a column had no way to say it at all.
+
 **An app can turn it off** with `"hints": false` in its manifest — a different
 claim from `bare`, and worth making on its own: _the directions here need no
 explaining_. The default is on, and that direction is deliberate: the apps most
@@ -305,18 +311,19 @@ to decide.
 
 The manifest carries the knobs; Lua carries the behaviour.
 
-| Knob                                  | Where    | Effect                                              |
-| ------------------------------------- | -------- | --------------------------------------------------- |
-| `name`                                | manifest | default title, and the name on your page            |
-| `icon`                                | manifest | your identity icon; absent → the mascot             |
-| `actions[]`                           | manifest | the action catalogue: `id`, `name`, `icon`          |
-| `frame`                               | manifest | `"standard"` (default) or `"bare"`                  |
-| `counter`                             | manifest | `false` if you are not a list                       |
-| `hints`                               | manifest | `false` to draw no control hint over you            |
-| `ui.title(s)`                         | Lua      | a title that changes at runtime                     |
-| `layout`                              | Lua      | on a list: `"grid"` for icons, `"mixer"` for values |
-| `style`                               | Lua      | which of the roles below a node is set in           |
-| `on_click` / `on_options` / `on_back` | Lua      | claim short A, long A, short B                      |
+| Knob                                  | Where    | Effect                                                |
+| ------------------------------------- | -------- | ----------------------------------------------------- |
+| `name`                                | manifest | default title, and the name on your page              |
+| `icon`                                | manifest | your identity icon; absent → the mascot               |
+| `actions[]`                           | manifest | the action catalogue: `id`, `name`, `icon`            |
+| `frame`                               | manifest | `"standard"` (default) or `"bare"`                    |
+| `counter`                             | manifest | `false` if you are not a list                         |
+| `hints`                               | manifest | `false` to draw no control hint over you              |
+| `ui.title(s)`                         | Lua      | a title that changes at runtime                       |
+| `layout`                              | Lua      | on a list: `"grid"` for icons, `"mixer"` for values   |
+| `style`                               | Lua      | which of the roles below a node is set in             |
+| `align`                               | Lua      | `"right"` on a line that must clear the hint's corner |
+| `on_click` / `on_options` / `on_back` | Lua      | claim short A, long A, short B                        |
 
 ### The style roles
 
