@@ -5,6 +5,7 @@
 #include "catnip_ui.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "lauxlib.h"
 #include "lua.h"
@@ -272,6 +273,33 @@ int catnip_ui_depth(catnip_rt *rt)
     int depth = (int)lua_tointeger(L, -1);
     lua_pop(L, 1);
     return depth;
+}
+
+int catnip_ui_screen_frame(catnip_rt *rt)
+{
+    if (!ui_call(rt, "root")) return -1;
+    lua_State *L = catnip_rt_lua(rt);
+    int frame = -1;
+    if (lua_istable(L, -1)) {
+        /* Through __index, so this reads the node's props exactly as an app
+         * wrote them - `ui.screen{ frame = "standard" }`. */
+        lua_getfield(L, -1, "frame");
+        const char *s = lua_tostring(L, -1);
+        /* Anything that is not the word "bare" is standard, including a typo.
+         * The alternative is a screen that silently keeps the manifest's answer
+         * because it misspelled its disagreement with it, and a frame that
+         * ignores what a screen asked for is the failure this exists to end. */
+        if (s) frame = (strcmp(s, "bare") == 0) ? 1 : 0;
+        lua_pop(L, 1);
+    }
+    lua_pop(L, 1);
+    return frame;
+}
+
+bool catnip_ui_bare(catnip_rt *rt, bool manifest_bare)
+{
+    int frame = catnip_ui_screen_frame(rt);
+    return (frame >= 0) ? (frame != 0) : manifest_bare;
 }
 
 bool catnip_ui_pop(catnip_rt *rt)

@@ -653,6 +653,21 @@ void setup()
     maybe_join_network();
 }
 
+/* Whether the panel belongs to the running app right now.
+ *
+ * Two answers, in order: the visible screen's own `frame`, and the manifest's
+ * when the screen said nothing. That order is the whole point - `frame` used to
+ * be the manifest's alone, which made "the whole panel is mine" a claim an app
+ * made once for every screen it would ever show, and the clock is the app that
+ * cannot make it: its face wants the panel and its setter wants the bar back.
+ *
+ * In the menu neither answers yes: no screen there sets `frame`, and the shell
+ * reports bare only while an app is actually running. */
+static bool app_is_bare()
+{
+    return g_rt && catnip_ui_bare(g_rt, catnip_shell_bare(g_shell) != 0);
+}
+
 void loop()
 {
     /* Either side of the frame draw: a full-screen blit takes long enough that
@@ -778,12 +793,7 @@ void loop()
         /* Whichever way it ended - B, home, finished, faulted - teardown loaded
          * the blank screen, so the menu has to be rebuilt before the next pass
          * draws it. */
-        if (st == CATNIP_SHELL_MENU) {
-            /* The launcher's own screens are never bare, and this has to be
-             * cleared before the menu is rebuilt rather than after. */
-            catnip_lvgl_backend_set_bare(false);
-            catnip_pages_rebuild(g_pages);
-        }
+        if (st == CATNIP_SHELL_MENU) catnip_pages_rebuild(g_pages);
     } else if (g_shell) {
         /* In the menu. A click has latched which app to launch; the launch
          * tears the menu tree down, so one that then fails to load must put the
@@ -791,16 +801,20 @@ void loop()
         const char *id = catnip_pages_take_launch(g_pages);
         if (id) {
             char err[64];
-            /* Before the app's first screen exists, which is what decides
-             * whether it reserves room for a bar it will not be given. */
-            if (catnip_shell_launch_id(g_shell, id, err, sizeof(err)) == 0) {
-                catnip_lvgl_backend_set_bare(catnip_shell_bare(g_shell) != 0);
-            } else {
+            if (catnip_shell_launch_id(g_shell, id, err, sizeof(err)) != 0) {
                 Serial.printf("[catnip] menu: %s could not launch: %s\n", id, err);
                 catnip_pages_rebuild(g_pages);
             }
         }
     }
+
+    /* Whether the panel belongs to the app, decided fresh every pass and before
+     * the tree is drawn - it is what says whether the region reserves room for
+     * a bar. Asked of the visible screen first and of the manifest only when
+     * the screen said nothing, so an app whose screens are all one shape still
+     * declares it once and the clock can hand the bar back for its setter. */
+    const bool bare = app_is_bare();
+    catnip_lvgl_backend_set_bare(bare);
 
     if (g_rt && g_be) catnip_render(g_rt, g_be);
 
@@ -816,7 +830,7 @@ void loop()
     update_status(false);
     /* Not over a canvas. `frame: "bare"` is a promise about the whole panel, and
      * a bar floating on the top layer would be the platform breaking it. */
-    catnip_frame_show(catnip_lvgl_backend_active() && !catnip_shell_bare(g_shell));
+    catnip_frame_show(catnip_lvgl_backend_active() && !bare);
     /* And what the four directions do from where the ring is (#80). Derived
      * from the tree by the same function the input pass asks, so the arrow that
      * is lit and the press that does something cannot disagree. */
@@ -824,7 +838,7 @@ void loop()
      * or asked for the hint not to be drawn, which is `"hints": false`. The
      * first is a claim about the whole surface and the second about this app's
      * directions needing no explanation, and either is reason enough. */
-    catnip_frame_show_hint(catnip_lvgl_backend_active() && !catnip_shell_bare(g_shell) &&
+    catnip_frame_show_hint(catnip_lvgl_backend_active() && !bare &&
                            catnip_shell_hints(g_shell));
     catnip_frame_set_hint(catnip_ui_input_hint(g_rt, catnip_ui_input_focused()));
     /* The status strip in the bar (#83): a card when one is in the slot, the

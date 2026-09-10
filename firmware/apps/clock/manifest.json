@@ -6,6 +6,8 @@
   "catnip_api": "1.0",
   "entry": "main.lua",
   "icon": "icon.png",
+  "frame": "bare",
+  "hints": false,
   "glance": "time",
   "counter": false,
   "permissions": []

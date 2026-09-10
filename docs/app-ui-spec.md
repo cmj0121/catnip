@@ -588,31 +588,39 @@ a clock being looked at should have nothing on it that is about the device.
 
 ```text
 ┌────────────────────────────────────────────────┐
-│  09-09                                         │  caption
+│                  2026-09-10                    │  body
 │                                                │
-│                 14:32                          │  display
+│                   14:32                        │  display
 │                                                │
-│           S   M   T  [W]  T   F   S            │  caption, one lit
-│                                                │
-│                       network time, 14:02      │  caption
+│  S M T W [T] F S                  NTP 14:30    │  body
 └────────────────────────────────────────────────┘
 ```
 
 Three layers, three sizes, and **none of them asks to be read twice**: the date
-waits in a corner for someone who wants it, the time meets the eye in the middle,
-and the weekday is a row of almost-invisible letters with today's lit. The strip
-earns its place by not needing to be read at all — seven positions, and the lit
-one is the answer.
+waits above for whoever wants it, the time meets the eye in the middle, and the
+weekday is a row of letters with today's in brackets. The strip earns its place
+by not needing to be read at all — seven positions, and the marked one is the
+answer.
 
 ```lua
-ui.screen{ ui.list{
-  ui.label{ id = "date",    text = "09-09",             style = "caption" },
-  ui.label{ id = "time",    text = "14:32",             style = "display" },
-  ui.label{ id = "weekday", text = "S M T [W] T F S",   style = "caption" },
-  ui.label{ id = "source",  text = "network time, 14:02",
-                            style = "caption", align = "right" },
-}}
+ui.screen{
+  ui.label{ id = "date", text = "2026-09-10", style = "body" },
+  ui.label{ id = "time", text = "14:32",      style = "display" },
+  ui.label{ id = "week", text = "S M T W [T] F S", style = "body" },
+  ui.label{ id = "src",  text = "NTP 14:30",  style = "body" },
+}
 ```
+
+**The order is the whole layout.** The date is named before the centrepiece, so
+it is the line above; the strip and the source line are named after it, so they
+are the line below, first-to-the-left and last-to-the-right. Nothing says a
+corner and the source line still lands in one.
+
+**No `align` here, and the corner is why.** A line at the foot of a _list_ asks
+for `align = "right"` to clear the control hint; a bare face has no hint drawn
+over it and no corner to clear, and the canvas has already put the last child at
+the right edge. Asking twice would cost the wide box that ranging text right
+takes, and that box would sit on top of the strip.
 
 **Where the time came from lives here and only here.** Not on the carousel, where
 it would be three quarters of what is on screen; and not on the setter, where a
@@ -621,9 +629,7 @@ of someone in the middle of answering it themselves. On the face it is the one
 place a doubt about the time can be settled, which is when anyone ever asks.
 
 An unsynced clock says nothing rather than saying it is unsynced — the line is
-simply absent. _(Today the shipped face is not yet `bare` and the line is
-right-aligned to clear the hint's corner. When the face becomes screen 1 there is
-no corner to clear, and `align` there becomes a choice rather than a workaround.)_
+simply absent.
 
 **An unset clock says so.** The RTC comes up never having been set, and a
 confident `00:00` on the first of January is worse than an admission: it will be
@@ -826,7 +832,7 @@ on another:
 | 4   | The setting screen: paged, two levels of focus, double A                      | the preference page and the input pass |
 | 5   | The hint reserves its corner on lists, floats elsewhere, and rides on the bar | the frame                              |
 | 6   | The action bar: the two-icon and three-icon shapes                            | new                                    |
-| 7   | The clock becomes three screens                                               | `apps/clock/main.lua`, `manifest.json` |
+| 7   | ~~The clock becomes three screens~~ — built                                   | `apps/clock/main.lua`, `manifest.json` |
 
 **One app changes, and it is the clock.** The File Browser and the WiFi Prober
 are both list screens and neither has a line to edit: every one of 1–5 is the

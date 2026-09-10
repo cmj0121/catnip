@@ -66,8 +66,7 @@ const char *catnip_menu_focus_name(const catnip_menu *m);
  *
  * Writes only what differs, so the twenty-nine passes a minute where nothing
  * has changed cost nothing at all. */
-void catnip_menu_set_glance(catnip_menu *m, const char *time, const char *date,
-                            const char *week);
+void catnip_menu_set_glance(catnip_menu *m, const char *time);
 
 /* Forget where the ring was, so the next rebuild opens on the cat.
  *

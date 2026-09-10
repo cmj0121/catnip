@@ -43,6 +43,29 @@ const char *catnip_ui_title(catnip_rt *rt);
  * and should leave. */
 int catnip_ui_depth(catnip_rt *rt);
 
+/* Which frame the *visible* screen asked for: 1 for bare, 0 for standard, and
+ * -1 when it said nothing and the manifest's answer still stands.
+ *
+ * `frame` began as a manifest key, which made it a claim about the app rather
+ * than about one of its screens - and the clock is the app that shows why that
+ * is the wrong altitude. Its face is a canvas that wants the whole panel and
+ * its setter is a page of columns that wants the bar back, so an app-wide flag
+ * can only be wrong about one of them. A screen is what has a frame around it,
+ * so a screen is what gets to say.
+ *
+ * The manifest key stays, and stays the default: an app whose screens are all
+ * one shape still says it once. */
+int catnip_ui_screen_frame(catnip_rt *rt);
+
+/* The same question, already answered: whether the panel belongs to the app
+ * right now, given what the manifest said.
+ *
+ * The two-line rule - the screen first, the manifest when the screen said
+ * nothing - lives here rather than at the board, because the board is the one
+ * layer no host test can reach. A rule that only exists in main.cpp is a rule
+ * that is checked by flashing. */
+bool catnip_ui_bare(catnip_rt *rt, bool manifest_bare);
+
 /* Discard the visible screen, revealing the one beneath. Returns true if there
  * was one. This is ui.pop() called from the platform rather than by the app:
  * the app declined the back, so the pop is the platform's default action and

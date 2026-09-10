@@ -162,11 +162,14 @@ void mark_list(catnip_handle parent)
 
 const lv_font_t *role_font(catnip_style_role role, bool canvas)
 {
-    /* On a canvas the prose roles differ only in ink. There is one thing on a
-     * canvas to be looked at and everything else is a label beside it, so a
-     * heading and a caption at different sizes would only make the labels argue
-     * with each other - and a strip whose letters changed size as the day
-     * changed would shift under the eye at midnight. */
+    /* In a canvas *cell* the prose roles differ only in ink. A cell is a
+     * fraction of the panel with one thing in it to be looked at, so a heading
+     * and a caption at different sizes would only make the labels argue with
+     * each other - and at cell scale the smaller of the two would not be read
+     * at all. A canvas that *is* the panel is the other case and is not this
+     * one: it has room for the three sizes the roles already mean, which is
+     * what a face is - the date in a corner, the time in the middle, and the
+     * working underneath in the ink that says it is working. */
     if (canvas && role != CATNIP_STYLE_DISPLAY) return &lv_font_montserrat_24;
 
     switch (role) {
@@ -218,16 +221,21 @@ lv_obj_t *button_label(lv_obj_t *button)
     return lv_obj_get_child(button, 1);
 }
 
-/* Whether this node sits on a canvas - a bare screen, or anything laid out as
- * one. The scale is a property of where a node is, not of what it is: the same
- * `caption` is a footnote on a page and a label on a face. */
+/* Whether this node sits in a canvas *cell* - a list laid out as a canvas,
+ * which is what a carousel's clock cell is. The scale is a property of how much
+ * room a node has, not of what it is.
+ *
+ * A bare screen used to answer yes here too, and that was the same word for two
+ * different amounts of room: the launcher's cell is one position on a ring and
+ * a bare screen is 320x240. Everything on the clock's own face came out at 24
+ * px because of it, which put a line of prose at 328 px on a 320 px panel - the
+ * source line ran off the right-hand edge and sat on top of the weekday strip
+ * on the way. A face that is the whole panel keeps the roles' own sizes. */
 bool on_canvas(const Entry *e)
 {
     Entry *p = map_find(e->parent);
 
-    if (p && p->kind == CATNIP_NODE_LIST && p->layout == CATNIP_LAYOUT_CANVAS)
-        return true;
-    return g_bare && p && p->kind == CATNIP_NODE_SCREEN;
+    return p && p->kind == CATNIP_NODE_LIST && p->layout == CATNIP_LAYOUT_CANVAS;
 }
 
 void apply_style(Entry *e, catnip_style_role role)

@@ -119,12 +119,9 @@ void catnip_pages_rebuild(catnip_pages *p)
 
 void catnip_pages_glance(catnip_pages *p)
 {
-    static const char *const kDay[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
     uint32_t t;
     char hm[8];
-    char date[16];
-    int32_t y;
-    uint32_t mo, d, h, mi, wd;
+    uint32_t h, mi;
 
     if (!p) return;
 
@@ -161,19 +158,18 @@ void catnip_pages_glance(catnip_pages *p)
     t = p->env.now_epoch(p->env.ud);
     if (!t) {
         /* The same admission the clock's own face makes. */
-        catnip_menu_set_glance(p->menu, NULL, "----------", "");
+        catnip_menu_set_glance(p->menu, NULL);
         p->shown_time[0] = '\0';
         return;
     }
-    catnip_rtc_split(t, &y, &mo, &d, &h, &mi, &wd);
+    /* The hour and the minute, and nothing else asked for: the ring's cell
+     * shows the time alone now, so the date and the weekday this used to
+     * compute went out with the two labels that displayed them. */
+    catnip_rtc_split(t, NULL, NULL, NULL, &h, &mi, NULL);
     snprintf(hm, sizeof(hm), "%02u:%02u", (unsigned)h, (unsigned)mi);
-    /* The time alone is enough to tell a changed pass from an unchanged one:
-     * the date cannot change without it - midnight is 23:59 becoming 00:00 -
-     * which is the same reason the weekday is not compared either. */
     if (strcmp(hm, p->shown_time) == 0) return;
     snprintf(p->shown_time, sizeof(p->shown_time), "%s", hm);
-    snprintf(date, sizeof(date), "%04d-%02u-%02u", (int)y, (unsigned)mo, (unsigned)d);
-    catnip_menu_set_glance(p->menu, hm, date, kDay[wd]);
+    catnip_menu_set_glance(p->menu, hm);
 }
 
 /* The grid of every app (#71), reached by pushing up from the ring. Built from

@@ -198,34 +198,56 @@ int main(void)
         catnip_menu_free(menu);
     }
 
-    /* ---- a face, and the corner it may not use -------------------------- */
-    /* The clock's shape: the centrepiece first, so both of the others are on
-     * the bottom line - which is what "the order the children are named in is
-     * the layout" means, and what the clock's own face relies on. */
+    /* ---- the clock's face, as the app builds it ------------------------- */
+    /* Four children with the centrepiece second: the date is named before it so
+     * it is the top line, the weekday and the source line after it so they are
+     * the bottom one, first-to-the-left and last-to-the-right. That is the whole
+     * of what "the order the children are named in is the layout" means, and it
+     * is what puts where-the-time-came-from in the bottom-right corner without
+     * the app saying a coordinate.
+     *
+     * Bare, because the face is screen 1: no bar over it and no hint, so the
+     * bottom line starts at the panel's edge rather than clearing a corner
+     * nothing is drawn in. */
+    catnip_lvgl_backend_set_bare(true);
     run("ui.screen{ id = 'face',\n"
-        "  ui.list{ id = 'canvas', layout = 'canvas',\n"
-        "    ui.label{ id = 'time', text = '14:03', style = 'display' },\n"
-        "    ui.label{ id = 'date', text = '2026-09-09', style = 'caption' },\n"
-        "    ui.label{ id = 'week', text = 'Tue', style = 'caption' } } }\n");
+        "  ui.label{ id = 'date', text = '2026-09-10', style = 'body' },\n"
+        "  ui.label{ id = 'time', text = '14:32', style = 'display' },\n"
+        "  ui.label{ id = 'week', text = ' S  M  T  W [T] F  S ', style = 'body' },\n"
+        "  ui.label{ id = 'src', text = 'NTP 14:30', style = 'body' } }\n");
     pass();
     shot("clock-face");
     {
         lv_obj_t *date = obj("date");
         lv_obj_t *week = obj("week");
+        lv_obj_t *src = obj("src");
         lv_obj_t *time_ = obj("time");
-        lv_obj_t *canvas = obj("canvas");
-        int floor_ = canvas ? (int)lv_obj_get_height(canvas) / 2 : 0;
+        int floor_ = CATNIP_SCREEN_H / 2;
 
-        CHECK(date && week && time_, "the face is drawn");
-        CHECK(date && week && lv_obj_get_y(date) > floor_ && lv_obj_get_y(week) > floor_,
-              "both of the ones named after the centrepiece are on the bottom line");
-        CHECK(date && week && lv_obj_get_x(week) > lv_obj_get_x(date),
+        CHECK(date && week && src && time_, "the face is drawn");
+        CHECK(date && lv_obj_get_y(date) < floor_,
+              "the one named before the centrepiece is the top line");
+        CHECK(week && src && lv_obj_get_y(week) > floor_ && lv_obj_get_y(src) > floor_,
+              "and the two named after it are the bottom line");
+        /* The bottom line fits on the panel, both of it. Everything on a face
+         * used to be 24 px, which made this one line 328 px wide on a 320 px
+         * screen - it ran off the right-hand edge and crossed the strip on the
+         * way, and neither of the two assertions below could see it. */
+        CHECK(week && src &&
+                  lv_obj_get_x(week) + (int)lv_obj_get_width(week) <= lv_obj_get_x(src),
+              "and they do not overlap");
+        CHECK(week && src && lv_obj_get_x(src) > lv_obj_get_x(week),
               "which runs first-to-the-left, last-to-the-right");
-        /* And the bug the hint introduced the day it was drawn: the date sat
-         * underneath four arrows. */
-        CHECK(date && lv_obj_get_x(date) >= CATNIP_FRAME_HINT_W,
-              "and starts to the right of the control hint");
+        CHECK(src && lv_obj_get_x(src) + (int)lv_obj_get_width(src) > CATNIP_SCREEN_W / 2,
+              "so the source line ends up in the bottom-right corner");
+        /* The corner rule, from the other side. A list reserves it because its
+         * rows reach it; a bare face reserves nothing, because nothing is drawn
+         * over one - and reserving it anyway would be the platform taking 34 px
+         * for a hint it is not going to draw. */
+        CHECK(week && lv_obj_get_x(week) < CATNIP_FRAME_HINT_W,
+              "and nothing is held back for a hint a bare screen never gets");
     }
+    catnip_lvgl_backend_set_bare(false);
 
     /* ---- a pushed screen with no centrepiece stacks --------------------- */
     /* `frame: "bare"` belongs to the app, not to one of its screens, so every
@@ -248,14 +270,20 @@ int main(void)
 
     catnip_lvgl_backend_set_bare(false);
     /* The Clock app's setter as the app actually builds it: the mixer, and the
-     * caption under it saying where the time came from (#84). The caption is
-     * the thing being checked - a line added under a list that grows is the
-     * classic way to add something nobody ever sees. */
+     * standard frame it pushes itself under. It used to carry a caption saying
+     * where the time came from; that line is on the face now, where a doubt
+     * about the time is actually had, rather than over the shoulder of somebody
+     * already answering it.
+     *
+     * The caption stays in this tree all the same, under a name that says what
+     * it is for: `align` reached the renderer once and then did nothing for a
+     * label that was not a row in a list, and the screen looked exactly as it
+     * had. Something has to hold that path down. */
     run("ui.screen{ id = 'setter',\n"
         "  ui.list{ id = 'cols', layout = 'mixer', on_prev = function() end,\n"
         "    ui.label{ id = 'c1', text = 'Y', value = 50 },\n"
         "    ui.label{ id = 'c2', text = 'M', value = 50 } },\n"
-        "  ui.label{ id = 'source', text = 'network time, synced 14:18',\n"
+        "  ui.label{ id = 'source', text = 'a line that must clear the corner',\n"
         "           style = 'body', align = 'right' } }\n");
     pass();
     /* With the hint drawn, because both live in the bottom-left corner and the
@@ -270,13 +298,11 @@ int main(void)
     catnip_frame_show(false);
     {
         lv_obj_t *src = obj("source");
-        CHECK(src != NULL, "the setter's source line exists");
+        CHECK(src != NULL, "a line under the columns exists");
         CHECK(src && lv_obj_get_y(src) + lv_obj_get_height(src) <= CATNIP_SCREEN_H,
               "and sits inside the panel rather than below its bottom edge");
         /* Ranged right, which is what keeps it out of the control hint's
-         * corner. Pinned because `align` reached the renderer and then did
-         * nothing for a label that was not a row in a list - it applied on one
-         * path and not the other, and the screen looked exactly as it had. */
+         * corner on a screen that does reserve one. */
         CHECK(src && lv_obj_get_style_text_align(src, 0) == LV_TEXT_ALIGN_RIGHT,
               "and is ranged right, clear of the hint's corner");
         CHECK(src && lv_obj_get_width(src) > CATNIP_SCREEN_W / 2,
