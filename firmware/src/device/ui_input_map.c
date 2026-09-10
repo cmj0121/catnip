@@ -57,7 +57,17 @@ catnip_dir_meaning catnip_ui_input_dir(catnip_button button, catnip_node_layout 
         if (left) return CATNIP_DIR_RING_BACK;
         if (right) return CATNIP_DIR_RING_FWD;
         if (down) return CATNIP_DIR_LEAVE_DOWN;
-        return CATNIP_DIR_NOTHING; /* up: the grid, once there is one */
+        return CATNIP_DIR_LEAVE_UP; /* up: the grid of every app (#71) */
+    }
+
+    /* A grid is a directory the ring walks in two dimensions. Both axes step
+     * the selection - left and up back, right and down on - because the cells
+     * flow left to right and wrap, so "back" and "on" are the two things a user
+     * means however they push. It clamps, like the column it is a wrapped
+     * version of; leaving it is B. */
+    if (layout == CATNIP_LAYOUT_GRID) {
+        if (left || up) return CATNIP_DIR_PREV;
+        return CATNIP_DIR_NEXT;
     }
 
     /* A mixer is stepped sideways for the same reason a carousel is - its

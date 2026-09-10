@@ -16,6 +16,14 @@
 extern "C" {
 #endif
 
+/* One access point a scan found (#54): what it is called, how strong it is in
+ * dBm (closer to zero is stronger), and which channel it is on. */
+typedef struct {
+    char ssid[33];
+    int rssi;
+    int channel;
+} catnip_wifi_ap;
+
 typedef struct {
     void *ud; /* passed back to every callback */
 
@@ -54,6 +62,12 @@ typedef struct {
     /* service.* */
     int (*wifi_status)(void *ud);       /* 1 connected, 0 not */
     const char *(*wifi_ssid)(void *ud); /* SSID or NULL */
+    /* Scan for nearby access points (#54). Fills up to `max` entries and
+     * returns how many, or -1 while a scan is still running - which is how a
+     * caller knows to ask again rather than that nothing is there. Non-blocking:
+     * it starts a scan and reports the last one's results, so no call stops the
+     * loop for the seconds a scan takes. */
+    int (*wifi_scan)(void *ud, catnip_wifi_ap *out, int max);
     /* HTTP GET: write body into buf (cap incl. NUL); return length or -1. */
     int (*http_get)(void *ud, const char *url, char *buf, size_t cap);
 

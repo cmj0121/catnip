@@ -77,6 +77,16 @@ void catnip_frame_set_hint(unsigned mask);
  * that wanted its own hint suppressed would have lost its title bar with it. */
 void catnip_frame_show_hint(bool on);
 
+/* The status strip beside the battery (#83): a glyph for a card in the slot, a
+ * glyph for the radio being up, and the sync glyph while a clock sync is in
+ * flight. Each appears only when true - absent, not dimmed, because a card that
+ * is not there is nothing to show, unlike a direction the hint must dim.
+ *
+ * Pushed rather than polled: each subsystem says when its answer changes, so
+ * the bar is not going to five drivers on every full-screen frame to draw two
+ * glyphs. */
+void catnip_frame_set_status(bool card, bool radio, bool syncing);
+
 /* The battery, top-left. Below zero means "not measured", and the frame then
  * draws no percentage at all rather than a plausible wrong one - the same rule
  * device.battery() answers -1 by. */

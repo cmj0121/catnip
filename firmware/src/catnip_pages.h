@@ -31,6 +31,7 @@
 
 #include "catnip_config.h"
 #include "catnip_device_info.h"
+#include "catnip_app_grid.h"
 #include "catnip_menu.h"
 #include "catnip_runtime.h"
 #include "catnip_settings.h"
@@ -47,6 +48,7 @@ typedef enum {
     CATNIP_PAGE_HOME = 0, /* the carousel */
     CATNIP_PAGE_INFO,     /* what this device is, and the two ways down */
     CATNIP_PAGE_PREF,     /* the preference page */
+    CATNIP_PAGE_GRID,     /* the grid of every app (#71) */
 } catnip_page;
 
 /* The board, as seen from here. Every callback may be NULL; a run with none of
