@@ -88,11 +88,13 @@ local order = {}
 -- Put the scan into that order. New networks go on the end, gone ones drop out,
 -- and then neighbours swap only where the gap is worth it.
 --
--- The pass is bounded rather than run to a fixed point: the comparison is not a
--- total order - a can be within five of b, and b within five of c, while a is
--- eight below c - so a sort that insisted on settling could walk in a circle.
--- Bounded, it settles over two or three scans instead, which is itself another
--- helping of the damping this is for.
+-- One adjacent pass, not a sort run to a fixed point.
+--
+-- "Stronger by more than five" is not a total order - a can be within five of
+-- b, and b within five of c, while a is eight below c - so a sort that insisted
+-- on settling could walk in a circle. One pass cannot: each neighbour is
+-- considered once, the order settles over two or three scans, and that is
+-- another helping of the damping this is for.
 local function reorder(aps)
   local by_ssid, seen = {}, {}
   for _, ap in ipairs(aps) do by_ssid[ap.ssid] = ap end
@@ -104,25 +106,31 @@ local function reorder(aps)
       seen[ssid] = true
     end
   end
-  -- Newly arrived, strongest first among themselves so a fresh page opens in
-  -- the right order rather than in scan order.
+  -- Newly arrived, put in at their strength rather than on the end.
+  --
+  -- The hysteresis exists to protect an order that is already on screen, and a
+  -- network nobody has seen yet has no position to protect - putting it at the
+  -- bottom and letting it climb one place a scan would be damping a jump that
+  -- never happened. Strongest first among themselves, so several arriving at
+  -- once arrive in order too.
   local fresh = {}
   for _, ap in ipairs(aps) do
     if not seen[ap.ssid] then fresh[#fresh + 1] = ap end
   end
   table.sort(fresh, function(a, b) return a.rssi > b.rssi end)
-  for _, ap in ipairs(fresh) do next_order[#next_order + 1] = ap.ssid end
-
-  for _ = 1, #next_order do
-    local moved = false
-    for i = 1, #next_order - 1 do
-      local a, b = by_ssid[next_order[i]], by_ssid[next_order[i + 1]]
-      if b.rssi - a.rssi > HYSTERESIS then
-        next_order[i], next_order[i + 1] = next_order[i + 1], next_order[i]
-        moved = true
-      end
+  for _, ap in ipairs(fresh) do
+    local at = #next_order + 1
+    for i, ssid in ipairs(next_order) do
+      if ap.rssi > by_ssid[ssid].rssi then at = i break end
     end
-    if not moved then break end
+    table.insert(next_order, at, ap.ssid)
+  end
+
+  for i = 1, #next_order - 1 do
+    local a, b = by_ssid[next_order[i]], by_ssid[next_order[i + 1]]
+    if b.rssi - a.rssi > HYSTERESIS then
+      next_order[i], next_order[i + 1] = next_order[i + 1], next_order[i]
+    end
   end
 
   order = next_order

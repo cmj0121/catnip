@@ -93,19 +93,6 @@ static void start_scan(void)
 
 catnip_wifi_state catnip_wifi_poll(void)
 {
-    /* Modem sleep off for a scan, and back on when nobody is scanning.
-     *
-     * A connected station with modem sleep on parks itself on the channel it is
-     * associated to and wakes only for its own beacons - so a scan started from
-     * there never leaves that channel and finishes having heard nothing. The
-     * radio reports that as a *completed* scan of zero networks, which is the
-     * most misleading answer it could give: the app is right, the driver is
-     * right, the plumbing is right, and the page is empty.
-     *
-     * It costs power, which is why it is not simply left off. It goes off for
-     * as long as somebody is asking for scans and comes back the moment they
-     * stop - the same "still asking" the busy ring is raised by, so a page that
-     * is open is a radio that is awake and a page that was closed is not. */
     if (g_state != CATNIP_WIFI_JOINING) return g_state;
 
     if (WiFi.status() == WL_CONNECTED) {
@@ -182,19 +169,6 @@ bool catnip_wifi_scanning(void)
     return true;
 }
 
-/* Modem sleep off for a scan, and back on when nobody is scanning.
- *
- * A connected station with modem sleep on parks itself on the channel it is
- * associated to and wakes only for its own beacons - so a scan started from
- * there never leaves that channel and finishes having heard nothing. The radio
- * reports that as a completed scan of zero networks, which is the most
- * misleading answer it could give: the app is right, the driver is right, the
- * plumbing is right, and the page is empty.
- *
- * It costs power, which is why it is not simply left off. It goes off for as
- * long as somebody is asking for scans and comes back the moment they stop -
- * the same "still asking" the busy ring is raised by, so a page that is open is
- * a radio that is awake and a page that was closed is not. */
 void catnip_wifi_rescan(void)
 {
     /* Drop the finished scan so the next ask starts one rather than reading
