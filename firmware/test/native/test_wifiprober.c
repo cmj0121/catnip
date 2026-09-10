@@ -214,6 +214,16 @@ int main(void)
     catnip_render_drain(g_rt);
     CHECK(g_rescans == 1, "A throws the last scan away and asks for another");
 
+    /* And on the empty page, where the list is hidden so the message can have
+     * the middle - which means nothing is focusable and the press falls through
+     * to the screen. The one page that says "press A" was the one page where A
+     * had nowhere to land. */
+    CHECK(hidden("aps"), "an empty page hides its list");
+    g_rescans = 0;
+    catnip_rt_dostring(g_rt, "ui.fire(ui.root(), 'click')", "=q");
+    catnip_render_drain(g_rt);
+    CHECK(g_rescans == 1, "and A reaches the screen instead, which answers it");
+
     printf("and the list is a focus stop, so a long page can be read to the end\n");
     put(0, "a", -40, 1);
     put(1, "b", -50, 6);

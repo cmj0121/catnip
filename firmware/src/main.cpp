@@ -1023,6 +1023,11 @@ void loop()
     /* Carry any clock sync forward (#84): it joins the network, asks the time
      * and writes the RTC over several passes, dropping the radio when it is
      * done. Cheap when idle - it returns at once unless a sync is in flight. */
+    /* The radio, once a pass. It steps a join in flight and manages modem
+     * sleep, which has to be off while anything is scanning - a scan with it on
+     * comes back having heard nothing, and the radio reports that as a
+     * completed scan of zero networks. */
+    (void)catnip_wifi_poll();
     catnip_net_time_poll();
 
     /* The frame, last: the counter it draws is read off the tree the pass above

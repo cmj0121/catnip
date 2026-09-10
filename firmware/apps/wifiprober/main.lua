@@ -26,6 +26,14 @@
 local rows
 local sel = 1
 
+-- A throws the last scan away and asks again. The driver was going to rescan
+-- anyway - what this buys is the platform's ring coming back up, which is the
+-- device saying "yes, I heard you". A page that answers a press with the list
+-- it was already showing has not answered it.
+local function look_again()
+  service.wifi.rescan()
+end
+
 -- Up and down are the reading position, and A is "look again".
 --
 -- The list had neither, which meant it was not a focus stop at all - a page of
@@ -39,11 +47,7 @@ rows = ui.list{ id = "aps", layout = "text",
   on_next = function()
     if sel < #rows.children then sel = sel + 1; rows.selected = sel end
   end,
-  -- A throws the last scan away and asks again. The driver was going to rescan
-  -- anyway - what this buys is the platform's ring coming back up, which is the
-  -- device saying "yes, I heard you". A page that answers a press with the list
-  -- it was already showing has not answered it.
-  on_click = function() service.wifi.rescan() end }
+  on_click = function() look_again() end }
 
 -- And one line for the one thing the header cannot say.
 --
@@ -168,14 +172,26 @@ local function refresh()
   status.hidden = (#aps > 0)
 end
 
-ui.screen{ rows, status }
+-- A is on the screen as well as on the list, and the empty page is why.
+--
+-- A press goes to whatever is focused, and falls through to the screen when
+-- nothing is - which is exactly the state the empty page is in, because the
+-- list is hidden there so that the message can have the middle. So the one page
+-- that says "press A to look again" was the one page where A had nowhere to
+-- land. It is on both now: the list answers while there is a list, and the
+-- screen answers when there is not.
+ui.screen{ rows, status, on_click = function() look_again() end }
 
 -- The app is its own loop: build the screen, then poll forever. A main chunk
 -- that never returns stays live and is stepped between its sleeps, which is how
 -- an app without a background thread keeps a screen fresh (sys.sleep yields to
 -- the scheduler; the watchdog is never tripped because the app is not spinning).
 -- B backs out of it, as everywhere.
+-- A second between asks, not because a scan takes a second - it takes five and
+-- a half, and the driver paces the sweeps itself - but because asking is how
+-- the answer is collected, and an answer that has arrived should be drawn
+-- rather than waited out. The driver returns nil until it has one.
 while true do
   refresh()
-  sys.sleep(1500)
+  sys.sleep(1000)
 end

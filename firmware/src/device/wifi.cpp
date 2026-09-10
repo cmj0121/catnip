@@ -53,8 +53,59 @@ void catnip_wifi_begin(const char *ssid, const char *psk)
     g_since = millis();
 }
 
+/* Start one.
+ *
+ * This used to turn modem sleep off first, on the theory that a connected
+ * station parks on the channel it is associated to and cannot hear anything
+ * else. The theory was wrong and the log said so: with the dwell and the rest
+ * below in place, scans come back with seven and eight networks while
+ * `WiFi.getSleep()` reads 1 throughout. The machinery went with the theory -
+ * a driver-level power change made under a running scan can abort it, and
+ * paying that risk for something the data says does nothing is the worst
+ * trade there is. */
+/* How long the radio listens on each channel, and how long it rests between
+ * sweeps.
+ *
+ * Four hundred milliseconds is longer than the beacon interval every access
+ * point in the world uses (about 102 ms), so a channel is listened to for four
+ * beacons rather than for one that may or may not fall inside the window - and
+ * across the fourteen channels of the 2.4 GHz band that is a sweep of about
+ * five and a half seconds. A scan is a thing that takes time; the failure this
+ * replaces was one that took less and reported nothing.
+ *
+ * And a second of quiet between sweeps, because this radio is also holding an
+ * association. It was restarting the next sweep in the same breath as
+ * finishing the last, so the station never had an uninterrupted moment to be a
+ * station in. */
+static const uint32_t kDwellMs = 400;
+static const uint32_t kRestMs = 1000;
+static uint32_t g_scan_done_at;
+
+static void start_scan(void)
+{
+    /* Async, hidden networks included, active rather than passive, and the
+     * dwell said out loud rather than left to the default. A page that is here
+     * to show what is on the air is here to show the ones that do not announce
+     * themselves as well, and the app already has a word for them. */
+    WiFi.scanNetworks(true, true, false, kDwellMs);
+    g_scan_done_at = 0;
+}
+
 catnip_wifi_state catnip_wifi_poll(void)
 {
+    /* Modem sleep off for a scan, and back on when nobody is scanning.
+     *
+     * A connected station with modem sleep on parks itself on the channel it is
+     * associated to and wakes only for its own beacons - so a scan started from
+     * there never leaves that channel and finishes having heard nothing. The
+     * radio reports that as a *completed* scan of zero networks, which is the
+     * most misleading answer it could give: the app is right, the driver is
+     * right, the plumbing is right, and the page is empty.
+     *
+     * It costs power, which is why it is not simply left off. It goes off for
+     * as long as somebody is asking for scans and comes back the moment they
+     * stop - the same "still asking" the busy ring is raised by, so a page that
+     * is open is a radio that is awake and a page that was closed is not. */
     if (g_state != CATNIP_WIFI_JOINING) return g_state;
 
     if (WiFi.status() == WL_CONNECTED) {
@@ -131,6 +182,19 @@ bool catnip_wifi_scanning(void)
     return true;
 }
 
+/* Modem sleep off for a scan, and back on when nobody is scanning.
+ *
+ * A connected station with modem sleep on parks itself on the channel it is
+ * associated to and wakes only for its own beacons - so a scan started from
+ * there never leaves that channel and finishes having heard nothing. The radio
+ * reports that as a completed scan of zero networks, which is the most
+ * misleading answer it could give: the app is right, the driver is right, the
+ * plumbing is right, and the page is empty.
+ *
+ * It costs power, which is why it is not simply left off. It goes off for as
+ * long as somebody is asking for scans and comes back the moment they stop -
+ * the same "still asking" the busy ring is raised by, so a page that is open is
+ * a radio that is awake and a page that was closed is not. */
 void catnip_wifi_rescan(void)
 {
     /* Drop the finished scan so the next ask starts one rather than reading
@@ -140,7 +204,7 @@ void catnip_wifi_rescan(void)
     g_scan_asked = true;
     g_scan_answered = false;
     g_scan_started = millis();
-    WiFi.scanNetworks(true);
+    start_scan();
 }
 
 int catnip_wifi_scan(catnip_wifi_ap *out, int max)
@@ -155,10 +219,10 @@ int catnip_wifi_scan(catnip_wifi_ap *out, int max)
         if (n != last_n || (uint32_t)(now - last_log) > 2000u) {
             last_n = n;
             last_log = now;
-            Serial.printf("[catnip] scan: complete=%d mode=%d status=%d asked=%d "
-                          "answered=%d\n",
-                          n, (int)WiFi.getMode(), (int)WiFi.status(), (int)g_scan_asked,
-                          (int)g_scan_answered);
+            Serial.printf("[catnip] scan: complete=%d status=%d sleep=%d awake=%d "
+                          "asked=%d answered=%d\n",
+                          n, (int)WiFi.status(), (int)WiFi.getSleep(), 0,
+                          (int)g_scan_asked, (int)g_scan_answered);
         }
     }
 
@@ -173,7 +237,11 @@ int catnip_wifi_scan(catnip_wifi_ap *out, int max)
         /* Nothing running and nothing to report: start one. Async, so this
          * returns at once and the answer arrives on a later call. show_hidden
          * false, passive false - an ordinary active scan of the 2.4 GHz band. */
-        WiFi.scanNetworks(true);
+        /* Nothing running. Start one, unless the last sweep only just
+         * finished - the rest is what keeps this from being a radio that
+         * scans continuously and is a station in the gaps. */
+        if (g_scan_done_at == 0 || (uint32_t)(now - g_scan_done_at) >= kRestMs)
+            start_scan();
         return -1;
     }
     if (n == WIFI_SCAN_RUNNING) return -1;
@@ -187,7 +255,10 @@ int catnip_wifi_scan(catnip_wifi_ap *out, int max)
         out[i].channel = WiFi.channel(i);
     }
     WiFi.scanDelete();
-    WiFi.scanNetworks(true);
+    /* Answered, and then quiet. The next sweep starts on a later ask, once the
+     * rest above has passed: starting it here meant the radio was mid-sweep
+     * again before the answer had even been drawn. */
+    g_scan_done_at = now ? now : 1;
     g_scan_answered = true;
     return count;
 }
