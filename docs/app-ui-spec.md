@@ -43,8 +43,20 @@ lays it out.
 | **One icon**        | a landing page — the cat, a splash               | centred, alone                           |
 | **Up to six icons** | a set of things to choose between                | **3x2 grid**, the focused one ringed     |
 | **Rows of text**    | anything longer, or anything that needs words    | one row per line                         |
+| **Lines of text**   | a page to be read rather than chosen from        | one line per line, nothing ringed        |
 | **Values**          | settings — quantities, not choices               | **vertical bars**, side by side          |
 | **A face**          | one thing to be looked at, with labels around it | **canvas** — a centrepiece and two lines |
+
+**Rows and lines are not the same shape.** A row is a thing you may pick: it
+reserves an icon slot, it is ringed when the cursor is on it, and A on it does
+something. A line is a thing you read: no slot, no ring, and A on it is the
+page's business rather than the line's. `ui.list{ layout = "text" }` is the
+second, and the device page is what asked for it — a ring round "free heap"
+would be promising that pressing A there did something to the free heap.
+
+The cursor is still there in a column of lines; it is simply not drawn. What is
+left of a selection on a page nobody is choosing from is the reading position,
+and the page that is up is the half of it that shows.
 
 The first three all answer "which one?". **Values** is the fourth because none of
 them can answer "how much?" — a quantity has no natural row and no natural icon,
@@ -113,11 +125,17 @@ figure leaves both bottom corners empty whether or not anything is put in one.
 optional here: `2/3` is the only thing on the screen that says a third page
 exists, and a grid without it is a grid that appears to be all there is.
 
-**4. List.** One item per row, one row per line, and **the region's height is cut
-to a whole number of rows**. A half-row peeking past the bottom edge reads as a
+**4. List.** One item per line — a row you may pick, or a line you may only
+read — and **paged**, on fixed boundaries: lines one to eight, then nine to
+sixteen. The region is cut to a whole number of them, so a half-line at the
+bottom edge is not a thing this screen can show; a half-line reads as a
 rendering fault rather than as an invitation to scroll, and it is not needed as
-one: `3/11` in the header already says there is more, which is the second reason
-the header is not optional here either.
+one because `2/4` in the header already says there is more.
+
+It used to slide a viewport a row at a time, which meant the lines on screen
+were a different set every time the page was opened and nothing said why. Paged,
+it is the grid's shape in one dimension: the cursor moves within the page, and
+the page turns under it when it steps off.
 
 **5. Setting.** The **Values** shape, paged — as many columns as fit at a
 readable width, and the next screenful is the next page rather than a sideways
@@ -187,6 +205,38 @@ right now do something, which is the case the hint was built for.
 An app that set `"hints": false` gets no hint here either. The bar is unaffected
 by that flag: it is not an explanation of the controls, it is one of them.
 
+### Waiting
+
+There is one picture of waiting in this device and the platform draws it: a ring
+of eight dots with a bright one running round it, once a second, taken from the
+clock rather than counted — a spinner that sped up when the device had less to
+do would be saying the opposite of the truth.
+
+**It takes the whole panel**, and takes it from the bar and the hint as well.
+While it is up nothing underneath is true any more — the app being loaded is not
+the menu behind it, the list being scanned for is not the list still on screen —
+and a half-covered screen of stale content invites reading. The bar would be
+naming a screen that is going away and the hint would be a picture of controls
+that do nothing; both would be lying, quietly, in a corner.
+
+**No app raises it and no app draws one.** What waiting looks like was never an
+app's to decide, and an app that wrote its own would be one more shape a user
+has to learn for a thing they already know. The platform raises it for what it
+can see: a scan with nothing to show yet, an app being read off the card.
+
+**"Nothing to show yet", not "something is running."** A caller that keeps
+polling keeps a scan in the air the whole time it is open, and a spinner that
+never stops tells nobody anything. It is up from the first ask until the first
+answer, and it ends on its own — a claim that takes the whole device must be one
+that can end without anybody clearing it.
+
+**The status LED says it too**, which is the one place an answer can be read
+without looking at the screen — and that matters most in the case the ring
+cannot help with, because loading an app is the one moment the screen is about
+to be replaced anyway. Green is resting, the working colour is the same earthy
+yellow the ring is drawn in, and white is the screen being off: a dark panel is
+the state most likely to be read as a device that has died.
+
 **Long B is the safety zone and is never on the bar.** Short B is negotiable —
 an app may claim it, and the bar may rebind it. Long B reaches the cat from any
 depth and reaches no handler of anyone's.
@@ -214,11 +264,13 @@ optional.
    names a _category_; your `icon.png` is your app's _identity_. An unknown glyph
    degrades safely; a missing image falls back to the mascot. The built-in set is
    catnip's own solid colour set (`firmware/assets/icons`), not a borrowed symbol font.
-6. **Let `[PAGE]` be derived.** The frame works it out from what the main region
-   holds, and there is no API that sets it: a grid counts **pages**, a list
-   counts **rows**, a carousel and a mixer count **positions**, and a single icon
-   counts nothing and stays blank. A grid says `2/3` rather than `8/14` because what a
-   user sees there is a position on a page, not an ordinal.
+6. **Let `[PAGE]` be derived, and let it count screenfuls.** The frame works it
+   out from what the main region holds, and there is no API that sets it:
+   everything that pages counts **pages** — a grid, a list, a page of values — a
+   carousel counts **positions**, and a single icon counts nothing and stays
+   blank. `2/3` rather than `8/14`, because what a counter is for is how much
+   further there is to go, and the unit a reader can act on is screenfuls. "Row
+   twelve of forty-five" is an ordinal, and an ordinal is not an answer.
 7. **Short press is primary, long press is secondary — the same on A and B.**
    Short A activates; long A offers options for the selected item. Nothing an
    app can _do_ is ever on the screen — operations exist only behind long A.
@@ -438,19 +490,19 @@ to decide.
 
 The manifest carries the knobs; Lua carries the behaviour.
 
-| Knob                                  | Where    | Effect                                                |
-| ------------------------------------- | -------- | ----------------------------------------------------- |
-| `name`                                | manifest | default title, and the name on your page              |
-| `icon`                                | manifest | your identity icon; absent → the mascot               |
-| `actions[]`                           | manifest | the action catalogue: `id`, `name`, `icon`            |
-| `frame`                               | manifest | `"standard"` (default) or `"bare"` — screen 1 or 2–5  |
-| `counter`                             | manifest | `false` if you are not a list                         |
-| `hints`                               | manifest | `false` to draw no control hint over you              |
-| `ui.title(s)`                         | Lua      | a title that changes at runtime                       |
-| `layout`                              | Lua      | on a list: `"grid"` for icons, `"mixer"` for values   |
-| `style`                               | Lua      | which of the roles below a node is set in             |
-| `align`                               | Lua      | `"right"` on a line that must clear the hint's corner |
-| `on_click` / `on_options` / `on_back` | Lua      | claim short A, long A, short B                        |
+| Knob                                  | Where    | Effect                                                        |
+| ------------------------------------- | -------- | ------------------------------------------------------------- |
+| `name`                                | manifest | default title, and the name on your page                      |
+| `icon`                                | manifest | your identity icon; absent → the mascot                       |
+| `actions[]`                           | manifest | the action catalogue: `id`, `name`, `icon`                    |
+| `frame`                               | manifest | `"standard"` (default) or `"bare"` — screen 1 or 2–5          |
+| `counter`                             | manifest | `false` if you are not a list                                 |
+| `hints`                               | manifest | `false` to draw no control hint over you                      |
+| `ui.title(s)`                         | Lua      | a title that changes at runtime                               |
+| `layout`                              | Lua      | on a list: `"grid"`, `"mixer"`, `"row"`, `"canvas"`, `"text"` |
+| `style`                               | Lua      | which of the roles below a node is set in                     |
+| `align`                               | Lua      | `"right"` on a line that must clear the hint's corner         |
+| `on_click` / `on_options` / `on_back` | Lua      | claim short A, long A, short B                                |
 
 ### The style roles
 
@@ -475,6 +527,14 @@ writing down because they are the reason a role is enough:
 | `title`   | 20   | a heading, one step clear of the rows under it      |
 | `caption` | 10   | working, deliberately not competing with the answer |
 | `display` | 96   | one number owning the panel                         |
+
+**The typeface is monospaced, and that is a decision rather than a taste.**
+Nearly everything this device shows is a value beside a label: a channel next to
+a name, a strength next to both, a heap size under a version. In a proportional
+face those columns line up only by accident — the number after a short name sits
+somewhere else than the number after a long one — and a page has to be read
+across instead of down. Monospaced, the columns are a property of the type
+rather than of whichever strings happen to be in them.
 
 `body` and `title` were 14 and 16. A list is the screen this device spends most
 of its time being, and 14 is a size you read by leaning in — which on a device
@@ -861,8 +921,11 @@ the joystick is what commits.
 ## What this asked for, and where each of it landed
 
 _The five screens_ was a description of where the device was going. All seven of
-the changes it asked for are in, and the table is kept as the map of where each
-one landed rather than as a list of what is owed:
+the changes it asked for are in, and so is a second round that came out of using
+them - a sixth layout for a page that is read rather than chosen from, one
+picture of waiting, a monospaced face, and a counter that says screenfuls. The
+table is the map of where the first seven landed rather than a list of what is
+owed:
 
 | #   | Change                                                                                  | Where                                       |
 | --- | --------------------------------------------------------------------------------------- | ------------------------------------------- |
