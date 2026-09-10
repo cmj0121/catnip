@@ -198,6 +198,53 @@ int main(void)
         catnip_menu_free(menu);
     }
 
+    /* ---- a list shows whole rows, never half of one --------------------- */
+    /* Eleven rows into a region that fits some number of them: what is asserted
+     * is that the region is an exact number of rows tall, so the bottom edge
+     * cannot cut one in half. `3/11` in the header is what says there is more,
+     * and a half-row saying it as well reads as a fault rather than as an
+     * invitation. */
+    run("local rows = {}\n"
+        "for i = 1, 11 do rows[i] = ui.label{ id = 'r' .. i, text = 'row ' .. i } end\n"
+        "local list = ui.list{ id = 'rows', on_prev = function() end }\n"
+        "ui.screen{ list }\n"
+        "list:set_children(rows)\n");
+    /* Twice. A screen settles over two passes - the list's layout is what tells
+     * the screen how much of itself to reserve, and the rows are what say how
+     * tall a row is - and the device runs continuously, so the second pass is
+     * the state anyone ever sees. */
+    pass();
+    pass();
+    shot("list-page");
+    {
+        lv_obj_t *list = obj("rows");
+        lv_obj_t *r1 = obj("r1");
+
+        CHECK(list && r1, "the list and its rows are drawn");
+        if (list && r1) {
+            int32_t gap = lv_obj_get_style_pad_row(list, 0);
+            int32_t pitch = (int32_t)lv_obj_get_height(r1) + gap;
+            int32_t inner = (int32_t)lv_obj_get_content_height(list);
+
+            CHECK(pitch > gap, "a row has a height to measure");
+            lv_obj_t *scr = lv_obj_get_parent(list);
+
+            /* And the region it was cut out of is the one the frame left: the
+             * bar off the top, the hint off the bottom. A column of rows is the
+             * shape that reaches the bottom-left corner, so it is the shape
+             * that pays for the hint. */
+            CHECK(scr && lv_obj_get_style_pad_top(scr, 0) == CATNIP_FRAME_BAR_H + 4,
+                  "the bar's height comes off the top of a list screen");
+            CHECK(scr && lv_obj_get_style_pad_bottom(scr, 0) == CATNIP_FRAME_HINT_H + 4,
+                  "and the hint's off the bottom, because a row reaches its corner");
+            CHECK(pitch > gap && (inner + gap) % pitch == 0,
+                  "and the region is a whole number of rows tall");
+            CHECK(inner < CATNIP_SCREEN_H,
+                  "which is less than the panel, because the bar and the hint "
+                  "take theirs first");
+        }
+    }
+
     /* ---- the clock's face, as the app builds it ------------------------- */
     /* Four children with the centrepiece second: the date is named before it so
      * it is the top line, the weekday and the source line after it so they are

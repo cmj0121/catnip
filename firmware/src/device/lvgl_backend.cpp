@@ -75,6 +75,7 @@ struct Entry {
     catnip_node_layout layout; /* list only: how its children are arranged */
     catnip_style_role role;    /* kept because a canvas places by role */
     bool sel_dirty;            /* list only: the highlight has to be re-applied */
+    bool laid_out;             /* list only: apply_list_layout has run at least once */
     bool row;                  /* list child: internal flex row of image + label */
     /* The widgets inside a row, held rather than looked up by child index: a
      * mixer column adds two more and the order on screen is not the order they
@@ -118,6 +119,7 @@ bool g_bare;
 /* ---- the map ------------------------------------------------------------ */
 
 void apply_list_layout(Entry *e);
+void apply_screen_region(Entry *screen);
 
 Entry *map_find(catnip_handle h)
 {
@@ -172,14 +174,21 @@ const lv_font_t *role_font(catnip_style_role role, bool canvas)
      * working underneath in the ink that says it is working. */
     if (canvas && role != CATNIP_STYLE_DISPLAY) return &lv_font_montserrat_24;
 
+    /* 20 / 16 / 10, and body was 14. A list is the screen this device spends
+     * most of its time being, and 14 is a size read by leaning in - which on a
+     * thing held in two hands is the wrong posture to have designed for. Title
+     * moved with it: shifting one and not the other would leave a heading a
+     * hair larger than the rows under it, which is worse than no heading at
+     * all. Caption did not move, because it is working rather than an answer
+     * and the gap between it and body is what says so. */
     switch (role) {
-    case CATNIP_STYLE_TITLE: return &lv_font_montserrat_16;
+    case CATNIP_STYLE_TITLE: return &lv_font_montserrat_20;
     case CATNIP_STYLE_CAPTION: return &lv_font_montserrat_10;
     case CATNIP_STYLE_DISPLAY: return &catnip_font_display;
     /* An unknown name from Lua already arrived as BODY - catnip_render.c
      * resolves it - so this is the fallback for the roles that do not change
      * the size, not for a name nobody recognised. */
-    default: return &lv_font_montserrat_14;
+    default: return &lv_font_montserrat_16;
     }
 }
 
@@ -890,8 +899,13 @@ void apply_desc(Entry *e, const catnip_node_desc *d)
     if (role_moved) relayout_canvas(map_find(e->parent));
     apply_flags(e, d->flags);
     if (e->kind == CATNIP_NODE_LIST) {
-        if (e->layout != d->layout) {
+        /* `!e->laid_out` and not just a difference: a column of rows is layout
+         * zero and a fresh Entry is zeroed, so "it has not changed" and "it has
+         * never been applied" were the same answer - and the one shape that
+         * never got its layout applied was the commonest one there is. */
+        if (!e->laid_out || e->layout != d->layout) {
             e->layout = d->layout;
+            e->laid_out = true;
             apply_list_layout(e);
         }
         e->selected = d->selected;
@@ -994,25 +1008,109 @@ void apply_list_layout(Entry *e)
         lv_obj_set_style_pad_column(e->obj, 6, 0);
     }
 
-    /* A carousel takes the whole panel and the bar floats over it, where a
-     * column starts below the bar. The screen is the platform's either way, so
-     * the layout that knows which shape it is, is the thing that says so:
-     * reserving room for the bar and then centring a full-screen mascot in what
-     * was left would put the cat low and crop it. */
-    Entry *screen = map_find(e->parent);
-    if (screen && screen->kind == CATNIP_NODE_SCREEN && !g_bare) {
-        lv_obj_set_style_pad_top(screen->obj, carousel ? 0 : CATNIP_FRAME_BAR_H + 4, 0);
-        /* And room at the bottom for the hint, for the same reason as the bar
-         * at the top: it is drawn over every screen, so a column that ran to
-         * the bottom edge would have its last row under it. A carousel reserves
-         * nothing - it is the whole panel by design, and the hint floats over
-         * it exactly as the bar does. */
-        lv_obj_set_style_pad_bottom(screen->obj, carousel ? 0 : CATNIP_FRAME_HINT_H + 4,
-                                    0);
-        lv_obj_set_style_pad_left(screen->obj, carousel ? 0 : 6, 0);
-        lv_obj_set_style_pad_right(screen->obj, carousel ? 0 : 6, 0);
-    }
     e->sel_dirty = true;
+}
+
+/* How much of a screen the frame takes, decided by what the screen holds.
+ *
+ * It used to be decided from inside a list's layout, which had two faults. The
+ * small one is that a screen's region is not a list's business. The large one
+ * is that it ran only when a list's layout *changed*, and a plain column of
+ * rows is layout zero - so the one shape that most needs the room, the one
+ * whose bottom row runs the full width, was the one shape that never reserved
+ * any. It has been decided here, once per screen per pass, ever since.
+ *
+ * The bar comes off the top of everything except a carousel, which is the whole
+ * panel by design with the bar floating over it.
+ *
+ * The hint comes off the bottom only when the content can actually reach the
+ * bottom-left corner. Rows can - the last one runs the full width. A mixer can:
+ * its leftmost column is the height of the region. A grid can: its bottom-left
+ * cell is exactly there. A carousel and a canvas cannot, because a cell and a
+ * centrepiece are middles, and taking 34 px from either for a hint that will be
+ * drawn over empty panel is the platform charging rent on space it is not
+ * using. */
+void apply_screen_region(Entry *screen)
+{
+    uint32_t n;
+    bool carousel = false; /* the whole panel is one cell */
+    bool corner = false;   /* something of the content reaches the bottom-left */
+
+    if (screen->kind != CATNIP_NODE_SCREEN) return;
+    n = lv_obj_get_child_count(screen->obj);
+    for (uint32_t i = 0; i < n; i++) {
+        Entry *c = map_find((catnip_handle)(intptr_t)lv_obj_get_user_data(
+            lv_obj_get_child(screen->obj, (int32_t)i)));
+
+        if (!c || c->kind != CATNIP_NODE_LIST) continue;
+        if (c->layout == CATNIP_LAYOUT_CAROUSEL) carousel = true;
+        else if (c->layout != CATNIP_LAYOUT_CANVAS) corner = true;
+    }
+    /* Nothing but labels: a face, placed around a centrepiece. Both middles,
+     * and neither reaches a corner. */
+
+    /* A bare screen is the whole panel and nothing is drawn over it, so nothing
+     * is held back from it - which is the whole of what `frame: "bare"` buys.
+     * A carousel is the whole panel by design and the bar floats over it, which
+     * is why a full-panel mascot is not centred in what a bar left behind. */
+    bool bar = !g_bare && !carousel;
+    bool hint = !g_bare && corner;
+
+    lv_obj_set_style_pad_top(screen->obj, bar ? CATNIP_FRAME_BAR_H + 4 : 0, 0);
+    lv_obj_set_style_pad_bottom(screen->obj, hint ? CATNIP_FRAME_HINT_H + 4 : 0, 0);
+    lv_obj_set_style_pad_left(screen->obj, (g_bare || carousel) ? 0 : 6, 0);
+    lv_obj_set_style_pad_right(screen->obj, (g_bare || carousel) ? 0 : 6, 0);
+}
+
+/* Cut a column of rows to a whole number of them.
+ *
+ * A half-row peeking past the bottom edge reads as a rendering fault rather
+ * than as an invitation to scroll - and it is not needed as one, because the
+ * header's `3/11` already says there is more. So the list keeps only the rows
+ * it can show whole and the remainder is left as empty panel above the hint.
+ *
+ * The allotment is re-derived rather than remembered: flex is asked for it
+ * afresh every time, because what is left for this list depends on whatever
+ * else is on the screen, and a height cut once and then kept would never grow
+ * back when a status line above it went away.
+ *
+ * Only a column of rows, and only one that is the screen's own child. A
+ * carousel shows one cell, a mixer's columns are the height of the region by
+ * definition, and a grid pages rather than scrolls - none of them can show half
+ * of anything. */
+void fit_whole_rows(Entry *e)
+{
+    Entry *screen = map_find(e->parent);
+    uint32_t n = lv_obj_get_child_count(e->obj);
+    int32_t gap, pitch, avail, rows, inner;
+
+    if (e->layout != CATNIP_LAYOUT_ROWS || n == 0) return;
+    if (!screen || screen->kind != CATNIP_NODE_SCREEN) return;
+
+    /* Give the room back before measuring it, so this reads the space flex
+     * would allot now and not the space it allotted last time. */
+    lv_obj_set_flex_grow(e->obj, 1);
+    lv_obj_set_height(e->obj, LV_SIZE_CONTENT);
+    lv_obj_mark_layout_as_dirty(screen->obj);
+    lv_obj_update_layout(screen->obj);
+    avail = lv_obj_get_content_height(e->obj);
+
+    gap = lv_obj_get_style_pad_row(e->obj, 0);
+    pitch = lv_obj_get_height(lv_obj_get_child(e->obj, 0)) + gap;
+    if (pitch <= gap || avail <= 0) return; /* a row with no height yet */
+
+    /* The last row on the page is followed by no gap, so the room a whole
+     * number of rows needs is one gap less than their pitch. */
+    rows = (avail + gap) / pitch;
+    if (rows < 1) return;
+    inner = rows * pitch - gap;
+    if (inner >= avail) return; /* already exact - leave flex holding it */
+
+    lv_obj_set_flex_grow(e->obj, 0);
+    lv_obj_set_height(e->obj, inner + lv_obj_get_height(e->obj) -
+                                  lv_obj_get_content_height(e->obj));
+    lv_obj_mark_layout_as_dirty(screen->obj);
+    lv_obj_update_layout(screen->obj);
 }
 
 void apply_selection(Entry *e)
@@ -1023,6 +1121,7 @@ void apply_selection(Entry *e)
 
     e->sel_dirty = false;
     lv_obj_update_layout(e->obj);
+    fit_whole_rows(e);
     for (uint32_t i = 0; i < n; i++) {
         lv_obj_t *child = lv_obj_get_child(e->obj, i);
         bool on = ((int)i == e->selected);
@@ -1102,10 +1201,9 @@ lv_obj_t *make_screen(void)
     lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(obj, 0, 0);
     make_column(obj, 6);
-    /* Room for the frame's bar, which is drawn on the top layer above every
-     * screen. The number is the frame's, so the two cannot drift apart - and a
-     * bare screen reserves none of it, because no bar is drawn over one. */
-    lv_obj_set_style_pad_top(obj, g_bare ? 0 : CATNIP_FRAME_BAR_H + 4, 0);
+    /* What the frame takes off it is apply_screen_region's, decided at the end
+     * of every pass from what the screen turned out to hold. Nothing is set
+     * here, because at create time it holds nothing. */
     return obj;
 }
 
@@ -1416,6 +1514,14 @@ void be_show(void *ud, catnip_handle h)
 void be_end_pass(void *ud)
 {
     (void)ud;
+    /* The region first, for every screen, and only then what goes in it. A list
+     * that is cut to a whole number of rows has to be cut against the room it
+     * actually has, and the room it has is what the loop below decides. */
+    for (int i = 0; i < kMaxObjects; i++) {
+        Entry *e = &g_map[i];
+
+        if (e->used && e->kind == CATNIP_NODE_SCREEN) apply_screen_region(e);
+    }
     for (int i = 0; i < kMaxObjects; i++) {
         Entry *e = &g_map[i];
 

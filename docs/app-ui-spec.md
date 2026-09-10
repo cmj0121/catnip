@@ -93,9 +93,9 @@ device, an app picks one, and everything else follows from that pick.
 | ------------------ | ---------------- | ------ | --------------- | ---------- |
 | **1. Full screen** | anything         | none   | none            | none       |
 | **2. Mascot**      | one icon         | over   | optional, float | may float  |
-| **3. Icon grid**   | 3x2 icons, paged | always | floats          | may float  |
+| **3. Icon grid**   | 3x2 icons, paged | always | reserved corner | may float  |
 | **4. List**        | rows of text     | always | reserved corner | may float  |
-| **5. Setting**     | values, paged    | always | floats          | may float  |
+| **5. Setting**     | values, paged    | always | reserved corner | may float  |
 
 **1. Full screen** (`frame: "bare"`). The platform draws **nothing** — no bar, no
 hint, no counter, not one pixel — and keeps exactly one gesture, long B. This is
@@ -130,11 +130,18 @@ one:
 
 **The control hint**, bottom-left. Whether it costs the app anything is a
 per-screen answer, and the question is always the same one: _can the content
-reach that corner?_ A list can — its bottom row runs the full width — so the list
-screen **reserves** the corner and the region is that much narrower. A grid, a
-mascot and a setting page cannot: their content is columns or a centred figure,
-the corner is empty either way, and the hint **floats** with nothing given up.
-Full screen draws none at all.
+reach that corner?_
+
+Three of the five can, and they pay for it: a list's bottom row runs the full
+width, a setting page's leftmost column is the height of the region, and a
+grid's bottom-left cell is exactly there. Those three **reserve** the strip and
+get a shorter region for it. A mascot cannot — a centred figure is a middle, and
+holding back 34 px for a hint that will be drawn over empty panel is the
+platform charging rent on space it is not using. Full screen reserves nothing
+because nothing is drawn over it at all.
+
+The rule is the question, not the list: a shape added later answers it for
+itself.
 
 **The action bar**, along the bottom, and it has two shapes.
 
