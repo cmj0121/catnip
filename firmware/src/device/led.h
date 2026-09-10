@@ -8,6 +8,7 @@
 #ifndef CATNIP_LED_H
 #define CATNIP_LED_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -50,6 +51,22 @@ void catnip_led_level(uint8_t brightness);
  * indistinguishable from a dead board. It is taken as "back to the brand
  * colour" instead - a script cannot switch the sign of life off. */
 void catnip_led_colour(uint8_t r, uint8_t g, uint8_t b);
+
+/* Breathe in the working colour, or go back to whatever colour was in use.
+ *
+ * The same state the busy ring draws, said in the one place a user can see
+ * without looking at the screen - which is the whole argument for it: the two
+ * things the ring is raised for are a scan and an app being loaded, and an app
+ * being loaded is the one moment the screen is about to be replaced anyway.
+ *
+ * Layered over the colour rather than replacing it, the way the dim is layered
+ * over the level: an app that asked for red gets red back when the wait ends,
+ * because the wait was not the app's and neither is forgetting what it chose.
+ *
+ * It is still a breath. A steady light cannot say "the firmware is running",
+ * and a device that stops running while it is loading is exactly the device
+ * this light exists to give away. */
+void catnip_led_busy(bool on);
 
 /* Drive one step of the breathing cycle. Call it often - it reads the clock
  * rather than blocking, so it costs nothing to call from a busy loop. */

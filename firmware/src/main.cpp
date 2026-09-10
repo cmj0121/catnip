@@ -742,6 +742,19 @@ static const char *busy_reason(void)
     return NULL;
 }
 
+/* Waiting, said in both places at once.
+ *
+ * The ring is on the screen and the LED is not, and that is the point of saying
+ * it twice: the two things this is raised for are a scan and an app being
+ * loaded, and loading an app is the one moment the screen is about to be
+ * replaced anyway. One call, so the two can never disagree about whether the
+ * device is working. */
+static void say_busy(const char *what)
+{
+    catnip_frame_set_busy(what);
+    catnip_led_busy(what != NULL);
+}
+
 /* Long A's answer, turned into a bar.
  *
  * The app was asked which of its actions apply and answered with ids out of its
@@ -977,13 +990,13 @@ void loop()
              * so there is no later pass to draw from. It does not turn while it
              * is up, and that is honest - nothing is happening in this device
              * except the thing it is saying. */
-            catnip_frame_set_busy("loading");
+            say_busy("loading");
             catnip_lvgl_step();
             if (catnip_shell_launch_id(g_shell, id, err, sizeof(err)) != 0) {
                 Serial.printf("[catnip] menu: %s could not launch: %s\n", id, err);
                 catnip_pages_rebuild(g_pages);
             }
-            catnip_frame_set_busy(NULL);
+            say_busy(NULL);
         }
     }
 
@@ -1078,7 +1091,7 @@ void loop()
      * show it: a scan with nothing to show yet, or an app being loaded off the
      * card. Neither of those is drawn by whoever is waiting - what waiting
      * looks like is the platform's, exactly as the bar and the hint are. */
-    catnip_frame_set_busy(busy_reason());
+    say_busy(busy_reason());
     catnip_toast_step();
 
     /* And give the rest of the system the pass back when this one did nothing.
