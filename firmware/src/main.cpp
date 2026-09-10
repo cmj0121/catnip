@@ -23,6 +23,7 @@
 #include "catnip_runtime.h"
 #include "catnip_shell.h"
 #include "catnip_bar.h"
+#include "catnip_busy.h"
 #include "catnip_icon_map.h"
 #include "catnip_ui.h"
 #include "device/board.h"
@@ -172,14 +173,21 @@ static void leave_diag(void)
     catnip_pages_rebuild(g_pages);
 }
 
-static const uint16_t *const g_anim_frames[] = {
-    catnip_splash,   /* f00: paw up, rest, no motion arcs */
-    catnip_anim_f01, /* f01: paw tipped out, one short arc above it */
-    catnip_anim_f02, /* f02: full sweep, arcs off both the paw and the tail */
-    catnip_anim_f01, /* back through f01 so the loop is 0,1,2,1 */
-};
+/* The splash, and the busy ring under it.
+ *
+ * It was a four-frame paw cycle, and the cycle is gone: the device has one
+ * picture of working now and this is where it is first shown. Three things were
+ * saying "wait" in three different shapes - a paw waving at boot, a label the
+ * WiFi prober refreshed itself, and nothing at all while an app loaded - and
+ * only the ring is a picture of waiting rather than a picture of a cat.
+ *
+ * The splash stays as the ground because it is the only thing on the panel that
+ * says which device this is, and the ring is drawn over it. Frames from the
+ * owner's card still play as the ground if they supplied any; the ring rides on
+ * top of whichever it is, so the indicator is the same either way. */
+static const uint16_t *const g_anim_frames[] = {catnip_splash};
 static const size_t g_anim_count = sizeof(g_anim_frames) / sizeof(g_anim_frames[0]);
-static unsigned long g_frame_ms = 625; /* one 4-frame cycle = one 2.5 s breath */
+static unsigned long g_frame_ms = 625;
 
 /* Frames from the card, when the owner supplied any: zero means the built-in
  * mascot above. The two are played by the same loop, so the only difference
@@ -221,9 +229,40 @@ static void draw_current_frame(void)
     if (g_animating) show_frame(g_frame);
 }
 
+/* The ring, straight onto the panel, over whatever the ground is. Eight small
+ * circles rather than a frame: 153,600 bytes to move eight dots was what the
+ * paw cycle cost, and the ground under them does not change. */
+static void draw_busy_ring(unsigned now)
+{
+    /* The same ring at the same size as the one LVGL draws - it is one
+     * animation, and two sizes of it would be two. Low on the panel rather than
+     * centred, because here the ground is the splash and the cat is what the
+     * middle is for; the LVGL one has an empty screen to sit in the middle of. */
+    static const int kCx = CATNIP_SCREEN_W / 2;
+    static const int kCy = CATNIP_SCREEN_H - 40;
+    static const int kR = 26;
+    catnip_busy_dot dots[CATNIP_BUSY_DOTS];
+    int n =
+        catnip_busy_dots(catnip_busy_phase(now), kCx, kCy, kR, dots, CATNIP_BUSY_DOTS);
+
+    for (int i = 0; i < n; i++) {
+        /* The tail is drawn in the ground's own colour so a dot that has faded
+         * out is gone rather than dark: there is no alpha on a direct blit, and
+         * a ring of grey circles on the splash would be a ring of holes in it.
+         *
+         * The five steps are the ink stepped towards the ground, worked out
+         * once here rather than blended per pixel. */
+        static const uint16_t kInk[CATNIP_BUSY_DOTS] = {
+            0x1082, 0x2103, 0x3184, 0x4A26, 0x6AC8, 0x9BAA, 0xCCEC, 0xDD25,
+        };
+        catnip_display_dot(dots[i].x, dots[i].y, 5, kInk[dots[i].level]);
+    }
+}
+
 static void animate(void)
 {
     static unsigned long last = 0;
+    static unsigned last_phase = (unsigned)-1;
     unsigned long now = millis();
     /* g_animating is deliberately not cleared when the renderer takes over: it
      * is what set_screen() restores when the panel comes back on, and clearing
@@ -231,10 +270,22 @@ static void animate(void)
      * off at the moment it occurred. Who owns the panel is asked afresh here
      * every pass instead. */
     if (catnip_lvgl_backend_active()) return;
-    if (!g_animating || now - last < g_frame_ms) return;
-    last = now;
-    g_frame = (g_frame + 1) % frame_count();
-    show_frame(g_frame);
+    if (!g_animating) return;
+    /* The ground, when there is more than one of it to play. */
+    if (frame_count() > 1 && now - last >= g_frame_ms) {
+        last = now;
+        g_frame = (g_frame + 1) % frame_count();
+        show_frame(g_frame);
+        last_phase = (unsigned)-1; /* the blit took the ring with it */
+    }
+    /* And the ring, on its own cadence. */
+    {
+        unsigned phase = catnip_busy_phase((unsigned)now);
+        if (phase != last_phase) {
+            last_phase = phase;
+            draw_busy_ring((unsigned)now);
+        }
+    }
 }
 
 /* A short press of the power button turns the screen off and on again. The
@@ -675,6 +726,22 @@ void setup()
     maybe_join_network();
 }
 
+/* What the device is waiting for, or NULL when it is not waiting.
+ *
+ * Asked afresh every pass rather than pushed, because the answer is a state
+ * somebody else owns and a flag set at the start of one is a flag that outlives
+ * it the day the other end returns early.
+ *
+ * Loading an app is not on this list because it does not last a pass: the
+ * launch reads Lua off the card and runs it without returning, so there is no
+ * pass in the middle of it to draw anything from. It puts the ring up itself,
+ * on the way in - see below. */
+static const char *busy_reason(void)
+{
+    if (catnip_wifi_scanning()) return "scanning";
+    return NULL;
+}
+
 /* Long A's answer, turned into a bar.
  *
  * The app was asked which of its actions apply and answered with ids out of its
@@ -904,10 +971,19 @@ void loop()
         const char *id = catnip_pages_take_launch(g_pages);
         if (id) {
             char err[64];
+            /* The ring, and then straight onto the panel before the launch
+             * blocks: reading an app off the card and running its chunk takes
+             * long enough to be noticed and does not return until it is done,
+             * so there is no later pass to draw from. It does not turn while it
+             * is up, and that is honest - nothing is happening in this device
+             * except the thing it is saying. */
+            catnip_frame_set_busy("loading");
+            catnip_lvgl_step();
             if (catnip_shell_launch_id(g_shell, id, err, sizeof(err)) != 0) {
                 Serial.printf("[catnip] menu: %s could not launch: %s\n", id, err);
                 catnip_pages_rebuild(g_pages);
             }
+            catnip_frame_set_busy(NULL);
         }
     }
 
@@ -998,6 +1074,11 @@ void loop()
          * catnip_pages.c - they are one screen each and their titles do not
          * change while they are up, where the ring's does on every step. */
     }
+    /* The one picture of working there is, and the loop is what knows when to
+     * show it: a scan with nothing to show yet, or an app being loaded off the
+     * card. Neither of those is drawn by whoever is waiting - what waiting
+     * looks like is the platform's, exactly as the bar and the hint are. */
+    catnip_frame_set_busy(busy_reason());
     catnip_toast_step();
 
     /* And give the rest of the system the pass back when this one did nothing.

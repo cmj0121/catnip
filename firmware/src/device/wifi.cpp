@@ -87,9 +87,36 @@ const char *catnip_wifi_ssid(void)
     return g_state == CATNIP_WIFI_OFF ? nullptr : g_ssid;
 }
 
+/* Whether the ring should be up, which is not the same as whether the radio is
+ * scanning. A caller that keeps polling keeps a scan in the air for as long as
+ * it is open, so "the radio is scanning" is true the whole time the prober is
+ * on screen - and a spinner that never stops is not telling anybody anything.
+ *
+ * What the ring means is "there is nothing to show yet". So: up from the first
+ * ask until the first answer, and then down, however many scans run behind it.
+ *
+ * A gap in the asking is a new session - the app was closed and opened again -
+ * and the ring comes back for it. Three seconds, which is longer than any
+ * caller's own poll interval and shorter than anybody's patience. */
+static bool g_scan_asked;
+static bool g_scan_answered;
+static uint32_t g_scan_last_ask;
+
+bool catnip_wifi_scanning(void)
+{
+    return g_scan_asked && !g_scan_answered;
+}
+
 int catnip_wifi_scan(catnip_wifi_ap *out, int max)
 {
     int n = WiFi.scanComplete();
+    uint32_t now = millis();
+
+    if (!g_scan_asked || (uint32_t)(now - g_scan_last_ask) > 3000u) {
+        g_scan_asked = true;
+        g_scan_answered = false;
+    }
+    g_scan_last_ask = now;
 
     if (n == WIFI_SCAN_FAILED) {
         /* Nothing running and nothing to report: start one. Async, so this
@@ -110,6 +137,7 @@ int catnip_wifi_scan(catnip_wifi_ap *out, int max)
     }
     WiFi.scanDelete();
     WiFi.scanNetworks(true);
+    g_scan_answered = true;
     return count;
 }
 

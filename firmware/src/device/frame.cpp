@@ -3,11 +3,14 @@
 
 #include "catnip_icon_img.h"
 
+#include "../catnip_busy.h"
+
 #include <lvgl.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "../catnip_render.h"
+#include "board.h"
 #include "lvgl_backend.h"
 #include "ui_input_core.h"
 
@@ -34,6 +37,13 @@ unsigned g_hint_mask; /* which directions are lit, for the draw below */
 /* The action bar: the panel, and one cell per action. Built once and reused,
  * because a bar rebuilt on every long press would blink at exactly the moment
  * somebody is looking at it. */
+/* The busy ring: a panel, its eight dots and the word under them. */
+lv_obj_t *g_busy;
+lv_obj_t *g_busy_dot[CATNIP_BUSY_DOTS];
+lv_obj_t *g_busy_word;
+unsigned g_busy_phase = (unsigned)-1;
+char g_busy_what[16];
+
 lv_obj_t *g_act;
 lv_obj_t *g_act_cell[3];
 lv_obj_t *g_act_icon[3];
@@ -259,7 +269,109 @@ bool ensure_actions(void)
     return true;
 }
 
+/* The whole panel, and the ring in the middle of it.
+ *
+ * It floated over the content at first, on the argument that what is being
+ * waited for is usually about what is already there. That argument is wrong
+ * about this device: while it is up, nothing on the screen underneath is true
+ * any more - the app being loaded is not the menu behind it, and the list being
+ * scanned for is not the list still on screen. A half-covered screen of stale
+ * content invites reading, and everything there is to read is out of date.
+ *
+ * So it takes the panel, and it takes it from the bar and the hint too. The bar
+ * names a screen that is going away and the hint is a picture of controls that
+ * do nothing while this is up; both would be lying, quietly, in a corner. */
+const int kBusyR = 26;   /* the ring */
+const int kBusyDotR = 5; /* one dot */
+
+bool ensure_busy(void)
+{
+    if (g_busy) return true;
+    if (!catnip_lvgl_backend_active()) return false;
+
+    g_busy = lv_obj_create(lv_layer_top());
+    if (!g_busy) return false;
+    lv_obj_remove_style_all(g_busy);
+    lv_obj_set_size(g_busy, CATNIP_SCREEN_W, CATNIP_SCREEN_H);
+    lv_obj_set_pos(g_busy, 0, 0);
+    /* Opaque, and the ground the rest of the device uses: this is the same
+     * device with nothing on it yet, not a dialog over a screen. */
+    lv_obj_set_style_bg_color(g_busy, lv_color_hex(catnip_color_bg()), 0);
+    lv_obj_set_style_bg_opa(g_busy, LV_OPA_COVER, 0);
+    lv_obj_remove_flag(g_busy, LV_OBJ_FLAG_SCROLLABLE);
+    /* Nothing here is touchable: it is a picture of waiting, and a wait you
+     * could press would be promising a way to stop it. */
+    lv_obj_remove_flag(g_busy, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(g_busy, LV_OBJ_FLAG_HIDDEN);
+
+    for (int i = 0; i < CATNIP_BUSY_DOTS; i++) {
+        lv_obj_t *d = lv_obj_create(g_busy);
+        if (!d) return false;
+        lv_obj_remove_style_all(d);
+        lv_obj_set_size(d, 2 * kBusyDotR, 2 * kBusyDotR);
+        lv_obj_set_style_radius(d, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_bg_opa(d, LV_OPA_COVER, 0);
+        lv_obj_remove_flag(d, LV_OBJ_FLAG_CLICKABLE);
+        g_busy_dot[i] = d;
+    }
+    g_busy_word = lv_label_create(g_busy);
+    if (!g_busy_word) return false;
+    lv_obj_set_style_text_font(g_busy_word, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(g_busy_word, lv_color_hex(catnip_color_faint()), 0);
+    /* Under the ring rather than at the foot of the panel: the two are one
+     * thing being said, and a word alone at the bottom of an empty screen would
+     * read as a caption for the emptiness. */
+    lv_obj_align(g_busy_word, LV_ALIGN_CENTER, 0, kBusyR + kBusyDotR + 20);
+    return true;
+}
+
 } /* namespace */
+
+void catnip_frame_set_busy(const char *what)
+{
+    unsigned phase;
+
+    if (!what || !what[0]) {
+        /* Only on the way down, and only once: hiding invalidates, and on this
+         * display an invalidation is the whole panel. */
+        if (g_busy && g_busy_phase != (unsigned)-1) {
+            lv_obj_add_flag(g_busy, LV_OBJ_FLAG_HIDDEN);
+            g_busy_phase = (unsigned)-1;
+            g_busy_what[0] = '\0';
+        }
+        return;
+    }
+    if (!ensure_busy()) return;
+
+    if (strcmp(g_busy_what, what) != 0) {
+        snprintf(g_busy_what, sizeof(g_busy_what), "%s", what);
+        lv_label_set_text(g_busy_word, g_busy_what);
+    }
+    if (g_busy_phase == (unsigned)-1) lv_obj_remove_flag(g_busy, LV_OBJ_FLAG_HIDDEN);
+
+    /* One step is one repaint of the whole panel, which is what a spinner costs
+     * here - so it steps on the clock's cadence and not on the loop's, and a
+     * pass that lands inside the same step draws nothing at all. */
+    phase = catnip_busy_phase((unsigned)lv_tick_get());
+    if (phase == g_busy_phase) return;
+    g_busy_phase = phase;
+    {
+        catnip_busy_dot dots[CATNIP_BUSY_DOTS];
+        /* Centred across the panel, and one dot's radius down from the top so
+         * the dot at twelve o'clock is inside it rather than half off it. */
+        int n = catnip_busy_dots(phase, CATNIP_SCREEN_W / 2, CATNIP_SCREEN_H / 2, kBusyR,
+                                 dots, CATNIP_BUSY_DOTS);
+        for (int i = 0; i < n; i++) {
+            /* The tail is opacity rather than colour: one ink, so the ring is
+             * one object being lit rather than eight things of different
+             * kinds. */
+            uint8_t opa = (uint8_t)(40 + (215 * dots[i].level) / (CATNIP_BUSY_DOTS - 1));
+            lv_obj_set_pos(g_busy_dot[i], dots[i].x - kBusyDotR, dots[i].y - kBusyDotR);
+            lv_obj_set_style_bg_color(g_busy_dot[i], lv_color_hex(kColHintLit), 0);
+            lv_obj_set_style_bg_opa(g_busy_dot[i], opa, 0);
+        }
+    }
+}
 
 void catnip_frame_set_actions(const char *const *names, const catnip_icon *icons, int n,
                               int focus)

@@ -29,6 +29,7 @@
 #include "catnip_render.h"
 #include "catnip_runtime.h"
 #include "catnip_device_info.h"
+#include "catnip_busy.h"
 #include "catnip_typescale.h"
 #include "catnip_app_grid.h"
 #include "catnip_menu.h"
@@ -613,6 +614,38 @@ int main(void)
               "putting the bar away puts the hint back in its corner");
         catnip_frame_show_hint(false);
         catnip_frame_show(false);
+    }
+
+    /* ---- the busy ring -------------------------------------------------- */
+    /* The shape is pinned in test_busy.c; what is checked here is that the
+     * platform draws it over what is on screen rather than in place of it - the
+     * thing being waited for is usually about what is already there. */
+    {
+        lv_obj_t *ring = nullptr;
+
+        catnip_frame_set_busy("scanning");
+        pass();
+        shot("busy");
+        for (uint32_t i = 0; i < lv_obj_get_child_count(lv_layer_top()); i++) {
+            lv_obj_t *c = lv_obj_get_child(lv_layer_top(), (int32_t)i);
+            /* Eight dots and a word: the only thing on the top layer with nine
+             * children. Found by shape because nothing in the node model owns
+             * it, which is the whole point of it being the platform's. */
+            if (lv_obj_get_child_count(c) == CATNIP_BUSY_DOTS + 1) ring = c;
+        }
+        CHECK(ring != NULL, "the busy ring is drawn");
+        CHECK(ring && !lv_obj_has_flag(ring, LV_OBJ_FLAG_HIDDEN), "and it is up");
+        /* The whole panel, not a dialog over one: while it is up there is
+         * nothing true underneath to leave showing. */
+        CHECK(ring && (int)lv_obj_get_width(ring) == CATNIP_SCREEN_W &&
+                  (int)lv_obj_get_height(ring) == CATNIP_SCREEN_H,
+              "and it takes the whole panel rather than floating over it");
+        CHECK(ring && lv_obj_get_style_bg_opa(ring, 0) == LV_OPA_COVER,
+              "opaque, so the screen it replaced is not read through it");
+        catnip_frame_set_busy(nullptr);
+        pass();
+        CHECK(ring && lv_obj_has_flag(ring, LV_OBJ_FLAG_HIDDEN),
+              "and nothing to wait for puts it away");
     }
 
     /* ---- the control hint, drawn over a page ---------------------------- */

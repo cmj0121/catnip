@@ -14,8 +14,14 @@
 -- association and sweep every channel at once. That is the prober's to spend:
 -- it is here to look at the air, and looking at the air costs the link.
 
+-- No "scanning..." here, and that is the point of it being gone. Waiting is a
+-- state the platform draws - one ring, in one place, at one rhythm, over every
+-- app that ever waits for anything - and an app that wrote its own would be one
+-- more shape a user has to learn for a thing they already know. The status line
+-- is left for what this app knows and the platform does not: how many networks
+-- came back.
 local rows = ui.list{ id = "aps" }
-local status = ui.label{ id = "status", text = "scanning..." }
+local status = ui.label{ id = "status", text = "" }
 
 -- How strong, in words rather than a raw dBm nobody reads at a glance. The
 -- thresholds are the usual ones: -60 and up is a room away, -75 and up is

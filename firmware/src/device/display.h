@@ -44,6 +44,14 @@ int catnip_display_load_frames(const char *dir);
 /* Show a frame loaded by catnip_display_load_frames. */
 void catnip_display_show_frame(int index);
 
+/* One filled circle, straight onto the panel.
+ *
+ * The busy ring at boot, and nothing else. LVGL is not up until an app draws
+ * its first widget, so the one thing that has to be animated before then cannot
+ * be a widget - and a full-frame blit per step, which is what the four-frame
+ * paw cycle cost, is 153,600 bytes to move eight dots. */
+void catnip_display_dot(int cx, int cy, int r, uint16_t rgb565);
+
 #ifdef __cplusplus
 }
 #endif

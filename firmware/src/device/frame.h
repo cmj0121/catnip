@@ -119,6 +119,22 @@ int catnip_frame_action_at(int x, int y);
  * so it sits on the bar's shoulder rather than under it. */
 #define CATNIP_FRAME_ACT_H 44
 
+/* The busy ring, and what it is waiting for.
+ *
+ * `what` is a short word drawn under it - "scanning", "loading" - or NULL to
+ * put it away. One of these in the whole device, drawn by the platform, because
+ * "working" is a sentence a user must be able to read the same way everywhere.
+ *
+ * It takes the whole panel, and takes it from the bar and the hint as well.
+ * While it is up, nothing on the screen underneath is true any more - the app
+ * being loaded is not the menu behind it - and a bar naming a screen that is
+ * going away is a lie in a corner. An empty ground with one thing on it is the
+ * honest picture of a device that has nothing to show yet.
+ *
+ * Call it every pass while busy - it turns itself from the clock, so the ring
+ * runs at the same rate whatever else the loop is doing. */
+void catnip_frame_set_busy(const char *what);
+
 /* One pass of the bar against what is on screen: reads the counter the renderer
  * derives for the list being navigated and draws `N/total`, or blanks that
  * region when there is no list to count. Call it once per loop, after the

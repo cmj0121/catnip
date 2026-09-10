@@ -67,6 +67,11 @@ void catnip_wifi_end(void);
  * background. */
 int catnip_wifi_scan(catnip_wifi_ap *out, int max);
 
+/* Whether a scan is in the air right now. The platform draws the busy ring off
+ * this: an app that scans says nothing about waiting, because what waiting
+ * looks like is not an app's to decide. */
+bool catnip_wifi_scanning(void);
+
 #ifdef __cplusplus
 }
 #endif
