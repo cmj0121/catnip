@@ -132,6 +132,15 @@ typedef enum {
  * ROWS is a column of `[icon] [name]` lines, the ordinary case. CAROUSEL shows
  * one child at a time, filling the region, and steps sideways: it is what the
  * home screen is, and what "one icon" in the spec's main region means. */
+/* Where a line of text sits across its own width. DEFAULT means "whatever the
+ * arrangement would do", which is what almost everything wants. */
+typedef enum {
+    CATNIP_TEXT_ALIGN_DEFAULT = 0,
+    CATNIP_TEXT_ALIGN_LEFT,
+    CATNIP_TEXT_ALIGN_CENTER,
+    CATNIP_TEXT_ALIGN_RIGHT,
+} catnip_text_align;
+
 typedef enum {
     CATNIP_LAYOUT_ROWS = 0, /* the fallback, and therefore value 0 */
     CATNIP_LAYOUT_CAROUSEL,
@@ -250,6 +259,16 @@ typedef struct {
      * all, and whether a direction does anything from here, which is what the
      * on-screen control hint is drawn from. One fact, so they cannot drift. */
     unsigned events;
+    /* Which edge the text sits against, for the cases where the arrangement
+     * does not already decide it.
+     *
+     * A column ranges its text left and a strip centres it, and that is right
+     * nearly always - so this is absent nearly always. It exists because the
+     * bottom-left corner of every screen belongs to the control hint, and a
+     * line that wants to sit at the foot of a page has nowhere to go but the
+     * other end. A canvas gets that for free from the order its children are
+     * named in; a column had no way to say it at all. */
+    catnip_text_align align;
 } catnip_node_desc;
 
 /*

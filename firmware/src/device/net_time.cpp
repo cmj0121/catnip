@@ -124,3 +124,8 @@ uint32_t catnip_net_time_last(void)
 {
     return g_last;
 }
+
+catnip_sync_state catnip_net_time_state(void)
+{
+    return g_state;
+}

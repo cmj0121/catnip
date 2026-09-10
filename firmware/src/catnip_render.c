@@ -74,6 +74,7 @@ typedef struct {
     int selected;
     unsigned flags;
     unsigned events;
+    catnip_text_align align;
     char *text;      /* owned copy of the last text sent, or NULL */
     size_t text_cap; /* bytes handed to the allocator, so they can be given back */
 } slot;
@@ -471,6 +472,19 @@ static void desc_build(ctx *c, int node, catnip_node_desc *d)
         }
         lua_pop(L, 1);
 
+        {
+            const char *al = NULL;
+            lua_pushstring(L, "align");
+            lua_rawget(L, props);
+            al = lua_tostring(L, -1);
+            /* An unknown name is the arrangement's own choice, the same promise
+             * an unknown style role or layout makes. */
+            if (al && strcmp(al, "left") == 0) d->align = CATNIP_TEXT_ALIGN_LEFT;
+            else if (al && strcmp(al, "center") == 0) d->align = CATNIP_TEXT_ALIGN_CENTER;
+            else if (al && strcmp(al, "right") == 0) d->align = CATNIP_TEXT_ALIGN_RIGHT;
+            lua_pop(L, 1);
+        }
+
         if (d->kind == CATNIP_NODE_LIST) {
             lua_pushstring(L, "layout");
             lua_rawget(L, props);
@@ -531,9 +545,9 @@ static int desc_same(const slot *s, const catnip_node_desc *d)
 {
     return s->kind == d->kind && s->style == d->style && s->icon == d->icon &&
            s->layout == d->layout && s->selected == d->selected && s->flags == d->flags &&
-           s->events == d->events && s->value == d->value && s->steps == d->steps &&
-           s->text != NULL && strcmp(s->text, d->text) == 0 && s->image != NULL &&
-           strcmp(s->image, d->image) == 0 && s->value_text != NULL &&
+           s->events == d->events && s->align == d->align && s->value == d->value &&
+           s->steps == d->steps && s->text != NULL && strcmp(s->text, d->text) == 0 &&
+           s->image != NULL && strcmp(s->image, d->image) == 0 && s->value_text != NULL &&
            strcmp(s->value_text, d->value_text) == 0;
 }
 
@@ -546,6 +560,7 @@ static void desc_store(lua_State *L, slot *s, const catnip_node_desc *d)
     s->selected = d->selected;
     s->flags = d->flags;
     s->events = d->events;
+    s->align = d->align;
     s->value = d->value;
     s->steps = d->steps;
     text_store(L, s, d->text);

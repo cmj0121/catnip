@@ -252,7 +252,8 @@ void apply_style(Entry *e, catnip_style_role role)
     lv_obj_set_style_text_color(text, lv_color_hex(role_ink(role)), 0);
 }
 
-void apply_text(Entry *e, const char *text, catnip_icon icon, const char *image)
+void apply_text(Entry *e, const char *text, catnip_icon icon, const char *image,
+                catnip_text_align align)
 {
     lv_obj_t *label = nullptr;
     lv_obj_t *img = nullptr;
@@ -358,8 +359,15 @@ void apply_text(Entry *e, const char *text, catnip_icon icon, const char *image)
         bool in_page = !(big || mixer || strip || grid);
         lv_obj_set_flex_grow(label, in_page ? 1 : 0);
         lv_obj_set_width(label, in_page ? LV_PCT(100) : LV_SIZE_CONTENT);
-        lv_obj_set_style_text_align(
-            label, in_page ? LV_TEXT_ALIGN_LEFT : LV_TEXT_ALIGN_CENTER, 0);
+        /* The arrangement decides, unless the node said otherwise. Asking is
+         * rare and the two cases it exists for are real: a line at the foot of
+         * a page has to clear the control hint's corner, and only the node
+         * knows it is that line. */
+        lv_text_align_t want = in_page ? LV_TEXT_ALIGN_LEFT : LV_TEXT_ALIGN_CENTER;
+        if (align == CATNIP_TEXT_ALIGN_LEFT) want = LV_TEXT_ALIGN_LEFT;
+        else if (align == CATNIP_TEXT_ALIGN_CENTER) want = LV_TEXT_ALIGN_CENTER;
+        else if (align == CATNIP_TEXT_ALIGN_RIGHT) want = LV_TEXT_ALIGN_RIGHT;
+        lv_obj_set_style_text_align(label, want, 0);
         if (strip) {
             /* A strip's items are the words and nothing else - no leading icon
              * slot, because the slot exists so text cannot shift when a row
@@ -369,6 +377,21 @@ void apply_text(Entry *e, const char *text, catnip_icon icon, const char *image)
             lv_obj_set_style_pad_all(e->obj, 0, 0);
         }
     }
+    /* An explicit alignment, for a label that is not a row in a list - a line
+     * straight on a screen, which is how a page's own footnote is built. It
+     * needs the full width to range within: a box that hugs its text has no
+     * room to sit at either end of, so asking for right without asking for
+     * width would look exactly like left. */
+    if (!e->row && e->kind == CATNIP_NODE_LABEL && align != CATNIP_TEXT_ALIGN_DEFAULT) {
+        lv_obj_set_width(label, LV_PCT(100));
+        lv_obj_set_style_text_align(label,
+                                    align == CATNIP_TEXT_ALIGN_RIGHT ? LV_TEXT_ALIGN_RIGHT
+                                    : align == CATNIP_TEXT_ALIGN_CENTER
+                                        ? LV_TEXT_ALIGN_CENTER
+                                        : LV_TEXT_ALIGN_LEFT,
+                                    0);
+    }
+
     if (e->kind == CATNIP_NODE_BUTTON) {
         /* A tile rather than a caption with a picture in front of it: the icon
          * on top and the word under it, which is how a thing you go *to* is
@@ -392,14 +415,15 @@ void apply_text(Entry *e, const char *text, catnip_icon icon, const char *image)
         lv_obj_set_flex_grow(e->obj, in_strip ? 1 : 0);
         lv_obj_set_width(e->obj, in_strip ? LV_SIZE_CONTENT : LV_PCT(100));
         if (icon >= CATNIP_ICON_FOLDER && icon <= CATNIP_ICON_CLOSE) {
-            /* Half the carousel's size. A cell is the whole panel and its icon
-             * is the only thing on it; a tile is one of a pair at the foot of a
-             * page of text, and at 64 px it read as the page rather than as the
-             * way off it. The 64 px source scaled down rather than the 14 px
-             * one scaled up, because shrinking a shape keeps its edges and
-             * stretching one does not - and source before alignment, since
+            /* A quarter of the carousel's size. A cell is the whole panel and
+             * its icon is the only thing on it; a tile is one of a pair at the
+             * foot of a page of facts, and every pixel it takes is a fact the
+             * reader does not get - the device page was showing two and a half
+             * of its eleven lines. The 64 px source scaled down rather than the
+             * 14 px one scaled up, because shrinking a shape keeps its edges
+             * and stretching one does not - and source before alignment, since
              * STRETCH works its factor out from the source it can see. */
-            lv_obj_set_size(img, 32, 32);
+            lv_obj_set_size(img, 24, 24);
             lv_image_set_src(img, &catnip_icon_img_64[icon - CATNIP_ICON_FOLDER]);
             lv_image_set_inner_align(img, LV_IMAGE_ALIGN_STRETCH);
             lv_obj_remove_flag(img, LV_OBJ_FLAG_HIDDEN);
@@ -846,7 +870,7 @@ void apply_flags(Entry *e, unsigned flags)
  * thing and would eventually disagree. */
 void apply_desc(Entry *e, const catnip_node_desc *d)
 {
-    apply_text(e, d->text, d->icon, d->image);
+    apply_text(e, d->text, d->icon, d->image, d->align);
     apply_value(e, d->value, d->value_text, d->steps, d->style == CATNIP_STYLE_PRIMARY);
     /* After the style, because where a node goes on a canvas depends on which
      * role it is in - and only then, because that is the only thing about a
