@@ -29,10 +29,12 @@
 #include "catnip_render.h"
 #include "catnip_runtime.h"
 #include "catnip_device_info.h"
+#include "catnip_app_grid.h"
 #include "catnip_menu.h"
 #include "catnip_ui.h"
 #include "device/board.h"
 #include "device/frame.h"
+#include "device/ui_input_core.h"
 #include "device/lvgl_backend.h"
 #include "device/lvgl_port.h"
 #include "host_shot.h"
@@ -179,7 +181,7 @@ int main(void)
         lv_obj_t *cell;
 
         CHECK(menu != NULL, "the launcher is built");
-        catnip_menu_show(menu, NULL, 0, false);
+        catnip_menu_show(menu, NULL, 0, false, NULL);
         pass();
         shot("launcher");
         ring = obj("menu_list");
@@ -289,6 +291,57 @@ int main(void)
                       lv_obj_get_y(lv_obj_get_child(k1, 1)),
               "and each is its icon above its word");
         catnip_device_info_free(info);
+    }
+
+    /* ---- the app grid: many apps, wrapping, pinned ones marked --------- */
+    catnip_lvgl_backend_set_bare(false);
+    {
+        catnip_app_grid *g = catnip_app_grid_new(g_rt);
+        catnip_app_entry apps[6];
+        lv_obj_t *c1;
+        lv_obj_t *c6;
+        for (int i = 0; i < 6; i++) {
+            memset(&apps[i], 0, sizeof(apps[i]));
+            snprintf(apps[i].id, sizeof(apps[i].id), "app%d", i);
+            snprintf(apps[i].name, sizeof(apps[i].name), "App %d", i);
+            apps[i].compatible = 1;
+        }
+        CHECK(g != NULL, "the app grid is built");
+        catnip_app_grid_show(g, apps, 6, false, "app3"); /* app3 unpinned */
+        pass();
+        shot("app-grid");
+        c1 = obj("grid1");
+        c6 = obj("grid6");
+        CHECK(c1 && c6, "the cells are drawn");
+        CHECK(c1 && c6 && lv_obj_get_y(c6) > lv_obj_get_y(c1),
+              "and wrap onto further rows rather than off the edge");
+        catnip_app_grid_free(g);
+    }
+
+    /* ---- the control hint, drawn over a page ---------------------------- */
+    {
+        /* Three lit, one dim - the state the cat is in - so the shot shows both
+         * inks and the alignment of all four at once. */
+        static const struct {
+            unsigned mask;
+            const char *name;
+        } kStates[4] = {
+            {CATNIP_HINT_UP | CATNIP_HINT_DOWN | CATNIP_HINT_LEFT | CATNIP_HINT_RIGHT,
+             "hint-all"},
+            {CATNIP_HINT_LEFT | CATNIP_HINT_RIGHT | CATNIP_HINT_DOWN, "hint-cat"},
+            {CATNIP_HINT_UP | CATNIP_HINT_DOWN, "hint-column"},
+            {0, "hint-none"},
+        };
+        catnip_frame_show(true);
+        catnip_frame_show_hint(true);
+        for (int i = 0; i < 4; i++) {
+            catnip_frame_set_hint(kStates[i].mask);
+            pass();
+            shot(kStates[i].name);
+        }
+        catnip_frame_show_hint(false);
+        catnip_frame_show(false);
+        CHECK(1, "the control hint is drawn");
     }
 
     catnip_rt_free(g_rt);

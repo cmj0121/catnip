@@ -256,13 +256,19 @@ int main(void)
     CHECK(title_is(""), "and the launcher does not name itself in its own bar");
     CHECK(focus_is("menu_list"), "the ring is what the focus is on");
 
-    /* The hint, and the reason it exists: up on the cat does nothing, because
-     * the grid it will open is not built (#71), and a direction that does
-     * nothing is indistinguishable from a device that has stopped listening. */
+    /* Every direction on the cat now does something, and the hint says so:
+     * left/right step the ring, down is the device page, up is the grid (#71). */
     CHECK((hint() & CATNIP_HINT_LEFT) && (hint() & CATNIP_HINT_RIGHT),
           "left and right step the ring, so both are lit");
     CHECK(hint() & CATNIP_HINT_DOWN, "down reaches the device page, so it is lit");
-    CHECK(!(hint() & CATNIP_HINT_UP), "up has no grid to open yet, so it is dimmed");
+    CHECK(hint() & CATNIP_HINT_UP, "and up opens the grid of every app, so it is lit");
+
+    /* ---- up is the grid of every app (#71) ---------------------------- */
+    press(CATNIP_BTN_UP);
+    CHECK(catnip_pages_current(g_pages) == CATNIP_PAGE_GRID, "up opens the grid");
+    CHECK(title_is("Apps"), "and the bar names it");
+    press(CATNIP_BTN_B);
+    CHECK(catnip_pages_current(g_pages) == CATNIP_PAGE_HOME, "and B returns to the ring");
 
     /* ---- down is the device page -------------------------------------- */
     press(CATNIP_BTN_DOWN);
