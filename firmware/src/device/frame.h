@@ -97,9 +97,16 @@ void catnip_frame_set_battery(int percent);
  * screen - the content stays visible underneath, because an action is always
  * about something the user can still see.
  *
- * Up to three cells, each `[icon] [name]`, with `focus` ringed. In the
- * two-icon shape nothing is ringed: the left one *is* A and the right one *is*
- * B, so a ring would be pointing at a button that is already under a thumb.
+ * Up to three cells, each `[icon] [name]`. `focus` is ringed when `modal` -
+ * when the bar steps rather than binding. Otherwise nothing is ringed: the left
+ * one *is* A and the right one *is* B, so a ring would point at a button that is
+ * already under a thumb.
+ *
+ * `modal` is told rather than worked out from `n`. It used to be re-derived
+ * here as `n >= 3`, and that is only one of the two ways a bar can be modal -
+ * a pair whose second action is destructive steps too, because B will not carry
+ * it. The File Browser offers exactly that on a folder, so long A there gave a
+ * cursor that stepped and was never drawn.
  *
  * Drawn here rather than by an app for the reason the top bar is: consistency
  * is a property of having one drawer, and the one thing a user must be able to
@@ -108,7 +115,7 @@ void catnip_frame_set_battery(int percent);
  * `names`/`icons` are borrowed for the length of the call. `n` of 0 puts it
  * away. */
 void catnip_frame_set_actions(const char *const *names, const catnip_icon *icons, int n,
-                              int focus);
+                              int focus, bool modal);
 
 /* Which cell a tap at (x, y) landed on, or -1. The bar is the one piece of
  * chrome a finger may press: it is the finger's only route to Cancel, since

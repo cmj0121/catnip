@@ -3,6 +3,7 @@
 
 #include "catnip_icon_img.h"
 
+#include "../catnip_bar.h"
 #include "../catnip_busy.h"
 
 #include <lvgl.h>
@@ -45,9 +46,9 @@ unsigned g_busy_phase = (unsigned)-1;
 char g_busy_what[16];
 
 lv_obj_t *g_act;
-lv_obj_t *g_act_cell[3];
-lv_obj_t *g_act_icon[3];
-lv_obj_t *g_act_name[3];
+lv_obj_t *g_act_cell[CATNIP_BAR_CELLS];
+lv_obj_t *g_act_icon[CATNIP_BAR_CELLS];
+lv_obj_t *g_act_name[CATNIP_BAR_CELLS];
 int g_act_n;
 unsigned g_last_hint = ~0u;
 
@@ -235,7 +236,7 @@ bool ensure_actions(void)
     lv_obj_remove_flag(g_act, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(g_act, LV_OBJ_FLAG_HIDDEN);
 
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < CATNIP_BAR_CELLS; i++) {
         lv_obj_t *cell = lv_obj_create(g_act);
         if (!cell) return false;
         lv_obj_set_height(cell, LV_PCT(100));
@@ -374,14 +375,15 @@ void catnip_frame_set_busy(const char *what)
 }
 
 void catnip_frame_set_actions(const char *const *names, const catnip_icon *icons, int n,
-                              int focus)
+                              int focus, bool modal)
 {
     static int shown_n = -1;
     static int shown_focus = -1;
-    static char shown[3][CATNIP_ACTION_NAME_MAX];
+    static bool shown_modal;
+    static char shown[CATNIP_BAR_CELLS][CATNIP_ACTION_NAME_MAX];
 
     if (n < 0) n = 0;
-    if (n > 3) n = 3;
+    if (n > CATNIP_BAR_CELLS) n = CATNIP_BAR_CELLS;
 
     /* Nothing at all when nothing differs, and this guard is the difference
      * between a device that answers a button and one that does not.
@@ -395,7 +397,8 @@ void catnip_frame_set_actions(const char *const *names, const catnip_icon *icons
      * and dropped the loop to nine passes a second. Nine passes a second is a
      * device that feels broken. */
     {
-        bool same = (n == shown_n && (n < 3 || focus == shown_focus));
+        bool same =
+            (n == shown_n && modal == shown_modal && (!modal || focus == shown_focus));
         for (int i = 0; same && i < n; i++)
             same = strcmp(shown[i], names && names[i] ? names[i] : "") == 0;
         if (same) return;
@@ -403,10 +406,11 @@ void catnip_frame_set_actions(const char *const *names, const catnip_icon *icons
     if (!ensure_actions()) return;
     shown_n = n;
     shown_focus = focus;
+    shown_modal = modal;
     for (int i = 0; i < n; i++)
         snprintf(shown[i], sizeof(shown[i]), "%s", names && names[i] ? names[i] : "");
 
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < CATNIP_BAR_CELLS; i++) {
         if (i < n) {
             lv_obj_remove_flag(g_act_cell[i], LV_OBJ_FLAG_HIDDEN);
             lv_label_set_text(g_act_name[i], names && names[i] ? names[i] : "");
@@ -418,11 +422,11 @@ void catnip_frame_set_actions(const char *const *names, const catnip_icon *icons
                 lv_image_set_src(g_act_icon[i],
                                  &catnip_icon_img_14[ic - CATNIP_ICON_FOLDER]);
             }
-            /* Ringed only in the modal shape. With two, the left one is A and
-             * the right one is B: a ring there would be pointing at a button
-             * that is already under a thumb, and would invite a user to move it
-             * with directions the bar has deliberately not taken. */
-            if (n >= 3 && i == focus) lv_obj_add_state(g_act_cell[i], LV_STATE_CHECKED);
+            /* Ringed only when the bar steps. When it binds, the left one is A
+             * and the right one is B: a ring there would point at a button that
+             * is already under a thumb, and would invite a user to move it with
+             * directions the bar has deliberately not taken. */
+            if (modal && i == focus) lv_obj_add_state(g_act_cell[i], LV_STATE_CHECKED);
             else lv_obj_remove_state(g_act_cell[i], LV_STATE_CHECKED);
         } else {
             lv_obj_add_flag(g_act_cell[i], LV_OBJ_FLAG_HIDDEN);

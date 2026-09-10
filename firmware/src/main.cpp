@@ -791,20 +791,23 @@ static void offer_actions(void)
 static void draw_actions(void)
 {
     const catnip_bar *bar = catnip_ui_input_bar();
-    const char *names[3];
-    catnip_icon icons[3];
+    const char *names[CATNIP_BAR_CELLS];
+    catnip_icon icons[CATNIP_BAR_CELLS];
     int n;
 
     if (!catnip_bar_up(bar)) {
-        catnip_frame_set_actions(nullptr, nullptr, 0, 0);
+        catnip_frame_set_actions(nullptr, nullptr, 0, 0, false);
         return;
     }
-    n = bar->n > 3 ? 3 : bar->n;
+    n = bar->n > CATNIP_BAR_CELLS ? CATNIP_BAR_CELLS : bar->n;
     for (int i = 0; i < n; i++) {
         names[i] = bar->items[i].name;
         icons[i] = catnip_icon_from_name(bar->items[i].icon);
     }
-    catnip_frame_set_actions(names, icons, n, bar->focus);
+    /* Whether it steps is the bar's to say, not a thing to re-derive from the
+     * count: two actions whose second is destructive step as well, because B
+     * will not carry that one. */
+    catnip_frame_set_actions(names, icons, n, bar->focus, catnip_bar_modal(bar));
 }
 
 /* Whether the panel belongs to the running app right now.
@@ -1023,10 +1026,9 @@ void loop()
     /* Carry any clock sync forward (#84): it joins the network, asks the time
      * and writes the RTC over several passes, dropping the radio when it is
      * done. Cheap when idle - it returns at once unless a sync is in flight. */
-    /* The radio, once a pass. It steps a join in flight and manages modem
-     * sleep, which has to be off while anything is scanning - a scan with it on
-     * comes back having heard nothing, and the radio reports that as a
-     * completed scan of zero networks. */
+    /* The radio, once a pass: it steps a join in flight. Before this it was
+     * only stepped from inside the clock sync, so a join was advanced only when
+     * an NTP request happened to be in flight too. */
     (void)catnip_wifi_poll();
     catnip_net_time_poll();
 

@@ -511,10 +511,10 @@ int main(void)
             static const catnip_icon kIcons[3] = {CATNIP_ICON_SETTINGS, CATNIP_ICON_FILE,
                                                   CATNIP_ICON_WARNING};
             catnip_frame_show(true);
-            catnip_frame_set_actions(kNames, kIcons, 3, 0);
+            catnip_frame_set_actions(kNames, kIcons, 3, 0, true);
             pass();
             shot("device-page-actions");
-            catnip_frame_set_actions(nullptr, nullptr, 0, 0);
+            catnip_frame_set_actions(nullptr, nullptr, 0, 0, false);
             catnip_frame_show(false);
             pass();
         }
@@ -603,7 +603,7 @@ int main(void)
         catnip_frame_show(true);
         catnip_frame_show_hint(true);
         catnip_frame_set_hint(CATNIP_HINT_LEFT | CATNIP_HINT_RIGHT);
-        catnip_frame_set_actions(nullptr, nullptr, 0, 0);
+        catnip_frame_set_actions(nullptr, nullptr, 0, 0, false);
         pass();
         /* The hint by its size, which is the one thing about it that is fixed:
          * nothing in the node model owns it either, and after the bar exists it
@@ -617,7 +617,7 @@ int main(void)
         }
         hint_y_down = hint_obj ? (int)lv_obj_get_y(hint_obj) : 0;
 
-        catnip_frame_set_actions(kNames, kIcons, 3, 1);
+        catnip_frame_set_actions(kNames, kIcons, 3, 1, true);
         pass();
         shot("action-bar");
         {
@@ -644,7 +644,7 @@ int main(void)
         CHECK(hint_obj && hint_y_up < hint_y_down,
               "and the hint has been lifted onto its shoulder rather than left under it");
 
-        catnip_frame_set_actions(nullptr, nullptr, 0, 0);
+        catnip_frame_set_actions(nullptr, nullptr, 0, 0, false);
         pass();
         CHECK(hint_obj && (int)lv_obj_get_y(hint_obj) == hint_y_down,
               "putting the bar away puts the hint back in its corner");
