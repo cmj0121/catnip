@@ -178,6 +178,21 @@ static int l_ntp_last(lua_State *L)
     return 1;
 }
 
+/* service.wifi.rescan() -> ok. Throws the last scan away and starts another.
+ *
+ * The driver rescans on its own behind anything that keeps polling, so this is
+ * not how an app gets fresh results - it is how it says it asked for them. What
+ * it buys is the busy ring: a page that answers a press with the list it was
+ * already showing has not answered it. */
+static int l_wifi_rescan(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+
+    if (h && h->wifi_rescan) h->wifi_rescan(h->ud);
+    lua_pushboolean(L, h && h->wifi_rescan ? 1 : 0);
+    return 1;
+}
+
 static int l_wifi_scan(lua_State *L)
 {
     const catnip_hal *h = hal_of(L);
@@ -477,10 +492,13 @@ int catnip_api_open(catnip_rt *rt, const catnip_hal *hal)
                                           {"read", l_gpio_read},
                                           {"adc", l_gpio_adc},
                                           {NULL, NULL}};
-    static const luaL_Reg service_funcs[] = {
-        {"wifi_status", l_wifi_status}, {"wifi_ssid", l_wifi_ssid},
-        {"wifi_scan", l_wifi_scan},     {"ntp_last", l_ntp_last},
-        {"http_get", l_http_get},       {NULL, NULL}};
+    static const luaL_Reg service_funcs[] = {{"wifi_status", l_wifi_status},
+                                             {"wifi_ssid", l_wifi_ssid},
+                                             {"wifi_scan", l_wifi_scan},
+                                             {"wifi_rescan", l_wifi_rescan},
+                                             {"ntp_last", l_ntp_last},
+                                             {"http_get", l_http_get},
+                                             {NULL, NULL}};
     static const luaL_Reg fs_funcs[] = {{"read", l_fs_read},     {"write", l_fs_write},
                                         {"exists", l_fs_exists}, {"list", l_fs_list},
                                         {"stat", l_fs_stat},     {"delete", l_fs_delete},
@@ -495,10 +513,11 @@ int catnip_api_open(catnip_rt *rt, const catnip_hal *hal)
     /* Reshape service into nested wifi/http tables + kv, over the C funcs. */
     static const char SERVICE_LUA[] =
         "service.wifi = { status = service.wifi_status, ssid = service.wifi_ssid,\n"
-        "                 scan = service.wifi_scan }\n"
+        "                 scan = service.wifi_scan, rescan = service.wifi_rescan }\n"
         "service.ntp = { last = service.ntp_last }\n"
         "service.http = { get = service.http_get }\n"
         "service.wifi_status, service.wifi_ssid, service.wifi_scan = nil, nil, nil\n"
+        "service.wifi_rescan = nil\n"
         "service.ntp_last, service.http_get = nil, nil\n";
     if (luaL_dostring(L, SERVICE_LUA) != LUA_OK) {
         catnip_rt_report_error(rt, L);

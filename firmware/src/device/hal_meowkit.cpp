@@ -114,6 +114,12 @@ const char *hal_wifi_ssid(void *ud)
     return catnip_wifi_status() == CATNIP_WIFI_CONNECTED ? catnip_wifi_ssid() : nullptr;
 }
 
+void hal_wifi_rescan(void *ud)
+{
+    (void)ud;
+    catnip_wifi_rescan();
+}
+
 int hal_wifi_scan(void *ud, catnip_wifi_ap *out, int max)
 {
     (void)ud;
@@ -216,6 +222,7 @@ const catnip_hal *catnip_meowkit_hal_begin(void)
     g_hal.wifi_status = hal_wifi_status;
     g_hal.wifi_ssid = hal_wifi_ssid;
     g_hal.wifi_scan = hal_wifi_scan;
+    g_hal.wifi_rescan = hal_wifi_rescan;
 
     /* fs.* is the card and nothing else. The root is the mount point itself,
      * because catnip_api.c reaches the card through plain stdio - fopen,

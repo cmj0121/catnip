@@ -64,6 +64,13 @@ static unsigned long g_millis;
  * service.wifi.scan(), so this is the air. */
 static catnip_wifi_ap g_air[8];
 static int g_air_n = -1; /* -1 is "still scanning", which is a real answer */
+static int g_rescans;
+
+static void m_wifi_rescan(void *ud)
+{
+    (void)ud;
+    g_rescans++;
+}
 
 static int m_wifi_scan(void *ud, catnip_wifi_ap *out, int max)
 {
@@ -171,6 +178,7 @@ int main(void)
     catnip_hal hal;
     memset(&hal, 0, sizeof(hal));
     hal.wifi_scan = m_wifi_scan;
+    hal.wifi_rescan = m_wifi_rescan;
 
     g_rt = catnip_rt_new_tracked();
     catnip_ui_open(g_rt);
@@ -184,6 +192,57 @@ int main(void)
     air(0);
     CHECK(!hidden("status"), "a scan that found nothing says so");
     CHECK_STR(row(1), "", "and puts no row on the page to say it with");
+    /* And says what to do about it. Two sentences, because "what was found" and
+     * "what to do" are two different things. */
+    {
+        lua_State *L = catnip_rt_lua(g_rt);
+        catnip_rt_dostring(g_rt, "S = ui.get('status').text", "=q");
+        lua_getglobal(L, "S");
+        CHECK(lua_tostring(L, -1) && strstr(lua_tostring(L, -1), "press A") != NULL,
+              "and offers the press that looks again");
+        lua_pop(L, 1);
+        catnip_rt_dostring(g_rt, "A = ui.get('status').align", "=q");
+        lua_getglobal(L, "A");
+        CHECK(lua_tostring(L, -1) && strcmp(lua_tostring(L, -1), "center") == 0,
+              "centred, because a line ranged left on an empty page reads as a list");
+        lua_pop(L, 1);
+    }
+
+    printf("A looks again, which is the device saying it heard you\n");
+    g_rescans = 0;
+    catnip_rt_dostring(g_rt, "ui.fire('aps', 'click')", "=q");
+    catnip_render_drain(g_rt);
+    CHECK(g_rescans == 1, "A throws the last scan away and asks for another");
+
+    printf("and the list is a focus stop, so a long page can be read to the end\n");
+    put(0, "a", -40, 1);
+    put(1, "b", -50, 6);
+    put(2, "c", -60, 11);
+    air(3);
+    catnip_rt_dostring(g_rt, "ui.fire('aps', 'next') S = ui.get('aps').selected", "=q");
+    catnip_render_drain(g_rt);
+    {
+        lua_State *L = catnip_rt_lua(g_rt);
+        catnip_rt_dostring(g_rt, "S = ui.get('aps').selected", "=q");
+        lua_getglobal(L, "S");
+        CHECK((int)lua_tointeger(L, -1) == 2, "down moves the reading position");
+        lua_pop(L, 1);
+    }
+    /* And it clamps: a page that came round from the last line to the first
+     * would lose the reader their place. */
+    catnip_rt_dostring(g_rt,
+                       "for _ = 1, 9 do ui.fire('aps', 'next') end "
+                       "S = ui.get('aps').selected",
+                       "=q");
+    catnip_render_drain(g_rt);
+    {
+        lua_State *L = catnip_rt_lua(g_rt);
+        catnip_rt_dostring(g_rt, "S = ui.get('aps').selected", "=q");
+        lua_getglobal(L, "S");
+        CHECK((int)lua_tointeger(L, -1) == 3, "and stops at the last line");
+        lua_pop(L, 1);
+    }
+    g_air_n = -1;
 
     printf("a page of networks says nothing at all, because the header counts them\n");
     put(0, "far", -85, 1);

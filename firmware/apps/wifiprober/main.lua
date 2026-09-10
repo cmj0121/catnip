@@ -22,7 +22,28 @@
 -- ring around the one the cursor is on; neither is true here - there is no icon
 -- coming, and a ring would promise that pressing A on a network did something
 -- to it. What this page is, is a list of what is on the air, read.
-local rows = ui.list{ id = "aps", layout = "text" }
+-- Declared before the handlers that move it, because they name it.
+local rows
+local sel = 1
+
+-- Up and down are the reading position, and A is "look again".
+--
+-- The list had neither, which meant it was not a focus stop at all - a page of
+-- networks longer than the screen could not be scrolled to the end of it. What
+-- it looked like was a page with nothing below the fold, which is the worst
+-- shape a bug can take: nothing on the screen was wrong.
+rows = ui.list{ id = "aps", layout = "text",
+  on_prev = function()
+    if sel > 1 then sel = sel - 1; rows.selected = sel end
+  end,
+  on_next = function()
+    if sel < #rows.children then sel = sel + 1; rows.selected = sel end
+  end,
+  -- A throws the last scan away and asks again. The driver was going to rescan
+  -- anyway - what this buys is the platform's ring coming back up, which is the
+  -- device saying "yes, I heard you". A page that answers a press with the list
+  -- it was already showing has not answered it.
+  on_click = function() service.wifi.rescan() end }
 
 -- And one line for the one thing the header cannot say.
 --
@@ -31,7 +52,7 @@ local rows = ui.list{ id = "aps", layout = "text" }
 -- cannot say is "I looked, and there was nothing" - a blank page and a page
 -- with nothing on the air are the same picture, and only one of them is an
 -- answer. So the line exists for exactly that case and is hidden otherwise.
-local status = ui.label{ id = "status", hidden = true }
+local status = ui.label{ id = "status", hidden = true, align = "center" }
 
 -- How strong, in words rather than a raw dBm nobody reads at a glance. The
 -- thresholds are the usual ones: -60 and up is a room away, -75 and up is
@@ -123,7 +144,12 @@ local function refresh()
                                               ap.channel) }
   end
   rows:set_children(cells)
-  status.text = "nothing on the air"
+  if sel > #cells then sel = #cells > 0 and #cells or 1 end
+  rows.selected = sel
+  -- Two sentences, because they are two different things: what was found, and
+  -- what to do about it. Centred, because on a page with nothing else on it a
+  -- line ranged left reads as the first of a list that never arrived.
+  status.text = "nothing on the air\npress A to look again"
   status.hidden = (#aps > 0)
 end
 

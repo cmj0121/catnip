@@ -107,6 +107,17 @@ bool catnip_wifi_scanning(void)
     return g_scan_asked && !g_scan_answered;
 }
 
+void catnip_wifi_rescan(void)
+{
+    /* Drop the finished scan so the next ask starts one rather than reading
+     * this one out again, and forget that anything was ever answered - which is
+     * what puts the ring back up. */
+    WiFi.scanDelete();
+    g_scan_asked = true;
+    g_scan_answered = false;
+    WiFi.scanNetworks(true);
+}
+
 int catnip_wifi_scan(catnip_wifi_ap *out, int max)
 {
     int n = WiFi.scanComplete();
