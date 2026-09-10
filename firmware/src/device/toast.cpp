@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 
+#include "catnip_font.h"
 #include "lvgl_backend.h"
 #include "toast.h"
 
@@ -55,7 +56,7 @@ bool build(void)
     /* Twice the caption size. A fault is not a footnote: it is the one thing on
      * the screen worth reading at that moment, and something read at a glance
      * across a room has to be legible at that distance. */
-    lv_obj_set_style_text_font(g_label, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_font(g_label, &catnip_font_20, 0);
     return true;
 }
 

@@ -35,20 +35,19 @@ static const char CATNIP_MENU_LUA[] =
      * the placeholder glyph, which is what that glyph exists for. */
     /* `disabled` is the platform's word for "here but not usable"; the backend
      * dims it and the handler below refuses to launch it. */
-    /* A cell that shows a value is not a picture and not a word - it is a
-     * small face, and the cell is the whole region, so it is laid out as one.
-     * The centrepiece is the time; the date and the weekday sit on the line
-     * under it, one at each end. Three nodes because they are three roles, and
-     * a node carries one. */
+    /* A cell that shows a value is not a picture and not a word, so the cell is
+     * the whole region and is laid out as a face - one centrepiece, and nothing
+     * else. The date and the weekday used to sit on the line under it, and they
+     * are gone: this is one position on a ring the user is stepping past to
+     * find something else, and what it owes them at that speed is the one fact
+     * they came for. The rest is worth reading, so it is on the app's own face
+     * where there is room to read it. */
     "    if glance[i] ~= '' then\n"
     "      local face = ui.list{ id = 'menu_app' .. i, layout = 'canvas',\n"
     "                            disabled = not ready[i] }\n"
-    "      __catnip_menu_faces[i] = {\n"
-    "        ui.label{ id = 'menu_time' .. i, text = glance[i], style = 'display' },\n"
-    "        ui.label{ id = 'menu_date' .. i, text = '', style = 'caption' },\n"
-    "        ui.label{ id = 'menu_week' .. i, text = '', style = 'caption' },\n"
-    "      }\n"
-    "      face:set_children(__catnip_menu_faces[i])\n"
+    "      __catnip_menu_faces[i] =\n"
+    "        ui.label{ id = 'menu_time' .. i, text = glance[i], style = 'display' }\n"
+    "      face:set_children({ __catnip_menu_faces[i] })\n"
     "      rows[i + 1] = face\n"
     "    else\n"
     "      rows[i + 1] = ui.label{ id = 'menu_app' .. i, text = name,\n"
@@ -88,12 +87,8 @@ static const char CATNIP_MENU_LUA[] =
     "end\n"
     /* One property write per cell that actually differs. The tree is not
      * rebuilt, which is what the renderer being retained is for. */
-    "function __catnip_menu_glance(time, date, week)\n"
-    "  for i, f in pairs(__catnip_menu_faces) do\n"
-    "    f[1].text = time\n"
-    "    f[2].text = date\n"
-    "    f[3].text = week\n"
-    "  end\n"
+    "function __catnip_menu_glance(time)\n"
+    "  for _, f in pairs(__catnip_menu_faces) do f.text = time end\n"
     "end\n";
 
 /* Mirrors CATNIP_SHELL_MAX_APPS in catnip_shell.h, which is where the app list
@@ -277,8 +272,7 @@ void catnip_menu_show(catnip_menu *m, const catnip_app_entry *apps, int n, bool 
     if (lua_pcall(L, 5, 0, 0) != LUA_OK) catnip_rt_report_error(m->rt, L);
 }
 
-void catnip_menu_set_glance(catnip_menu *m, const char *time, const char *date,
-                            const char *week)
+void catnip_menu_set_glance(catnip_menu *m, const char *time)
 {
     lua_State *L;
 
@@ -286,8 +280,6 @@ void catnip_menu_set_glance(catnip_menu *m, const char *time, const char *date,
     L = catnip_rt_lua(m->rt);
     if (!L) return;
     if (!time) time = "--:--";
-    if (!date) date = "";
-    if (!week) week = "";
 
     /* Nothing at all on the pass where nothing differs, which is twenty-nine
      * passes out of thirty: the face changes once a minute. */
@@ -300,9 +292,7 @@ void catnip_menu_set_glance(catnip_menu *m, const char *time, const char *date,
         return;
     }
     lua_pushstring(L, time);
-    lua_pushstring(L, date);
-    lua_pushstring(L, week);
-    if (lua_pcall(L, 3, 0, 0) != LUA_OK) catnip_rt_report_error(m->rt, L);
+    if (lua_pcall(L, 1, 0, 0) != LUA_OK) catnip_rt_report_error(m->rt, L);
 }
 
 const char *catnip_menu_focus_name(const catnip_menu *m)

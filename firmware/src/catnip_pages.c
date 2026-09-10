@@ -1,6 +1,8 @@
 /* catnip_pages.c - see catnip_pages.h. */
 #include "catnip_pages.h"
 
+#include "catnip_typescale.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,6 +22,9 @@ struct catnip_pages {
     catnip_app_grid *grid;
     catnip_settings *settings;
     catnip_device_info *info;
+    /* Built on first use rather than at startup: a page of type samples is
+     * opened by somebody deciding a size, which is not every boot. */
+    catnip_typescale *sizes;
 
     catnip_page page;
     /* Whether anything on the preference page has been stepped since it was
@@ -67,6 +72,7 @@ void catnip_pages_free(catnip_pages *p)
     if (!p) return;
     catnip_app_grid_free(p->grid);
     catnip_device_info_free(p->info);
+    catnip_typescale_free(p->sizes);
     catnip_settings_free(p->settings);
     catnip_menu_free(p->menu);
     free(p);
@@ -119,12 +125,9 @@ void catnip_pages_rebuild(catnip_pages *p)
 
 void catnip_pages_glance(catnip_pages *p)
 {
-    static const char *const kDay[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
     uint32_t t;
     char hm[8];
-    char date[16];
-    int32_t y;
-    uint32_t mo, d, h, mi, wd;
+    uint32_t h, mi;
 
     if (!p) return;
 
@@ -161,19 +164,18 @@ void catnip_pages_glance(catnip_pages *p)
     t = p->env.now_epoch(p->env.ud);
     if (!t) {
         /* The same admission the clock's own face makes. */
-        catnip_menu_set_glance(p->menu, NULL, "----------", "");
+        catnip_menu_set_glance(p->menu, NULL);
         p->shown_time[0] = '\0';
         return;
     }
-    catnip_rtc_split(t, &y, &mo, &d, &h, &mi, &wd);
+    /* The hour and the minute, and nothing else asked for: the ring's cell
+     * shows the time alone now, so the date and the weekday this used to
+     * compute went out with the two labels that displayed them. */
+    catnip_rtc_split(t, NULL, NULL, NULL, &h, &mi, NULL);
     snprintf(hm, sizeof(hm), "%02u:%02u", (unsigned)h, (unsigned)mi);
-    /* The time alone is enough to tell a changed pass from an unchanged one:
-     * the date cannot change without it - midnight is 23:59 becoming 00:00 -
-     * which is the same reason the weekday is not compared either. */
     if (strcmp(hm, p->shown_time) == 0) return;
     snprintf(p->shown_time, sizeof(p->shown_time), "%s", hm);
-    snprintf(date, sizeof(date), "%04d-%02u-%02u", (int)y, (unsigned)mo, (unsigned)d);
-    catnip_menu_set_glance(p->menu, hm, date, kDay[wd]);
+    catnip_menu_set_glance(p->menu, hm);
 }
 
 /* The grid of every app (#71), reached by pushing up from the ring. Built from
@@ -197,12 +199,6 @@ static void enter_info(catnip_pages *p)
 {
     static char rows[CATNIP_INFO_MAX_ROWS][CATNIP_INFO_ROW_MAX];
     const char *ptrs[CATNIP_INFO_MAX_ROWS];
-    /* The two places you would go having read this, each with the icon it is
-     * known by: the gear the preference page is reached by everywhere else, and
-     * the warning triangle for a page that takes the screen and only gives it
-     * back when it is told to. */
-    static const catnip_info_key kPref = {"Preference", "settings"};
-    static const catnip_info_key kDiag = {"Diagnostic", "warning"};
     int n = 0;
     int i;
 
@@ -213,7 +209,7 @@ static void enter_info(catnip_pages *p)
     for (i = 0; i < n; i++)
         ptrs[i] = rows[i];
 
-    catnip_device_info_show(p->info, ptrs, n, &kPref, &kDiag);
+    catnip_device_info_show(p->info, ptrs, n);
     call_title(p, "Device");
 }
 
@@ -252,6 +248,29 @@ static void leave_settings(catnip_pages *p, bool keep, bool home)
     }
 }
 
+/* Every type size, drawn in itself. Reached from the device page beside the
+ * preference page and the diagnostic, because it answers the same question
+ * those two do - what is this thing, and what does it do. */
+static void enter_sizes(catnip_pages *p)
+{
+    p->page = CATNIP_PAGE_SIZES;
+    if (!p->sizes) p->sizes = catnip_typescale_new(p->rt);
+    catnip_typescale_show(p->sizes);
+    call_title(p, "Text sizes");
+}
+
+const catnip_action *catnip_pages_actions(const catnip_pages *p, int *n)
+{
+    if (n) *n = 0;
+    if (!p) return NULL;
+    /* Only the device page offers anything behind A. The carousel's long press
+     * is nothing, the grid's pins an app - it does the thing rather than
+     * offering to, because a menu with one item is a press spent on nothing -
+     * and the preference page's A is its own two levels. */
+    if (p->page == CATNIP_PAGE_INFO) return catnip_device_info_actions(n);
+    return NULL;
+}
+
 const char *catnip_pages_take_launch(catnip_pages *p)
 {
     if (!p) return NULL;
@@ -266,11 +285,15 @@ bool catnip_pages_step(catnip_pages *p, int gesture)
 
     if (p->page == CATNIP_PAGE_INFO) {
         int act = catnip_device_info_take_action(p->info);
-        if (act == CATNIP_INFO_LEFT) {
+        if (act == CATNIP_INFO_PREF) {
             enter_settings(p);
             return true;
         }
-        if (act == CATNIP_INFO_RIGHT) {
+        if (act == CATNIP_INFO_SIZES) {
+            enter_sizes(p);
+            return true;
+        }
+        if (act == CATNIP_INFO_DIAG) {
             if (p->env.enter_diag) p->env.enter_diag(p->env.ud);
             return true;
         }
@@ -280,6 +303,14 @@ bool catnip_pages_step(catnip_pages *p, int gesture)
             catnip_pages_rebuild(p);
         /* True whether or not anything happened: this pass belonged to this
          * page, and the caller must not also offer the gesture to the shell. */
+        return true;
+    }
+
+    if (p->page == CATNIP_PAGE_SIZES) {
+        /* Nothing on it acts, so the only two gestures it has are the two ways
+         * out: B back to the page it was opened from, long B to the cat. */
+        if (gesture == CATNIP_UI_GESTURE_HOME) catnip_pages_rebuild(p);
+        else if (gesture == CATNIP_UI_GESTURE_BACK) enter_info(p);
         return true;
     }
 

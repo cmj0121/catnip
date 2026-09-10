@@ -27,6 +27,7 @@
 
 #include <stdbool.h>
 
+#include "../catnip_bar.h"
 #include "../catnip_render.h"
 #include "../catnip_runtime.h"
 #include "input.h"
@@ -64,7 +65,21 @@ typedef struct {
     int (*mixer_pct)(void *ud, catnip_handle col, int y);
     /* This contact has become a swipe, so it must not also arrive as a tap. */
     void (*cancel_touch)(void *ud);
+    /* Which cell of the action bar a tap at (x, y) landed on, or -1. The bar is
+     * the one piece of chrome a finger may press: it is the finger's only route
+     * to Cancel, since back and home have no touch. */
+    int (*action_at)(void *ud, int x, int y);
+    /* How many whole lines of `list` are on screen at once, or 0 when that
+     * cannot be answered. Geometry, so it is asked of whatever draws - and it
+     * is asked at all because a column of *lines* moves a page at a time and a
+     * page is a number only the drawing knows. */
+    int (*page_rows)(void *ud, catnip_handle list);
     void *ud;
+    /* The action bar, when one is up. While it is, A and B are its own and, in
+     * the modal shape, so are left and right - and the content underneath keeps
+     * up and down, because it is still there to be read. NULL is the ordinary
+     * case: no bar, and nothing about this changes any other press. */
+    catnip_bar *bar;
 } catnip_ui_env;
 
 /* Everything one input pass has to remember between passes: how long each
@@ -87,7 +102,49 @@ typedef struct {
      * left-swipe changed four settings at once. */
     catnip_handle drag_col;
     bool drag_settled;
+    /* Which column has been taken up - the second level of a page of values -
+     * or CATNIP_HANDLE_NONE for none.
+     *
+     * Kept here rather than in the app because it is what a *direction* means,
+     * and what a direction means is the platform's: the same function answers
+     * the press and lights the arrow, and an app that owned this would be able
+     * to make the two disagree.
+     *
+     * One field, not a flag beside a handle. "Engaged" is exactly "this handle
+     * is the focus and the shape under it is a page of values", which the pass
+     * checks anyway - a separate bool was that same fact stored twice, with
+     * five sites having to keep the two in step. */
+    catnip_handle engaged_on;
+    /* When the column was taken up, and whether it was - for telling a second
+     * press from a first. Double A is the only gesture in the device with a
+     * shape of its own, and it exists on one screen: a page of values, where
+     * "and I am done" is a distinct thing to say because you may have set three
+     * of them.
+     *
+     * One pair, shared by the button and the finger. They were two, and the two
+     * had already drifted: the finger's copy had no commit arm, so a tap on a
+     * column that was already taken up did nothing where a press of A kept it. */
+    unsigned armed_at;
+    bool armed;
+    bool touch_was_down;
+    /* Who was long-pressed, and about which row. Kept because the answer comes
+     * back a drain later - the handler runs after this pass - and by then the
+     * ring may have moved. An action is always about the item it was asked of,
+     * not about wherever the user is standing when it is run. */
+    catnip_handle options_on;
+    int options_index;
 } catnip_ui_input;
+
+/* How close two short presses of A have to be to be one double press. Long
+ * enough that a deliberate second press lands inside it, short enough that
+ * committing one column and then committing another is not read as "and I am
+ * done" - which is the mistake this window is guarding, since both are things a
+ * user does on this page. */
+#define CATNIP_DOUBLE_MS 400u
+
+/* Who the last long press asked for options, and about which row. Reads
+ * CATNIP_HANDLE_NONE when nothing has. */
+catnip_handle catnip_ui_input_options_target(const catnip_ui_input *in, int *index);
 
 /* One pass. Posts prev / next / click / options to the focused node, moves the
  * focus cursor, and returns one of the CATNIP_UI_GESTURE_* values in

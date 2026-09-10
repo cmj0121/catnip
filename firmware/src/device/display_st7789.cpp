@@ -152,6 +152,12 @@ void catnip_display_blit(const void *data)
     g_panel.endWrite();
 }
 
+void catnip_display_dot(int cx, int cy, int r, uint16_t rgb565)
+{
+    if (!g_up) return;
+    g_panel.fillCircle(cx, cy, r, rgb565);
+}
+
 void catnip_display_fill(uint16_t rgb565)
 {
     if (g_up) g_panel.fillScreen(rgb565);

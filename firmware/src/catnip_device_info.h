@@ -23,6 +23,7 @@
 
 #include <stdbool.h>
 
+#include "catnip_bar.h"
 #include "catnip_runtime.h"
 
 #ifdef __cplusplus
@@ -38,34 +39,32 @@ typedef struct catnip_device_info catnip_device_info;
 
 catnip_device_info *catnip_device_info_new(catnip_rt *rt);
 
-/* One of the two buttons: what it says, and the icon it is known by. The icon
- * is a name from catnip_icon_map.c, and NULL is none. */
-typedef struct {
-    const char *text;
-    const char *icon;
-} catnip_info_key;
-
-/* Build - or rebuild - the page from `rows[0..n)`, each a finished line, with
- * two buttons under them.
+/* Build - or rebuild - the page from `rows[0..n)`, each a finished line.
  *
- * This page is the hub under home: the facts about the device, and the two
- * places you would go having read them. The buttons are drawn apart from the
- * rows so that something which acts cannot be mistaken for something which
- * reports, and they are ordinary focusable widgets - A activates the one the
- * ring is on, which is the platform's own rule and needs nothing new. The rows
- * themselves are a third stop that scrolls, because a page of facts longer than
- * the screen that could not be moved would be hiding the half nobody asked
- * about. Either button may be NULL for a page with fewer than two. */
-void catnip_device_info_show(catnip_device_info *d, const char *const *rows, int n,
-                             const catnip_info_key *left, const catnip_info_key *right);
+ * This page is the hub under home, and it is a page to be *read*: the facts
+ * about the device, one line each, as one column of prose that scrolls. It used
+ * to carry two tiles under the facts, and they were the thing this page was not
+ * supposed to be - operations drawn on a screen. They are behind A now, where
+ * every other operation in the device is, and the page is what it says it is.
+ *
+ * No selection is drawn on it either. A ring round "free heap" would promise
+ * that pressing A there did something to the free heap; what the cursor is for
+ * here is the reading position, and the scroll is the half of it that shows. */
+void catnip_device_info_show(catnip_device_info *d, const char *const *rows, int n);
 
-/* Which button was pressed since this was last asked, or CATNIP_INFO_NONE.
- * Reading clears it, so one press is acted on once. */
+/* Which of the three was chosen since this was last asked, or
+ * CATNIP_INFO_NONE. Reading clears it, so one press is acted on once. */
 enum {
     CATNIP_INFO_NONE = 0,
-    CATNIP_INFO_LEFT,
-    CATNIP_INFO_RIGHT,
+    CATNIP_INFO_PREF,
+    CATNIP_INFO_SIZES,
+    CATNIP_INFO_DIAG,
 };
+
+/* The three, as the platform's own action catalogue. This page has no manifest
+ * to declare them in - it is not an app - so it declares them here, and the bar
+ * that draws them cannot tell the difference. */
+const catnip_action *catnip_device_info_actions(int *n);
 /* Rewrite the fact lines in place, keeping the page - the ring's position, the
  * list's scroll, everything the retained renderer is for.
  *

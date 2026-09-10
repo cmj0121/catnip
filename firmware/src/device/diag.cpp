@@ -10,6 +10,8 @@
 
 #include "board.h"
 #include "diag.h"
+
+#include "catnip_font.h"
 #include "diag_layout.h"
 #include "display.h"
 #include "imu.h"
@@ -121,8 +123,8 @@ const int kSwatchH = 12;
  * They are not the same typeface - no LVGL font is - but the page never
  * depended on the shapes, only on there being an answer in a size that reads
  * from a chair and its working in a size that does not compete with it. */
-#define DIAG_FONT_BIG   &lv_font_montserrat_14
-#define DIAG_FONT_SMALL &lv_font_montserrat_10
+#define DIAG_FONT_BIG   &catnip_font_16
+#define DIAG_FONT_SMALL &catnip_font_10
 
 lv_obj_t *g_screen;
 lv_obj_t *g_box[CATNIP_BTN_COUNT];

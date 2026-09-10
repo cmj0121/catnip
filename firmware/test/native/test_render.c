@@ -474,8 +474,10 @@ static void test_screen_stack(void)
 /* ---- the event queue ---------------------------------------------------- */
 
 static char g_fired[512];
-static int t_dispatch(void *ud, catnip_rt *rt, int node_ref, const char *event, int index)
+static int t_dispatch(void *ud, catnip_rt *rt, int node_ref, const char *event, int index,
+                      const char *arg)
 {
+    (void)arg;
     (void)ud;
     (void)index;
     lua_State *L = catnip_rt_lua(rt);
@@ -778,6 +780,27 @@ static void test_counter(void)
     (void)pass(rt);
     CHECK(catnip_render_counter(rt, CATNIP_HANDLE_NONE, &n, &total) == 0,
           "an empty list counts nothing rather than 0/0");
+
+    /* A grid counts pages. Eight cells is two pages, and the counter says which
+     * of the two you are on - `8/14` over a wall of pictures answers a question
+     * nobody asked of it. */
+    run(rt, "local g = ui.list{ id = 'g', layout = 'grid', selected = 1 }\n"
+            "local cells = {}\n"
+            "for i = 1, 8 do cells[i] = ui.label{ id = 'g' .. i } end\n"
+            "ui.screen{ g }\n"
+            "g:set_children(cells)\n");
+    (void)pass(rt);
+    CHECK(catnip_render_counter(rt, CATNIP_HANDLE_NONE, &n, &total) == 1 && n == 1 &&
+              total == 2,
+          "eight cells in a grid read 1/2 - pages, not cells");
+    run(rt, "ui.get('g').selected = 6");
+    (void)pass(rt);
+    (void)catnip_render_counter(rt, CATNIP_HANDLE_NONE, &n, &total);
+    CHECK(n == 1 && total == 2, "the sixth cell is still the first page");
+    run(rt, "ui.get('g').selected = 7");
+    (void)pass(rt);
+    (void)catnip_render_counter(rt, CATNIP_HANDLE_NONE, &n, &total);
+    CHECK(n == 2 && total == 2, "and the seventh turns it");
 
     /* Two lists and no focus is genuinely ambiguous, and a guess would put a
      * number in the bar answering a question nobody asked. */

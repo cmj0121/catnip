@@ -10,6 +10,8 @@
 
 #include <stddef.h>
 
+#include "catnip_bar.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -54,6 +56,13 @@ typedef struct {
      * whose whole surface is the point, which is the same claim `frame: "bare"`
      * makes and is stated the same way - by saying so. */
     int hints;
+    /* The catalogue of things this app can do, which is the only place any of
+     * them is named. `on_options` answers with ids out of this and the platform
+     * draws them, so every app's Delete is the same word beside the same glyph
+     * and reached by the same press. An app that built its own menu would
+     * eventually draw a different one. */
+    catnip_action actions[CATNIP_BAR_MAX];
+    int n_actions;
 } catnip_manifest;
 
 /* Parse manifest JSON text into `out`. Required fields: id, name, catnip_api

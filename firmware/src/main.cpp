@@ -22,6 +22,9 @@
 #include "catnip_settings.h"
 #include "catnip_runtime.h"
 #include "catnip_shell.h"
+#include "catnip_bar.h"
+#include "catnip_busy.h"
+#include "catnip_icon_map.h"
 #include "catnip_ui.h"
 #include "device/board.h"
 #include "device/diag.h"
@@ -170,14 +173,21 @@ static void leave_diag(void)
     catnip_pages_rebuild(g_pages);
 }
 
-static const uint16_t *const g_anim_frames[] = {
-    catnip_splash,   /* f00: paw up, rest, no motion arcs */
-    catnip_anim_f01, /* f01: paw tipped out, one short arc above it */
-    catnip_anim_f02, /* f02: full sweep, arcs off both the paw and the tail */
-    catnip_anim_f01, /* back through f01 so the loop is 0,1,2,1 */
-};
+/* The splash, and the busy ring under it.
+ *
+ * It was a four-frame paw cycle, and the cycle is gone: the device has one
+ * picture of working now and this is where it is first shown. Three things were
+ * saying "wait" in three different shapes - a paw waving at boot, a label the
+ * WiFi prober refreshed itself, and nothing at all while an app loaded - and
+ * only the ring is a picture of waiting rather than a picture of a cat.
+ *
+ * The splash stays as the ground because it is the only thing on the panel that
+ * says which device this is, and the ring is drawn over it. Frames from the
+ * owner's card still play as the ground if they supplied any; the ring rides on
+ * top of whichever it is, so the indicator is the same either way. */
+static const uint16_t *const g_anim_frames[] = {catnip_splash};
 static const size_t g_anim_count = sizeof(g_anim_frames) / sizeof(g_anim_frames[0]);
-static unsigned long g_frame_ms = 625; /* one 4-frame cycle = one 2.5 s breath */
+static unsigned long g_frame_ms = 625;
 
 /* Frames from the card, when the owner supplied any: zero means the built-in
  * mascot above. The two are played by the same loop, so the only difference
@@ -219,9 +229,40 @@ static void draw_current_frame(void)
     if (g_animating) show_frame(g_frame);
 }
 
+/* The ring, straight onto the panel, over whatever the ground is. Eight small
+ * circles rather than a frame: 153,600 bytes to move eight dots was what the
+ * paw cycle cost, and the ground under them does not change. */
+static void draw_busy_ring(unsigned now)
+{
+    /* The same ring at the same size as the one LVGL draws - it is one
+     * animation, and two sizes of it would be two. Low on the panel rather than
+     * centred, because here the ground is the splash and the cat is what the
+     * middle is for; the LVGL one has an empty screen to sit in the middle of. */
+    static const int kCx = CATNIP_SCREEN_W / 2;
+    static const int kCy = CATNIP_SCREEN_H - 40;
+    static const int kR = 26;
+    catnip_busy_dot dots[CATNIP_BUSY_DOTS];
+    int n =
+        catnip_busy_dots(catnip_busy_phase(now), kCx, kCy, kR, dots, CATNIP_BUSY_DOTS);
+
+    for (int i = 0; i < n; i++) {
+        /* The tail is drawn in the ground's own colour so a dot that has faded
+         * out is gone rather than dark: there is no alpha on a direct blit, and
+         * a ring of grey circles on the splash would be a ring of holes in it.
+         *
+         * The five steps are the ink stepped towards the ground, worked out
+         * once here rather than blended per pixel. */
+        static const uint16_t kInk[CATNIP_BUSY_DOTS] = {
+            0x1082, 0x2103, 0x3184, 0x4A26, 0x6AC8, 0x9BAA, 0xCCEC, 0xDD25,
+        };
+        catnip_display_dot(dots[i].x, dots[i].y, 5, kInk[dots[i].level]);
+    }
+}
+
 static void animate(void)
 {
     static unsigned long last = 0;
+    static unsigned last_phase = (unsigned)-1;
     unsigned long now = millis();
     /* g_animating is deliberately not cleared when the renderer takes over: it
      * is what set_screen() restores when the panel comes back on, and clearing
@@ -229,10 +270,22 @@ static void animate(void)
      * off at the moment it occurred. Who owns the panel is asked afresh here
      * every pass instead. */
     if (catnip_lvgl_backend_active()) return;
-    if (!g_animating || now - last < g_frame_ms) return;
-    last = now;
-    g_frame = (g_frame + 1) % frame_count();
-    show_frame(g_frame);
+    if (!g_animating) return;
+    /* The ground, when there is more than one of it to play. */
+    if (frame_count() > 1 && now - last >= g_frame_ms) {
+        last = now;
+        g_frame = (g_frame + 1) % frame_count();
+        show_frame(g_frame);
+        last_phase = (unsigned)-1; /* the blit took the ring with it */
+    }
+    /* And the ring, on its own cadence. */
+    {
+        unsigned phase = catnip_busy_phase((unsigned)now);
+        if (phase != last_phase) {
+            last_phase = phase;
+            draw_busy_ring((unsigned)now);
+        }
+    }
 }
 
 /* A short press of the power button turns the screen off and on again. The
@@ -285,10 +338,30 @@ static void power_off(void)
     catnip_power_off();
 }
 
-static void poll_power_button(void)
+/* The power button, asked of the PMIC over I2C.
+ *
+ * On a cadence, because the loop runs at several hundred passes a second and
+ * two register reads at 100 kHz cost about 450 us of every one of them - a
+ * fifth of the whole pass spent asking a button that a human presses at most
+ * twice a second whether it has moved. Twenty times a second is far inside what
+ * anyone can tell apart on a press, and the PMIC latches the event rather than
+ * reporting a level, so nothing is missed between asks.
+ *
+ * `force` is for the paths that must not wait for the cadence: the diagnostic
+ * page is the whole loop while it is up, and the boot animation runs before
+ * there is a loop at all. */
+static unsigned g_pmu_last;
+static void poll_power_button_at(unsigned now, bool force)
 {
+    if (!force && (unsigned)(now - g_pmu_last) < 50u) return;
+    g_pmu_last = now;
     if (catnip_pmu_power_key_held()) power_off();
     if (catnip_pmu_power_key_pressed()) set_screen(!g_screen_on);
+}
+
+static void poll_power_button(void)
+{
+    poll_power_button_at((unsigned)millis(), false);
 }
 
 /* Read the owner's settings and act on them. Where they come from and which
@@ -653,6 +726,122 @@ void setup()
     maybe_join_network();
 }
 
+/* What the device is waiting for, or NULL when it is not waiting.
+ *
+ * Asked afresh every pass rather than pushed, because the answer is a state
+ * somebody else owns and a flag set at the start of one is a flag that outlives
+ * it the day the other end returns early.
+ *
+ * Loading an app is not on this list because it does not last a pass: the
+ * launch reads Lua off the card and runs it without returning, so there is no
+ * pass in the middle of it to draw anything from. It puts the ring up itself,
+ * on the way in - see below. */
+static const char *busy_reason(void)
+{
+    if (catnip_wifi_scanning()) return "scanning";
+    return NULL;
+}
+
+/* Waiting, said in both places at once.
+ *
+ * The ring is on the screen and the LED is not, and that is the point of saying
+ * it twice: the two things this is raised for are a scan and an app being
+ * loaded, and loading an app is the one moment the screen is about to be
+ * replaced anyway. One call, so the two can never disagree about whether the
+ * device is working. */
+static void say_busy(const char *what)
+{
+    catnip_frame_set_busy(what);
+    catnip_led_busy(what != NULL);
+}
+
+/* Long A's answer, turned into a bar.
+ *
+ * The app was asked which of its actions apply and answered with ids out of its
+ * own manifest; this is where those become two or three buttons. It runs after
+ * the drain, because the handler that answers runs in the drain - and it runs
+ * every pass, because the answer is latched and reading it is what clears it.
+ *
+ * An app that answered with nothing gets no bar, which is the ordinary case for
+ * a page whose long press does the thing itself - the grid pins an app rather
+ * than offering to. */
+static void offer_actions(void)
+{
+    const catnip_action *catalogue;
+    int n_catalogue = 0;
+    int index = CATNIP_INDEX_NONE;
+    catnip_handle owner;
+
+    if (!g_rt) return;
+    /* The running app's, or the platform page's when nothing is running. Two
+     * sources and one bar: the launcher's own pages declare their actions in C
+     * where an app declares them in JSON, and the thing that draws them cannot
+     * tell the difference - which is the point. The launcher may offer no
+     * operation an app could not have offered the same way. */
+    catalogue = catnip_shell_actions(g_shell, &n_catalogue);
+    if (!catalogue) catalogue = catnip_pages_actions(g_pages, &n_catalogue);
+    owner = catnip_ui_input_options_asked(&index);
+    (void)catnip_bar_offer(catnip_ui_input_bar(), g_rt, catalogue, n_catalogue, owner,
+                           index);
+}
+
+/* And what it looks like. Names and glyphs are read off the bar every pass; the
+ * frame's own guard is what keeps that from repainting a panel that has not
+ * changed. */
+static void draw_actions(void)
+{
+    const catnip_bar *bar = catnip_ui_input_bar();
+    const char *names[CATNIP_BAR_CELLS];
+    catnip_icon icons[CATNIP_BAR_CELLS];
+    int n;
+
+    if (!catnip_bar_up(bar)) {
+        catnip_frame_set_actions(nullptr, nullptr, 0, 0, false);
+        return;
+    }
+    n = bar->n > CATNIP_BAR_CELLS ? CATNIP_BAR_CELLS : bar->n;
+    for (int i = 0; i < n; i++) {
+        names[i] = bar->items[i].name;
+        icons[i] = catnip_icon_from_name(bar->items[i].icon);
+    }
+    /* Whether it steps is the bar's to say, not a thing to re-derive from the
+     * count: two actions whose second is destructive step as well, because B
+     * will not carry that one. */
+    catnip_frame_set_actions(names, icons, n, bar->focus, catnip_bar_modal(bar));
+}
+
+/* Whether the panel belongs to the running app right now.
+ *
+ * Two answers, in order: the visible screen's own `frame`, and the manifest's
+ * when the screen said nothing. That order is the whole point - `frame` used to
+ * be the manifest's alone, which made "the whole panel is mine" a claim an app
+ * made once for every screen it would ever show, and the clock is the app that
+ * cannot make it: its face wants the panel and its setter wants the bar back.
+ *
+ * In the menu neither answers yes: no screen there sets `frame`, and the shell
+ * reports bare only while an app is actually running.
+ *
+ * Asked of Lua, so asked only when the answer can have moved.
+ *
+ * It is one pcall into the runtime, which is about 210 us on this chip - a
+ * sixth of a pass spent asking a question whose answer changes when an app
+ * pushes a screen and at no other time. A screen can only appear or vanish
+ * through a handler (the drain), a page or shell transition, or an app's own
+ * chunk being stepped; `moved` is those three, and it is worked out before this
+ * is called because the region has to be right before the tree is drawn. */
+static bool app_is_bare(bool moved)
+{
+    static bool cached;
+    static bool asked;
+
+    if (!g_rt) return false;
+    if (moved || !asked) {
+        cached = catnip_ui_bare(g_rt, catnip_shell_bare(g_shell) != 0);
+        asked = true;
+    }
+    return cached;
+}
+
 void loop()
 {
     /* Either side of the frame draw: a full-screen blit takes long enough that
@@ -665,7 +854,10 @@ void loop()
          * than from any of the switches the page is testing. */
         catnip_diag_step();
         catnip_lvgl_step();
-        poll_power_button();
+        /* Forced: the diagnostic page is the whole loop, and its passes are
+         * slow enough that a cadence would be the only thing reading the
+         * button. */
+        poll_power_button_at((unsigned)millis(), true);
         catnip_led_breathe();
         /* Holding B is the way out, and it goes back to the cat rather than
          * through a restart: the page borrowed lv_screen_active() and gives it
@@ -693,7 +885,15 @@ void loop()
     /* The slot, before anything reads it. A card that arrived brings apps with
      * it and a card that left takes them away, and either way the list on
      * screen is wrong until it is rebuilt. */
-    if (catnip_sd_poll()) {
+    /* And the slot, on a slower one still. A card is put in by hand and the
+     * answer costs a mount check; four times a second is faster than anyone can
+     * push one in and let go, and it was being asked four hundred and sixty
+     * times a second. */
+    static unsigned sd_last;
+    unsigned now_ms = (unsigned)millis();
+    bool ask_sd = (unsigned)(now_ms - sd_last) >= 250u;
+    if (ask_sd) sd_last = now_ms;
+    if (ask_sd && catnip_sd_poll()) {
         bool mounted = catnip_sd_mounted();
         catnip_meowkit_hal_set_fs(mounted);
         if (g_shell && catnip_shell_state(g_shell) != CATNIP_SHELL_RUNNING) {
@@ -745,6 +945,7 @@ void loop()
     /* The menu and a running app are the same kind of tree; which is up is the
      * shell's state, and the transitions between them are here (#33). */
     bool stepped = false;
+    catnip_page page_was = catnip_pages_current(g_pages);
     /* The platform's own screens, before the shell's states: none of them is
      * one. While one is up the menu's pick is not read and no app can start,
      * because the tree on screen is that page's and there is nothing on it to
@@ -778,12 +979,7 @@ void loop()
         /* Whichever way it ended - B, home, finished, faulted - teardown loaded
          * the blank screen, so the menu has to be rebuilt before the next pass
          * draws it. */
-        if (st == CATNIP_SHELL_MENU) {
-            /* The launcher's own screens are never bare, and this has to be
-             * cleared before the menu is rebuilt rather than after. */
-            catnip_lvgl_backend_set_bare(false);
-            catnip_pages_rebuild(g_pages);
-        }
+        if (st == CATNIP_SHELL_MENU) catnip_pages_rebuild(g_pages);
     } else if (g_shell) {
         /* In the menu. A click has latched which app to launch; the launch
          * tears the menu tree down, so one that then fails to load must put the
@@ -791,22 +987,49 @@ void loop()
         const char *id = catnip_pages_take_launch(g_pages);
         if (id) {
             char err[64];
-            /* Before the app's first screen exists, which is what decides
-             * whether it reserves room for a bar it will not be given. */
-            if (catnip_shell_launch_id(g_shell, id, err, sizeof(err)) == 0) {
-                catnip_lvgl_backend_set_bare(catnip_shell_bare(g_shell) != 0);
-            } else {
+            /* The ring, and then straight onto the panel before the launch
+             * blocks: reading an app off the card and running its chunk takes
+             * long enough to be noticed and does not return until it is done,
+             * so there is no later pass to draw from. It does not turn while it
+             * is up, and that is honest - nothing is happening in this device
+             * except the thing it is saying. */
+            say_busy("loading");
+            catnip_lvgl_step();
+            if (catnip_shell_launch_id(g_shell, id, err, sizeof(err)) != 0) {
                 Serial.printf("[catnip] menu: %s could not launch: %s\n", id, err);
                 catnip_pages_rebuild(g_pages);
             }
+            say_busy(NULL);
         }
     }
 
-    if (g_rt && g_be) catnip_render(g_rt, g_be);
+    /* Whether the panel belongs to the app, decided fresh every pass and before
+     * the tree is drawn - it is what says whether the region reserves room for
+     * a bar. Asked of the visible screen first and of the manifest only when
+     * the screen said nothing, so an app whose screens are all one shape still
+     * declares it once and the clock can hand the bar back for its setter. */
+    /* Everything that can have moved the tree since the last pass drew it. */
+    const bool moved =
+        delivered > 0 || stepped || catnip_pages_current(g_pages) != page_was;
+    const bool bare = app_is_bare(moved);
+    catnip_lvgl_backend_set_bare(bare);
+
+    /* After the drain that ran the app's handlers and before the tree is drawn,
+     * because a bar put up now is a bar the user sees this frame. */
+    offer_actions();
+
+    /* How many objects the pass touched, which is the honest answer to "did
+     * anything on screen change" - and the only one, since an app writes a
+     * property without telling anybody. */
+    const int drawn = (g_rt && g_be) ? catnip_render(g_rt, g_be) : 0;
 
     /* Carry any clock sync forward (#84): it joins the network, asks the time
      * and writes the RTC over several passes, dropping the radio when it is
      * done. Cheap when idle - it returns at once unless a sync is in flight. */
+    /* The radio, once a pass: it steps a join in flight. Before this it was
+     * only stepped from inside the clock sync, so a join was advanced only when
+     * an NTP request happened to be in flight too. */
+    (void)catnip_wifi_poll();
     catnip_net_time_poll();
 
     /* The frame, last: the counter it draws is read off the tree the pass above
@@ -816,7 +1039,7 @@ void loop()
     update_status(false);
     /* Not over a canvas. `frame: "bare"` is a promise about the whole panel, and
      * a bar floating on the top layer would be the platform breaking it. */
-    catnip_frame_show(catnip_lvgl_backend_active() && !catnip_shell_bare(g_shell));
+    catnip_frame_show(catnip_lvgl_backend_active() && !bare);
     /* And what the four directions do from where the ring is (#80). Derived
      * from the tree by the same function the input pass asks, so the arrow that
      * is lit and the press that does something cannot disagree. */
@@ -824,9 +1047,31 @@ void loop()
      * or asked for the hint not to be drawn, which is `"hints": false`. The
      * first is a claim about the whole surface and the second about this app's
      * directions needing no explanation, and either is reason enough. */
-    catnip_frame_show_hint(catnip_lvgl_backend_active() && !catnip_shell_bare(g_shell) &&
+    catnip_frame_show_hint(catnip_lvgl_backend_active() && !bare &&
                            catnip_shell_hints(g_shell));
-    catnip_frame_set_hint(catnip_ui_input_hint(g_rt, catnip_ui_input_focused()));
+    /* The hint and the counter are both read out of the tree, and both cost a
+     * walk of it. What they say changes when the tree changes or when the ring
+     * moves, and on a device sitting still neither does - so both are asked
+     * only then, and the answers stand until something moves.
+     *
+     * The drawing behind them is guarded too, and separately: that guard is
+     * about not repainting, this one is about not asking. */
+    {
+        static catnip_handle focus_was = CATNIP_HANDLE_NONE;
+        static bool asked;
+        catnip_handle focus_now = catnip_ui_input_focused();
+
+        if (moved || drawn || focus_now != focus_was || !asked) {
+            focus_was = focus_now;
+            asked = true;
+            catnip_frame_set_hint(catnip_ui_input_hint(g_rt, focus_now));
+            catnip_frame_step(g_rt);
+        }
+    }
+    /* And the bar of actions, if one is up. It is drawn after the hint because
+     * putting it up lifts the hint onto its shoulder, and the hint has to exist
+     * to be lifted. */
+    draw_actions();
     /* The status strip in the bar (#83): a card when one is in the slot, the
      * radio when it is up, and the sync glyph only while a sync is actually in
      * flight - a badge that was always there would be saying "this device has
@@ -849,6 +1094,26 @@ void loop()
          * catnip_pages.c - they are one screen each and their titles do not
          * change while they are up, where the ring's does on every step. */
     }
+    /* The one picture of working there is, and the loop is what knows when to
+     * show it: a scan with nothing to show yet, or an app being loaded off the
+     * card. Neither of those is drawn by whoever is waiting - what waiting
+     * looks like is the platform's, exactly as the bar and the hint are. */
+    say_busy(busy_reason());
     catnip_toast_step();
-    catnip_frame_step(g_rt);
+
+    /* And give the rest of the system the pass back when this one did nothing.
+     *
+     * A loop with no yield in it runs as fast as the CPU will go - about nine
+     * hundred passes a second here - and every one of those passes is time the
+     * idle task does not get. FreeRTOS uses the idle task for its own
+     * housekeeping and the SoC uses it to clock down, so a busy loop is not
+     * only a flat battery: it is the one shape that starves the scheduler on a
+     * device that is also running a radio.
+     *
+     * One millisecond, and only when the pass found nothing to do. That is a
+     * ceiling of about five hundred passes a second, which is still two orders
+     * of magnitude faster than a thumb - and the moment anything happens, the
+     * next pass is immediate again, so the yield can never be in the way of a
+     * press it has already seen. */
+    if (!delivered && !stepped && !drawn && gesture == CATNIP_UI_GESTURE_NONE) delay(1);
 }

@@ -167,7 +167,46 @@ typedef enum {
      * carousel (one at a time). Each cell is a focusable child, so the ring
      * walks them in reading order. */
     CATNIP_LAYOUT_GRID,
+    /* A column of lines rather than a column of rows: no icon slot in front of
+     * each, and no ring around the one the cursor is on. It is a page to be
+     * read, not a page to be chosen from, and a highlight on a fact promises
+     * that pressing A there will do something.
+     *
+     * It still scrolls the way everything else does - the selection leads and
+     * the view follows - the selection simply is not drawn. That is not a
+     * hidden mode: on a page where nothing is selectable there is nothing for a
+     * selection to mean, and what is left of it is the reading position. */
+    CATNIP_LAYOUT_TEXT,
 } catnip_node_layout;
+
+/* How many cells a grid shows at once, and in what shape.
+ *
+ * The columns are fixed at three rather than fitted to the width. A grid that
+ * became four columns on a longer card would move every icon whose position a
+ * user had learned, and the position is most of what a grid of pictures is for.
+ *
+ * A seventh cell is the next page, not a longer scroll: the selection steps
+ * cell by cell and the page turns under it when it steps off. Which is why the
+ * counter over a grid reads `2/3` - the pages - and not `8/14`. Here rather
+ * than in the backend because the counter is derived in portable code and the
+ * drawing is not, and the two have to agree about what a page is. */
+#define CATNIP_GRID_COLS 3
+#define CATNIP_GRID_ROWS 2
+#define CATNIP_GRID_PAGE (CATNIP_GRID_COLS * CATNIP_GRID_ROWS)
+
+/* And how many columns a page of values shows at once. Five is what stays
+ * readable across 320 px: a column narrower than about sixty leaves no room for
+ * the number printed above it, and a number that has to be guessed at is not a
+ * setting being shown. The clock's five fields are one page and the preference
+ * page's four are one page, which is the shape both were designed at; a sixth
+ * turns one rather than squeezing five. */
+#define CATNIP_MIXER_PAGE 5
+
+/* How long an action id may be. Here rather than in catnip_bar.h because that
+ * header includes this one, and the renderer is what carries the ids back. */
+#define CATNIP_ACTION_ID_MAX 24
+/* And how many one long press may produce. */
+#define CATNIP_ACTIONS_MAX 8
 
 enum {
     /* Set on the kinds that can take input - button and list - unless the node
@@ -439,7 +478,7 @@ int catnip_render_drain(catnip_rt *rt);
  * negative for a handler that faulted or was not there at all. `back` is what
  * that distinction is for - see catnip_render_take_claim(). */
 typedef int (*catnip_render_dispatch_fn)(void *ud, catnip_rt *rt, int node_ref,
-                                         const char *event, int index);
+                                         const char *event, int index, const char *arg);
 void catnip_render_set_dispatch(catnip_rt *rt, catnip_render_dispatch_fn fn, void *ud);
 
 /* The handle of the screen the backend was last told to show, or
@@ -486,6 +525,15 @@ unsigned catnip_render_events(catnip_rt *rt, catnip_handle h);
  * once, and would let two apps disagree about what `total` counts. */
 int catnip_render_counter(catnip_rt *rt, catnip_handle focus, int *n, int *total);
 
+/* Tell the renderer how many children of `h` the backend can show at once.
+ *
+ * For the shapes whose page is measured rather than declared - a column of
+ * lines, whose page is however many fit. The counter needs the number and
+ * cannot work it out: how many lines fit is geometry, and geometry is the
+ * backend's. Everything else pages by a declared constant and says nothing
+ * here. */
+void catnip_render_set_page(catnip_rt *rt, catnip_handle h, int rows);
+
 /* Whether the handler of a claimable post returned something truthy, cleared as
  * it is read.
  *
@@ -497,6 +545,25 @@ int catnip_render_counter(catnip_rt *rt, catnip_handle focus, int *n, int *total
  * this 0, which is what makes "an app that wrote no on_back" the default rather
  * than a special case. */
 int catnip_render_take_claim(catnip_rt *rt);
+
+/* Run one of the actions the platform put on the bar. It arrives as
+ * `on_action(self, id, index)` on the list that was long-pressed: which action,
+ * and which of its rows it is about. The id rather than a number because that
+ * is what the app named it by in its manifest, and a number would be a position
+ * in a list the app no longer has. */
+int catnip_render_post_action(catnip_rt *rt, catnip_handle h, int index, const char *id);
+
+/* What the last `options` handler answered with: the action ids it named, in
+ * the order it named them. Returns how many were written into `ids` and clears
+ * the answer, so one long press produces one bar.
+ *
+ * Latched rather than returned, for the same reason the claim is: the caller
+ * that wants the answer - whatever puts the bar up - is not the caller that
+ * drains, and the handler runs somewhere between the two. */
+int catnip_render_take_actions(catnip_rt *rt, char (*ids)[CATNIP_ACTION_ID_MAX], int max);
+
+/* Record one id from inside a dispatcher. Nothing else calls this. */
+void catnip_render_put_action(catnip_rt *rt, const char *id);
 
 #ifdef __cplusplus
 }

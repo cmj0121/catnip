@@ -65,6 +65,9 @@ typedef struct {
     catnip_style_role style;
     catnip_icon icon;
     catnip_node_layout layout;
+    /* How many children the drawing can show at once, for the shapes whose page
+     * is measured rather than declared. 0 until something says. */
+    int page;
     char *image; /* owned copy of the last image name sent, or NULL */
     size_t image_cap;
     int value;
@@ -84,6 +87,11 @@ typedef struct {
     char event[EVENT_MAX];
     int index;     /* the child this is about, or CATNIP_INDEX_NONE */
     int claimable; /* the platform is waiting on this handler's answer */
+    /* Which action, for `action` events, and "" for every other kind. An index
+     * cannot carry it: the app answered `on_options` with names out of its
+     * manifest, so a name is what has to come back - and by the time it does,
+     * the list it answered with is gone. */
+    char arg[CATNIP_ACTION_ID_MAX];
 } qentry;
 
 typedef struct {
@@ -99,6 +107,9 @@ typedef struct {
     catnip_render_dispatch_fn dispatch;
     void *dispatch_ud;
     int claim; /* a handler returned truthy; read and cleared by take_claim */
+    /* What the last `options` handler answered with. */
+    char actions[CATNIP_ACTIONS_MAX][CATNIP_ACTION_ID_MAX];
+    int n_actions;
 
     catnip_handle order[SLOTS_MAX]; /* focusable handles, in tree order */
     int n_order;
@@ -498,6 +509,7 @@ static void desc_build(ctx *c, int node, catnip_node_desc *d)
             else if (lay && strcmp(lay, "row") == 0) d->layout = CATNIP_LAYOUT_ROW;
             else if (lay && strcmp(lay, "canvas") == 0) d->layout = CATNIP_LAYOUT_CANVAS;
             else if (lay && strcmp(lay, "grid") == 0) d->layout = CATNIP_LAYOUT_GRID;
+            else if (lay && strcmp(lay, "text") == 0) d->layout = CATNIP_LAYOUT_TEXT;
             lua_pop(L, 1);
         }
 
@@ -979,8 +991,10 @@ void catnip_render_reset(catnip_rt *rt, const catnip_render_backend *be)
     st->shown = CATNIP_HANDLE_NONE;
     st->qhead = st->qcount = st->qdropped = 0;
     /* An unread claim belongs to the app that just went away. Left standing it
-     * would answer the *next* app's first B. */
+     * would answer the *next* app's first B - and an unread set of actions
+     * would put that app's bar up over the wrong item, for the same reason. */
     st->claim = 0;
+    st->n_actions = 0;
     st->n_order = 0;
     st->deep_reported = 0;
     failed_clear(&c);
@@ -1019,6 +1033,15 @@ int catnip_render_focus_order(catnip_rt *rt, catnip_handle *out, int max)
 }
 
 /* ---- input -------------------------------------------------------------- */
+
+void catnip_render_set_page(catnip_rt *rt, catnip_handle h, int rows)
+{
+    lua_State *L = catnip_rt_lua(rt);
+    render_state *st = L ? state_peek(L) : NULL;
+    slot *sl = st ? slot_of(st, h) : NULL;
+
+    if (sl) sl->page = rows;
+}
 
 void catnip_render_set_dispatch(catnip_rt *rt, catnip_render_dispatch_fn fn, void *ud)
 {
@@ -1086,6 +1109,35 @@ int catnip_render_counter(catnip_rt *rt, catnip_handle focus, int *n, int *total
         if (st->slots[i].in_use && st->slots[i].parent == h) rows++;
     if (rows <= 0) return 0;
 
+    /* A grid counts pages, because what a user sees there is a position on a
+     * page rather than an ordinal: `2/3` answers "how much further is there",
+     * and `8/14` answers a question nobody asked of a wall of pictures. */
+    if (list->layout == CATNIP_LAYOUT_GRID) {
+        if (n) *n = list->selected / CATNIP_GRID_PAGE + 1;
+        if (total) *total = (rows + CATNIP_GRID_PAGE - 1) / CATNIP_GRID_PAGE;
+        return 1;
+    }
+    /* And so does a page of values, for the same reason: the columns are side
+     * by side and a user reads them as a screenful, not as an eighth of one. */
+    if (list->layout == CATNIP_LAYOUT_MIXER) {
+        if (n) *n = list->selected / CATNIP_MIXER_PAGE + 1;
+        if (total) *total = (rows + CATNIP_MIXER_PAGE - 1) / CATNIP_MIXER_PAGE;
+        return 1;
+    }
+    /* And a column - of rows or of lines - which pages too, on boundaries the
+     * *drawing* measured, because how many fit is geometry. Reported here so
+     * the bar and the page cannot disagree: they did, and the header read
+     * "9/14" over a page whose first line was the ninth.
+     *
+     * A column used to count its rows, and "row twelve of forty-five" is an
+     * ordinal rather than an answer: what the counter is for is how much more
+     * there is, and pages are the unit a reader can act on. */
+    if ((list->layout == CATNIP_LAYOUT_TEXT || list->layout == CATNIP_LAYOUT_ROWS) &&
+        list->page > 0) {
+        if (n) *n = list->selected / list->page + 1;
+        if (total) *total = (rows + list->page - 1) / list->page;
+        return 1;
+    }
     if (n) *n = list->selected + 1; /* one-based for display, converted once */
     if (total) *total = rows;
     return 1;
@@ -1112,6 +1164,33 @@ catnip_node_layout catnip_render_layout(catnip_rt *rt, catnip_handle h)
     return sl->layout;
 }
 
+void catnip_render_put_action(catnip_rt *rt, const char *id)
+{
+    lua_State *L = catnip_rt_lua(rt);
+    render_state *st = L ? state_peek(L) : NULL;
+
+    if (!st || !id || !id[0]) return;
+    if (st->n_actions >= CATNIP_ACTIONS_MAX) return;
+    snprintf(st->actions[st->n_actions], CATNIP_ACTION_ID_MAX, "%s", id);
+    st->n_actions++;
+}
+
+int catnip_render_take_actions(catnip_rt *rt, char (*ids)[CATNIP_ACTION_ID_MAX], int max)
+{
+    lua_State *L = catnip_rt_lua(rt);
+    render_state *st = L ? state_peek(L) : NULL;
+    int n, i;
+
+    if (!st) return 0;
+    n = st->n_actions;
+    st->n_actions = 0;
+    if (!ids || max <= 0) return 0;
+    if (n > max) n = max;
+    for (i = 0; i < n; i++)
+        snprintf(ids[i], CATNIP_ACTION_ID_MAX, "%s", st->actions[i]);
+    return n;
+}
+
 int catnip_render_take_claim(catnip_rt *rt)
 {
     lua_State *L = catnip_rt_lua(rt);
@@ -1124,7 +1203,7 @@ int catnip_render_take_claim(catnip_rt *rt)
 }
 
 static int post(catnip_rt *rt, catnip_handle h, const char *event, int index,
-                int claimable)
+                int claimable, const char *arg)
 {
     lua_State *L = catnip_rt_lua(rt);
     if (!L || !event) return -1;
@@ -1141,19 +1220,25 @@ static int post(catnip_rt *rt, catnip_handle h, const char *event, int index,
     snprintf(e->event, sizeof(e->event), "%s", event);
     e->index = index;
     e->claimable = claimable;
+    snprintf(e->arg, sizeof(e->arg), "%s", arg ? arg : "");
     st->qcount++;
     return 0;
 }
 
 int catnip_render_post(catnip_rt *rt, catnip_handle h, const char *event, int index)
 {
-    return post(rt, h, event, index, 0);
+    return post(rt, h, event, index, 0, NULL);
+}
+
+int catnip_render_post_action(catnip_rt *rt, catnip_handle h, int index, const char *id)
+{
+    return post(rt, h, "action", index, 0, id);
 }
 
 int catnip_render_post_claimable(catnip_rt *rt, catnip_handle h, const char *event,
                                  int index)
 {
-    return post(rt, h, event, index, 1);
+    return post(rt, h, event, index, 1, NULL);
 }
 
 int catnip_render_drain(catnip_rt *rt)
@@ -1196,7 +1281,8 @@ int catnip_render_drain(catnip_rt *rt)
              * that cares about it - the shell, deciding whether B was handled -
              * is not the caller that drains. Only a post that asked to be
              * answered can set it. */
-            int r = st->dispatch(st->dispatch_ud, rt, ref, e.event, e.index);
+            int r = st->dispatch(st->dispatch_ud, rt, ref, e.event, e.index,
+                                 e.arg[0] ? e.arg : NULL);
             if (e.claimable && r > 0) st->claim = 1;
             delivered++;
         } else {

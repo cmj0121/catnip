@@ -8,6 +8,7 @@
 #include "lvgl_backend.h"
 #include "touch.h"
 #include "ui_input.h"
+#include "frame.h"
 #include "ui_input_core.h"
 
 namespace {
@@ -72,7 +73,28 @@ void env_cancel_touch(void *ud)
     if (g_touch_indev) lv_indev_wait_release(g_touch_indev);
 }
 
-const catnip_ui_env kEnv = {env_mixer_at, env_mixer_pct, env_cancel_touch, nullptr};
+/* Which cell of the action bar a tap landed on. The bar is drawn by the frame,
+ * so the frame is what knows where its cells are. */
+int env_action_at(void *ud, int x, int y)
+{
+    (void)ud;
+    return catnip_frame_action_at(x, y);
+}
+
+/* The one action bar there is. Here rather than in the loop because the input
+ * pass is what drives it - while it is up, A and B are its own - and a bar the
+ * loop owned would be a second copy of that state to keep in step. */
+catnip_bar g_bar;
+
+int env_page_rows(void *ud, catnip_handle list)
+{
+    (void)ud;
+    return catnip_lvgl_backend_page_rows(list);
+}
+
+const catnip_ui_env kEnv = {env_mixer_at,  env_mixer_pct, env_cancel_touch,
+                            env_action_at, env_page_rows, nullptr,
+                            &g_bar};
 
 } /* namespace */
 
@@ -114,6 +136,16 @@ int catnip_ui_input_step(catnip_rt *rt)
      * handle and nothing more. */
     catnip_lvgl_backend_focus(catnip_ui_input_focus(&g_in));
     return gesture;
+}
+
+catnip_bar *catnip_ui_input_bar(void)
+{
+    return &g_bar;
+}
+
+catnip_handle catnip_ui_input_options_asked(int *index)
+{
+    return catnip_ui_input_options_target(&g_in, index);
 }
 
 catnip_handle catnip_ui_input_focused(void)

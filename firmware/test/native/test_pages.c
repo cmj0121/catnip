@@ -183,6 +183,11 @@ static catnip_rt *g_rt;
 static catnip_sched *g_sched;
 static catnip_pages *g_pages;
 static catnip_ui_input g_in;
+/* The action bar the input pass drives, and the env that hands it over. The
+ * device page's three doors are behind A now, so a test that could not see a
+ * bar could not reach the preference page at all. */
+static catnip_bar g_bar;
+static catnip_ui_env g_uienv;
 static unsigned g_clock; /* the millisecond counter, ours to advance */
 
 /* One pass of the main loop, in its order: read the switches, run whatever that
@@ -200,8 +205,18 @@ static void frame(const bool down[CATNIP_BTN_COUNT], unsigned advance)
     g_clock += advance;
     s.now = g_clock;
 
-    gesture = catnip_ui_input_run(&g_in, g_rt, &s, NULL);
+    gesture = catnip_ui_input_run(&g_in, g_rt, &s, &g_uienv);
     catnip_render_drain(g_rt);
+    /* What long A - and, on a page with no selection, short A - answered with,
+     * turned into a bar. The loop does this after the drain because the handler
+     * that answers runs in the drain; so does this. */
+    {
+        int n_cat = 0;
+        const catnip_action *cat = catnip_pages_actions(g_pages, &n_cat);
+        int index = CATNIP_INDEX_NONE;
+        catnip_handle owner = catnip_ui_input_options_target(&g_in, &index);
+        (void)catnip_bar_offer(&g_bar, g_rt, cat, n_cat, owner, index);
+    }
     catnip_pages_step(g_pages, gesture);
     catnip_render(g_rt, &kBackend);
 }
@@ -260,6 +275,7 @@ int main(void)
     catnip_render_set_dispatch(g_rt, catnip_sched_dispatch, g_sched);
     catnip_config_defaults(&cfg);
     g_board.epoch = 1757404980u; /* a Tuesday, so the ring has a clock to show */
+    g_uienv.bar = &g_bar;
     g_pages = catnip_pages_new(g_rt, NULL, &cfg, &kEnv);
 
     printf("the home section, driven by the switches\n");
@@ -319,19 +335,18 @@ int main(void)
         g_card_row = "card none";
     }
     CHECK(hint() & CATNIP_HINT_DOWN, "so down scrolls them");
-    CHECK(hint() & CATNIP_HINT_RIGHT, "and right reaches the buttons");
+    /* And nothing sideways: the page is one column of prose now, and the two
+     * tiles the ring used to reach are behind A. */
+    CHECK(!(hint() & CATNIP_HINT_RIGHT), "and there is nothing sideways to reach");
 
-    press(CATNIP_BTN_RIGHT);
-    CHECK(focus_is("info_left"), "right moves the ring onto Preference");
-    CHECK(!(hint() & CATNIP_HINT_UP) && !(hint() & CATNIP_HINT_DOWN),
-          "a button has nothing for up and down to move, so both are dimmed");
-    press(CATNIP_BTN_RIGHT);
-    CHECK(focus_is("info_right"), "and again onto Diagnostic");
-    CHECK(!(hint() & CATNIP_HINT_RIGHT), "which is the last stop, so right is dimmed");
-
-    /* ---- and A on it is the diagnostic --------------------------------- */
+    /* ---- A offers the three, and the bar is what carries them ----------- */
     press(CATNIP_BTN_A);
-    CHECK(g_board.diags == 1, "A on the right button hands the screen to the diagnostic");
+    CHECK(catnip_bar_up(&g_bar), "A on the facts puts a bar of three up");
+    CHECK(catnip_bar_modal(&g_bar), "three of them, so it steps rather than binds");
+    press(CATNIP_BTN_RIGHT);
+    press(CATNIP_BTN_RIGHT);
+    press(CATNIP_BTN_A);
+    CHECK(g_board.diags == 1, "and the third of them hands the screen to the diagnostic");
 
     /* ---- A on the left button is the preference page ------------------- */
     /* The diagnostic took the screen and handed it back, which on the device is
@@ -342,37 +357,60 @@ int main(void)
     CHECK(catnip_pages_current(g_pages) == CATNIP_PAGE_HOME,
           "redrawing the launcher is being on it");
     press(CATNIP_BTN_DOWN);
-    press(CATNIP_BTN_RIGHT);
-    press(CATNIP_BTN_A);
+    press(CATNIP_BTN_A); /* the bar */
+    press(CATNIP_BTN_A); /* its first, which is the preference page */
     CHECK(catnip_pages_current(g_pages) == CATNIP_PAGE_PREF,
-          "A on the left button opens the preference page");
+          "the first of the three opens the preference page");
     CHECK(title_is("Preference"), "and the bar says that too");
 
-    /* ---- a value is applied as it is stepped, and B puts it back -------- */
+    /* ---- two levels: the page, then one column of it -------------------- */
+    /* A selects, and on a page of values what A selects is a column. So up and
+     * down are the page until a column has been taken up, and the value only
+     * afterwards - which is the one thing that stops a page arrived at by
+     * pushing down putting a brightness under the joystick. */
     screen_was = cfg.screen_brightness;
     g_board.applies = 0;
     g_board.saves = 0;
     press(CATNIP_BTN_DOWN);
-    CHECK(cfg.screen_brightness < screen_was, "down steps the column the ring is on");
+    CHECK(cfg.screen_brightness == screen_was,
+          "down does nothing until a column has been taken up");
+
+    press(CATNIP_BTN_A);
+    press(CATNIP_BTN_DOWN);
+    CHECK(cfg.screen_brightness < screen_was, "A takes the column up and down steps it");
     CHECK(g_board.applies > 0, "and it is applied at once, so it can be seen");
     CHECK(g_board.saves == 0, "nothing is written yet");
 
+    /* B one level down: put this column back, and stay. Cancel means the same
+     * thing it means everywhere - undo the thing you are on - and the thing you
+     * are on is a value. */
     press(CATNIP_BTN_B);
     CHECK(cfg.screen_brightness == screen_was, "B puts back what was there");
-    CHECK(g_board.saves == 0, "and writes nothing at all");
+    CHECK(catnip_pages_current(g_pages) == CATNIP_PAGE_PREF, "and stays on the page");
+
+    press(CATNIP_BTN_B);
+    CHECK(g_board.saves == 0, "and a second B writes nothing at all");
     CHECK(catnip_pages_current(g_pages) == CATNIP_PAGE_INFO,
           "leaving returns to the page it was opened from, not to the cat");
 
-    /* ---- A keeps it, and writes once ----------------------------------- */
-    press(CATNIP_BTN_RIGHT);
+    /* ---- A keeps a column; two of them keep the page and leave ---------- */
+    press(CATNIP_BTN_A);
     press(CATNIP_BTN_A);
     CHECK(catnip_pages_current(g_pages) == CATNIP_PAGE_PREF, "back on the page");
+    press(CATNIP_BTN_A);
     press(CATNIP_BTN_DOWN);
     CHECK(g_board.saves == 0, "a step still writes nothing");
     press(CATNIP_BTN_A);
-    CHECK(cfg.screen_brightness < screen_was, "A keeps the change");
-    CHECK(g_board.saves == 1, "and writes it exactly once");
-    CHECK(catnip_pages_current(g_pages) == CATNIP_PAGE_INFO, "and returns to the hub");
+    CHECK(cfg.screen_brightness < screen_was, "A keeps the column");
+    CHECK(g_board.saves == 0, "and still writes nothing, because the page is still up");
+    CHECK(catnip_pages_current(g_pages) == CATNIP_PAGE_PREF, "and does not leave");
+
+    /* Twice, with nothing between: keep all of it and go. The step above is
+     * what makes the pair before it two presses rather than one gesture. */
+    press(CATNIP_BTN_A);
+    press(CATNIP_BTN_A);
+    CHECK(g_board.saves == 1, "two presses of A write it exactly once");
+    CHECK(catnip_pages_current(g_pages) == CATNIP_PAGE_INFO, "and return to the hub");
 
     /* ---- long B is home from anywhere ---------------------------------- */
     hold(CATNIP_BTN_B);
@@ -381,9 +419,10 @@ int main(void)
     CHECK(focus_is("menu_list"), "and the ring is back on the carousel");
 
     press(CATNIP_BTN_DOWN);
-    press(CATNIP_BTN_RIGHT);
+    press(CATNIP_BTN_A);
     press(CATNIP_BTN_A);
     g_board.saves = 0;
+    press(CATNIP_BTN_A);
     press(CATNIP_BTN_DOWN);
     hold(CATNIP_BTN_B);
     CHECK(catnip_pages_current(g_pages) == CATNIP_PAGE_HOME,

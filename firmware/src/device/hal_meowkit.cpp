@@ -114,6 +114,12 @@ const char *hal_wifi_ssid(void *ud)
     return catnip_wifi_status() == CATNIP_WIFI_CONNECTED ? catnip_wifi_ssid() : nullptr;
 }
 
+void hal_wifi_rescan(void *ud)
+{
+    (void)ud;
+    catnip_wifi_rescan();
+}
+
 int hal_wifi_scan(void *ud, catnip_wifi_ap *out, int max)
 {
     (void)ud;
@@ -216,6 +222,7 @@ const catnip_hal *catnip_meowkit_hal_begin(void)
     g_hal.wifi_status = hal_wifi_status;
     g_hal.wifi_ssid = hal_wifi_ssid;
     g_hal.wifi_scan = hal_wifi_scan;
+    g_hal.wifi_rescan = hal_wifi_rescan;
 
     /* fs.* is the card and nothing else. The root is the mount point itself,
      * because catnip_api.c reaches the card through plain stdio - fopen,
@@ -251,7 +258,27 @@ void catnip_meowkit_hal_set_fs(bool available)
 
 void catnip_meowkit_hal_poll(void)
 {
+    /* The switches every pass, and only the switches. They are what a press
+     * has to be seen by, and the loop's rate is the resolution of that.
+     *
+     * The other two are I2C reads on a 100 kHz bus, and each costs a few
+     * hundred microseconds - at several hundred passes a second that was most
+     * of the pass, spent asking two parts that cannot answer differently that
+     * fast. The accelerometer is configured at 100 Hz and cannot report faster
+     * than it samples; a battery moves over minutes. So each is asked at a rate
+     * it can actually change at, which leaves the bus and the CPU for the
+     * things that do. */
+    static uint32_t imu_last;
+    static uint32_t pmu_last;
+    uint32_t now = millis();
+
     catnip_input_poll();
-    catnip_imu_poll();
-    catnip_pmu_poll();
+    if ((uint32_t)(now - imu_last) >= 20u) {
+        imu_last = now;
+        catnip_imu_poll();
+    }
+    if ((uint32_t)(now - pmu_last) >= 500u) {
+        pmu_last = now;
+        catnip_pmu_poll();
+    }
 }

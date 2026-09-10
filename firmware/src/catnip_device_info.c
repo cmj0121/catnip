@@ -7,59 +7,53 @@
 #include "lauxlib.h"
 #include "lua.h"
 
-/* Rows of text with a pair of buttons under them: the facts, and the two doors.
+/* A page to be read: one column of lines, and nothing on it that acts.
  *
- * Three focus stops, in the order they are read: the facts, which up and down
- * scroll, then the two buttons, which A activates. */
+ * It was rows of text with two tiles under them, and the tiles were the thing
+ * this page was least entitled to have - operations drawn on a screen, on the
+ * one page in the device whose whole point is that it answers before it offers.
+ * They are behind A now, where every operation is, and what is left is prose.
+ */
 static const char CATNIP_INFO_LUA[] =
-    "function __catnip_info_build(lines, left, right)\n"
+    "function __catnip_info_build(lines)\n"
     "  local rows = {}\n"
     "  for i, line in ipairs(lines) do\n"
     "    rows[i] = ui.label{ id = 'info' .. i, text = line }\n"
     "  end\n"
-    /* The facts are a column that scrolls and nothing more: up and down move
-     * the cursor, and A on a fact does nothing, because a page where A on
-     * "free heap" lit something up would promise what it cannot deliver.
-     *
-     * It clamps rather than wrapping. A ring is the home carousel's shape,
-     * where there is no top and no bottom to see; a column has both, and one
-     * that jumped from the last line back to the first would lose the reader
-     * their place in a page they are reading rather than choosing from. */
+    /* The cursor is the reading position and is not drawn - `layout = 'text'`
+     * is what says so. It clamps rather than wrapping: a ring is the home
+     * carousel's shape, where there is no top and no bottom to see; a column
+     * has both, and one that jumped from the last line back to the first would
+     * lose the reader their place in a page they are reading. */
     "  local sel = 1\n"
     "  local list\n"
-    "  list = ui.list{ id = 'info_list',\n"
+    "  list = ui.list{ id = 'info_list', layout = 'text',\n"
     "    on_prev = function()\n"
     "      if sel > 1 then sel = sel - 1; list.selected = sel end\n"
     "    end,\n"
     "    on_next = function()\n"
     "      if sel < #rows then sel = sel + 1; list.selected = sel end\n"
+    "    end,\n"
+    /* A and long A answer the same three, and answering is all this does: the
+     * platform draws them. Short A as well as long, because this page has no
+     * selection for long A to be about and nothing else short A could mean -
+     * the same degenerate case the clock's face is. */
+    "    on_click = function() return { 'pref', 'sizes', 'diag' } end,\n"
+    "    on_options = function() return { 'pref', 'sizes', 'diag' } end,\n"
+    "    on_action = function(self, id)\n"
+    "      if id == 'pref' then __catnip_info_act(1)\n"
+    "      elseif id == 'sizes' then __catnip_info_act(2)\n"
+    "      elseif id == 'diag' then __catnip_info_act(3) end\n"
     "    end }\n"
     "  list:set_children(rows)\n"
     "  list.selected = sel\n"
-    /* The two places you would go having read them, side by side under the
-     * facts, each with the icon it is known by elsewhere - the same gear the
-     * preference page is reached by everywhere else, so the button is
-     * recognised before it is read. They are ordinary buttons: left and right
-     * move between them and A activates, which is the platform's own rule and
-     * needs nothing new here. */
-    "  local keys = {}\n"
-    "  local function key(k, id, act)\n"
-    "    if not k then return end\n"
-    "    keys[#keys + 1] = ui.button{ id = id, text = k.text, icon = k.icon,\n"
-    "                                 on_click = function() __catnip_info_act(act) end "
-    "}\n"
-    "  end\n"
-    "  key(left, 'info_left', 1)\n"
-    "  key(right, 'info_right', 2)\n"
-    "  local bar = ui.list{ id = 'info_keys', layout = 'row' }\n"
-    "  bar:set_children(keys)\n"
-    "  ui.screen{ list, bar, id = 'info_screen' }\n"
+    "  ui.screen{ list, id = 'info_screen' }\n"
     "end\n"
     /* Rewrite the facts without rebuilding the page.
      *
      * They go stale while they are being read - a card comes out, the battery
      * moves, the heap moves - and rebuilding the screen to say so would throw
-     * away the ring's position and the list's scroll, which is precisely what a
+     * away the reading position and the scroll, which is precisely what a
      * retained renderer exists to keep. One property write per line that
      * actually differs, so a page of unchanged facts costs no repaint at all -
      * which matters here, because this display repaints whole. */
@@ -69,6 +63,31 @@ static const char CATNIP_INFO_LUA[] =
     "    if node and node.text ~= line then node.text = line end\n"
     "  end\n"
     "end\n";
+
+/* The three, with the icons each is known by elsewhere: the gear the preference
+ * page is reached by everywhere, a page of letters for the type specimen, and
+ * the warning triangle for the one that takes the panel and gives it back only
+ * when it is told to. Recognised before they are read - which is what lets the
+ * names be five letters. Three cells across 320 px leaves about seventy for
+ * words, and a name that does not fit is drawn with an ellipsis; the icon is
+ * carrying most of the meaning either way, so the short name is the honest one
+ * rather than a truncation of a long one.
+ *
+ * None is destructive. The diagnostic takes the screen and hands it back; the
+ * preference page can be left with B; and a page of type samples changes
+ * nothing at all - so B carries the last of them, which is what makes this a
+ * bar of three that steps rather than one that binds. */
+static const catnip_action kActions[] = {
+    {"pref", "Prefs", "settings", false},
+    {"sizes", "Sizes", "file", false},
+    {"diag", "Diag", "warning", false},
+};
+
+const catnip_action *catnip_device_info_actions(int *n)
+{
+    if (n) *n = (int)(sizeof(kActions) / sizeof(kActions[0]));
+    return kActions;
+}
 
 struct catnip_device_info {
     catnip_rt *rt;
@@ -107,25 +126,7 @@ catnip_device_info *catnip_device_info_new(catnip_rt *rt)
     return d;
 }
 
-/* A button, or nil for a page that has fewer than two. A table rather than two
- * more arguments: the label and the icon are one thing said twice over, and a
- * call site with four bare strings in a row is one transposition away from a
- * gear on the diagnostic. */
-static void push_key(lua_State *L, const catnip_info_key *k)
-{
-    if (!k || !k->text) {
-        lua_pushnil(L);
-        return;
-    }
-    lua_newtable(L);
-    lua_pushstring(L, k->text);
-    lua_setfield(L, -2, "text");
-    lua_pushstring(L, k->icon ? k->icon : "none");
-    lua_setfield(L, -2, "icon");
-}
-
-void catnip_device_info_show(catnip_device_info *d, const char *const *rows, int n,
-                             const catnip_info_key *left, const catnip_info_key *right)
+void catnip_device_info_show(catnip_device_info *d, const char *const *rows, int n)
 {
     lua_State *L;
     int i;
@@ -145,9 +146,7 @@ void catnip_device_info_show(catnip_device_info *d, const char *const *rows, int
         lua_pushstring(L, rows[i] ? rows[i] : "");
         lua_rawseti(L, -2, i + 1);
     }
-    push_key(L, left);
-    push_key(L, right);
-    if (lua_pcall(L, 3, 0, 0) != LUA_OK) catnip_rt_report_error(d->rt, L);
+    if (lua_pcall(L, 1, 0, 0) != LUA_OK) catnip_rt_report_error(d->rt, L);
 }
 
 void catnip_device_info_update(catnip_device_info *d, const char *const *rows, int n)

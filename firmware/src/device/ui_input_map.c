@@ -34,9 +34,12 @@ int catnip_ui_input_focus_dir(catnip_button button)
     }
 }
 
-catnip_dir_meaning catnip_ui_input_dir(catnip_button button, catnip_node_layout layout,
-                                       unsigned events, bool back, bool fwd)
+catnip_dir_meaning catnip_ui_input_dir(catnip_button button, const catnip_dir_where *w)
 {
+    catnip_node_layout layout = w->layout;
+    unsigned events = w->events;
+    bool back = w->ring_back;
+    bool fwd = w->ring_fwd;
     bool up = button == CATNIP_BTN_UP;
     bool down = button == CATNIP_BTN_DOWN;
     bool left = button == CATNIP_BTN_LEFT;
@@ -70,15 +73,31 @@ catnip_dir_meaning catnip_ui_input_dir(catnip_button button, catnip_node_layout 
         return CATNIP_DIR_NEXT;
     }
 
-    /* A mixer is stepped sideways for the same reason a carousel is - its
-     * children are laid out across the region - and the axis it does not use
-     * for that is not spare: up and down are the value of the column under the
-     * ring. So the two shapes share "sideways chooses" and part company on what
-     * up and down mean. */
+    /* A page of values has two levels, and they are not two modes: A selects,
+     * and what A selects here is a column, so being on a column is one step
+     * further down the same word. Which is why the four directions mean
+     * different things at each level and neither level had to be named on
+     * screen.
+     *
+     * Unfocused, sideways chooses a column - the same "sideways chooses" a
+     * carousel has, because both lay their children across the region - and up
+     * and down are the page, which is the only thing left for them to be.
+     *
+     * Focused, up and down are the value, and **left and right go dead**. That
+     * is the one thing this level buys that is worth a gesture: changing a
+     * value is the one place in the device where a sideways push that landed on
+     * the neighbour would be silently wrong, because you would have moved a
+     * number you were not looking at. Unfocused, the same push is free. */
     if (layout == CATNIP_LAYOUT_MIXER) {
+        if (w->engaged) {
+            if (up) return CATNIP_DIR_RAISE;
+            if (down) return CATNIP_DIR_LOWER;
+            return CATNIP_DIR_NOTHING;
+        }
         if (left) return CATNIP_DIR_PREV;
         if (right) return CATNIP_DIR_NEXT;
-        return up ? CATNIP_DIR_RAISE : CATNIP_DIR_LOWER;
+        if (up) return w->page_back ? CATNIP_DIR_PAGE_BACK : CATNIP_DIR_NOTHING;
+        return w->page_fwd ? CATNIP_DIR_PAGE_FWD : CATNIP_DIR_NOTHING;
     }
 
     /* Anywhere else: up and down are the focused node's selection, and they do

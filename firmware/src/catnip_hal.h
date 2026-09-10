@@ -76,6 +76,9 @@ typedef struct {
      * it starts a scan and reports the last one's results, so no call stops the
      * loop for the seconds a scan takes. */
     int (*wifi_scan)(void *ud, catnip_wifi_ap *out, int max);
+    /* Throw the last scan away and look again. Optional: a device with no radio
+     * has nothing to look with, and an app that asks gets `false`. */
+    void (*wifi_rescan)(void *ud);
     /* HTTP GET: write body into buf (cap incl. NUL); return length or -1. */
     int (*http_get)(void *ud, const char *url, char *buf, size_t cap);
 

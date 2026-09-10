@@ -37,7 +37,7 @@
 #include "../generated/splash_rgb565.h"
 #include "catnip_mascot_img.h"
 #include "frame.h"
-#include "catnip_font_display.h"
+#include "catnip_font.h"
 #include "lvgl_backend.h"
 #include "lvgl_port.h"
 
@@ -75,7 +75,13 @@ struct Entry {
     catnip_node_layout layout; /* list only: how its children are arranged */
     catnip_style_role role;    /* kept because a canvas places by role */
     bool sel_dirty;            /* list only: the highlight has to be re-applied */
-    bool row;                  /* list child: internal flex row of image + label */
+    bool laid_out;             /* list only: apply_list_layout has run at least once */
+    catnip_text_align align;   /* which edge it asked for, for a canvas to place it by */
+    /* Screen only: how much of the region is currently trimmed off the bottom
+     * because a column of lines could not use it. Remembered so the untrimmed
+     * region can be worked out without putting the pad back to measure it. */
+    int32_t slack;
+    bool row; /* list child: internal flex row of image + label */
     /* The widgets inside a row, held rather than looked up by child index: a
      * mixer column adds two more and the order on screen is not the order they
      * were made in, so an index here would be a second thing to keep in step
@@ -118,6 +124,10 @@ bool g_bare;
 /* ---- the map ------------------------------------------------------------ */
 
 void apply_list_layout(Entry *e);
+void apply_screen_region(Entry *screen);
+bool set_pad(lv_obj_t *obj, lv_style_prop_t prop, int32_t want);
+int32_t row_slack(Entry *screen, int32_t applied);
+int page_rows_of(Entry *e);
 
 Entry *map_find(catnip_handle h)
 {
@@ -160,23 +170,39 @@ void mark_list(catnip_handle parent)
 
 /* ---- style roles -------------------------------------------------------- */
 
-const lv_font_t *role_font(catnip_style_role role, bool canvas)
+const lv_font_t *role_font(catnip_style_role role, bool canvas, bool strip)
 {
-    /* On a canvas the prose roles differ only in ink. There is one thing on a
-     * canvas to be looked at and everything else is a label beside it, so a
-     * heading and a caption at different sizes would only make the labels argue
-     * with each other - and a strip whose letters changed size as the day
-     * changed would shift under the eye at midnight. */
-    if (canvas && role != CATNIP_STYLE_DISPLAY) return &lv_font_montserrat_24;
+    /* A strip is seven letters that have to line up, so its prose roles are one
+     * size and differ only in ink - which is what makes "today's is the bright
+     * one" a thing you see rather than a thing you read. Roles at different
+     * sizes would make the line shift under the eye at midnight, which is the
+     * one moment nobody is looking at it. */
+    if (strip && role != CATNIP_STYLE_DISPLAY) return &catnip_font_16;
+    /* In a canvas *cell* the prose roles differ only in ink. A cell is a
+     * fraction of the panel with one thing in it to be looked at, so a heading
+     * and a caption at different sizes would only make the labels argue with
+     * each other - and at cell scale the smaller of the two would not be read
+     * at all. A canvas that *is* the panel is the other case and is not this
+     * one: it has room for the three sizes the roles already mean, which is
+     * what a face is - the date in a corner, the time in the middle, and the
+     * working underneath in the ink that says it is working. */
+    if (canvas && role != CATNIP_STYLE_DISPLAY) return &catnip_font_24;
 
+    /* 20 / 16 / 10, and body was 14. A list is the screen this device spends
+     * most of its time being, and 14 is a size read by leaning in - which on a
+     * thing held in two hands is the wrong posture to have designed for. Title
+     * moved with it: shifting one and not the other would leave a heading a
+     * hair larger than the rows under it, which is worse than no heading at
+     * all. Caption did not move, because it is working rather than an answer
+     * and the gap between it and body is what says so. */
     switch (role) {
-    case CATNIP_STYLE_TITLE: return &lv_font_montserrat_16;
-    case CATNIP_STYLE_CAPTION: return &lv_font_montserrat_10;
+    case CATNIP_STYLE_TITLE: return &catnip_font_20;
+    case CATNIP_STYLE_CAPTION: return &catnip_font_10;
     case CATNIP_STYLE_DISPLAY: return &catnip_font_display;
     /* An unknown name from Lua already arrived as BODY - catnip_render.c
      * resolves it - so this is the fallback for the roles that do not change
      * the size, not for a name nobody recognised. */
-    default: return &lv_font_montserrat_14;
+    default: return &catnip_font_16;
     }
 }
 
@@ -218,28 +244,42 @@ lv_obj_t *button_label(lv_obj_t *button)
     return lv_obj_get_child(button, 1);
 }
 
-/* Whether this node sits on a canvas - a bare screen, or anything laid out as
- * one. The scale is a property of where a node is, not of what it is: the same
- * `caption` is a footnote on a page and a label on a face. */
+/* Whether this node sits in a canvas *cell* - a list laid out as a canvas,
+ * which is what a carousel's clock cell is. The scale is a property of how much
+ * room a node has, not of what it is.
+ *
+ * A bare screen used to answer yes here too, and that was the same word for two
+ * different amounts of room: the launcher's cell is one position on a ring and
+ * a bare screen is 320x240. Everything on the clock's own face came out at 24
+ * px because of it, which put a line of prose at 328 px on a 320 px panel - the
+ * source line ran off the right-hand edge and sat on top of the weekday strip
+ * on the way. A face that is the whole panel keeps the roles' own sizes. */
 bool on_canvas(const Entry *e)
 {
     Entry *p = map_find(e->parent);
 
-    if (p && p->kind == CATNIP_NODE_LIST && p->layout == CATNIP_LAYOUT_CANVAS)
-        return true;
-    return g_bare && p && p->kind == CATNIP_NODE_SCREEN;
+    return p && p->kind == CATNIP_NODE_LIST && p->layout == CATNIP_LAYOUT_CANVAS;
+}
+
+/* Whether this node is one letter of a strip. */
+bool in_strip(const Entry *e)
+{
+    Entry *p = map_find(e->parent);
+
+    return p && p->kind == CATNIP_NODE_LIST && p->layout == CATNIP_LAYOUT_ROW;
 }
 
 void apply_style(Entry *e, catnip_style_role role)
 {
     bool canvas = on_canvas(e);
+    bool strip = in_strip(e);
 
     if (e->kind == CATNIP_NODE_BUTTON) {
         uint32_t fill = role_fill(role);
         lv_obj_t *label = button_label(e->obj);
 
         lv_obj_set_style_bg_color(e->obj, lv_color_hex(fill), 0);
-        lv_obj_set_style_text_font(label, role_font(role, canvas), 0);
+        lv_obj_set_style_text_font(label, role_font(role, canvas, strip), 0);
         /* Black on the two loud fills and white on the quiet one, so the text
          * stays legible whichever role a button is given. */
         lv_obj_set_style_text_color(
@@ -248,7 +288,7 @@ void apply_style(Entry *e, catnip_style_role role)
     }
     lv_obj_t *text = e->row ? e->name : e->obj;
     if (!text) return;
-    lv_obj_set_style_text_font(text, role_font(role, canvas), 0);
+    lv_obj_set_style_text_font(text, role_font(role, canvas, strip), 0);
     lv_obj_set_style_text_color(text, lv_color_hex(role_ink(role)), 0);
 }
 
@@ -299,7 +339,12 @@ void apply_text(Entry *e, const char *text, catnip_icon icon, const char *image,
              * is - a directory reads faster as pictures than as a column of
              * names. Square, so two rows fit above the fold. */
             lv_obj_set_width(e->obj, 96);
-            lv_obj_set_height(e->obj, 92);
+            /* Two rows have to fit in what the bar and the hint leave, so the
+             * cell is short of square rather than square: 82 twice with a gap
+             * between is 168, and the region is 170. A cell that kept its
+             * squareness would have put the second row half off the bottom -
+             * and a grid pages, so half a row is not a thing it can show. */
+            lv_obj_set_height(e->obj, 82);
             lv_obj_set_style_pad_all(e->obj, 4, 0);
         }
         /* A mixer column is as tall as the region and shares the width evenly
@@ -715,6 +760,11 @@ int catnip_lvgl_backend_mixer_at(int x, int y, catnip_handle *h, int *pct)
     return 0;
 }
 
+int catnip_lvgl_backend_page_rows(catnip_handle h)
+{
+    return page_rows_of(map_find(h));
+}
+
 int catnip_lvgl_backend_mixer_pct(catnip_handle h, int y)
 {
     Entry *e = mixer_column(h);
@@ -799,6 +849,30 @@ void relayout_canvas(Entry *screen)
         lv_obj_set_width(obj, LV_SIZE_CONTENT);
         lv_obj_set_height(obj, LV_SIZE_CONTENT);
 
+        /* Which end of its line a child asked for, when it asked. The order it
+         * was named in is the default and is right nearly always; `align` is
+         * what breaks the tie the default cannot - a line with one thing on it
+         * is both the first and the last thing on it, and "centred" was a guess
+         * at which of the two was meant. */
+        Entry *ce = map_find((catnip_handle)(intptr_t)lv_obj_get_user_data(obj));
+        catnip_text_align want = ce ? ce->align : CATNIP_TEXT_ALIGN_DEFAULT;
+        bool bottom = (int32_t)i > centre;
+
+        if ((int32_t)i != centre && want != CATNIP_TEXT_ALIGN_DEFAULT) {
+            lv_align_t at = want == CATNIP_TEXT_ALIGN_LEFT
+                                ? (bottom ? LV_ALIGN_BOTTOM_LEFT : LV_ALIGN_TOP_LEFT)
+                            : want == CATNIP_TEXT_ALIGN_RIGHT
+                                ? (bottom ? LV_ALIGN_BOTTOM_RIGHT : LV_ALIGN_TOP_RIGHT)
+                                : (bottom ? LV_ALIGN_BOTTOM_MID : LV_ALIGN_TOP_MID);
+            /* The hint's corner is still not free on a screen that reserves it,
+             * so a bottom-left that was asked for gets the same offset the
+             * order-derived one gets. */
+            lv_obj_align(
+                obj, at,
+                (at == LV_ALIGN_BOTTOM_LEFT && !g_bare) ? CATNIP_FRAME_HINT_W : 0, 0);
+            continue;
+        }
+
         if ((int32_t)i == centre) {
             lv_obj_align(obj, LV_ALIGN_CENTER, 0, 0);
         } else if ((int32_t)i > centre) {
@@ -876,14 +950,20 @@ void apply_desc(Entry *e, const catnip_node_desc *d)
      * role it is in - and only then, because that is the only thing about a
      * node that can move it. Every other update used to pay a scan of the map
      * to look up a parent and discover it was not a canvas. */
-    bool role_moved = e->role != d->style;
+    bool role_moved = e->role != d->style || e->align != d->align;
     apply_style(e, d->style);
     e->role = d->style;
+    e->align = d->align;
     if (role_moved) relayout_canvas(map_find(e->parent));
     apply_flags(e, d->flags);
     if (e->kind == CATNIP_NODE_LIST) {
-        if (e->layout != d->layout) {
+        /* `!e->laid_out` and not just a difference: a column of rows is layout
+         * zero and a fresh Entry is zeroed, so "it has not changed" and "it has
+         * never been applied" were the same answer - and the one shape that
+         * never got its layout applied was the commonest one there is. */
+        if (!e->laid_out || e->layout != d->layout) {
             e->layout = d->layout;
+            e->laid_out = true;
             apply_list_layout(e);
         }
         e->selected = d->selected;
@@ -966,8 +1046,9 @@ void apply_list_layout(Entry *e)
         e->obj,
         (carousel || mixer || strip || grid) ? LV_FLEX_ALIGN_CENTER : LV_FLEX_ALIGN_START,
         LV_FLEX_ALIGN_CENTER, grid ? LV_FLEX_ALIGN_START : LV_FLEX_ALIGN_CENTER);
+    bool text = e->layout == CATNIP_LAYOUT_TEXT;
     lv_obj_set_style_border_width(
-        e->obj, (carousel || mixer || strip || canvas || grid) ? 0 : 1, 0);
+        e->obj, (carousel || mixer || strip || canvas || grid || text) ? 0 : 1, 0);
     lv_obj_set_style_pad_all(e->obj, (carousel || canvas) ? 0 : 2, 0);
     if (canvas) lv_obj_set_style_bg_opa(e->obj, LV_OPA_TRANSP, 0);
     if (grid) {
@@ -986,25 +1067,212 @@ void apply_list_layout(Entry *e)
         lv_obj_set_style_pad_column(e->obj, 6, 0);
     }
 
-    /* A carousel takes the whole panel and the bar floats over it, where a
-     * column starts below the bar. The screen is the platform's either way, so
-     * the layout that knows which shape it is, is the thing that says so:
-     * reserving room for the bar and then centring a full-screen mascot in what
-     * was left would put the cat low and crop it. */
-    Entry *screen = map_find(e->parent);
-    if (screen && screen->kind == CATNIP_NODE_SCREEN && !g_bare) {
-        lv_obj_set_style_pad_top(screen->obj, carousel ? 0 : CATNIP_FRAME_BAR_H + 4, 0);
-        /* And room at the bottom for the hint, for the same reason as the bar
-         * at the top: it is drawn over every screen, so a column that ran to
-         * the bottom edge would have its last row under it. A carousel reserves
-         * nothing - it is the whole panel by design, and the hint floats over
-         * it exactly as the bar does. */
-        lv_obj_set_style_pad_bottom(screen->obj, carousel ? 0 : CATNIP_FRAME_HINT_H + 4,
-                                    0);
-        lv_obj_set_style_pad_left(screen->obj, carousel ? 0 : 6, 0);
-        lv_obj_set_style_pad_right(screen->obj, carousel ? 0 : 6, 0);
-    }
     e->sel_dirty = true;
+}
+
+/* How much of a screen the frame takes, decided by what the screen holds.
+ *
+ * It used to be decided from inside a list's layout, which had two faults. The
+ * small one is that a screen's region is not a list's business. The large one
+ * is that it ran only when a list's layout *changed*, and a plain column of
+ * rows is layout zero - so the one shape that most needs the room, the one
+ * whose bottom row runs the full width, was the one shape that never reserved
+ * any. It has been decided here, once per screen per pass, ever since.
+ *
+ * The bar comes off the top of everything except a carousel, which is the whole
+ * panel by design with the bar floating over it.
+ *
+ * The hint comes off the bottom only when the content can actually reach the
+ * bottom-left corner. Rows can - the last one runs the full width. A mixer can:
+ * its leftmost column is the height of the region. A grid can: its bottom-left
+ * cell is exactly there. A carousel and a canvas cannot, because a cell and a
+ * centrepiece are middles, and taking 34 px from either for a hint that will be
+ * drawn over empty panel is the platform charging rent on space it is not
+ * using. */
+/* A style write that asks first.
+ *
+ * lv_obj_set_style_pad_*() refreshes the style and invalidates whether or not
+ * the value differs, and this display renders LV_DISPLAY_RENDER_MODE_FULL - so
+ * an invalidation that changes nothing still costs 153,600 bytes over the bus.
+ * The region is decided every pass from what the screen holds, and what it
+ * holds hardly ever changes, so nearly every one of those writes was a repaint
+ * of a screen that had not moved. */
+bool set_pad(lv_obj_t *obj, lv_style_prop_t prop, int32_t want)
+{
+    lv_style_value_t now;
+    if (lv_obj_get_local_style_prop(obj, prop, &now, 0) == LV_STYLE_RES_FOUND &&
+        now.num == want)
+        return false;
+    lv_style_value_t v;
+    v.num = want;
+    lv_obj_set_local_style_prop(obj, prop, v, 0);
+    return true;
+}
+
+void apply_screen_region(Entry *screen)
+{
+    uint32_t n;
+    bool carousel = false; /* the whole panel is one cell */
+    bool corner = false;   /* something of the content reaches the bottom-left */
+    int visible = 0;       /* how many children are actually drawn */
+    bool sole_label = false;
+
+    if (screen->kind != CATNIP_NODE_SCREEN) return;
+    n = lv_obj_get_child_count(screen->obj);
+    for (uint32_t i = 0; i < n; i++) {
+        lv_obj_t *obj = lv_obj_get_child(screen->obj, (int32_t)i);
+        Entry *c = map_find((catnip_handle)(intptr_t)lv_obj_get_user_data(obj));
+
+        if (!lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN)) {
+            visible++;
+            sole_label = c && c->kind == CATNIP_NODE_LABEL;
+        }
+        if (!c || c->kind != CATNIP_NODE_LIST) continue;
+        if (c->layout == CATNIP_LAYOUT_CAROUSEL) carousel = true;
+        else if (c->layout != CATNIP_LAYOUT_CANVAS) corner = true;
+    }
+    /* Nothing but labels: a face, placed around a centrepiece. Both middles,
+     * and neither reaches a corner. */
+
+    /* One line on an otherwise empty screen goes in the middle of it.
+     *
+     * A column stacks from the top, which is right for a page of things and
+     * wrong for a page that is one sentence: a line alone at the top of an empty
+     * screen reads as the first item of a list that never arrived. There is
+     * nothing for it to be the first of, so it is the middle instead - the same
+     * argument the single-icon shape makes, and the reason a mascot is centred
+     * rather than stacked.
+     *
+     * Only a label, and only when it is the only thing drawn: an empty list is
+     * still a list, and a screen that recentred itself as its content came and
+     * went would move under the reader. */
+    {
+        lv_flex_align_t want =
+            (visible == 1 && sole_label) ? LV_FLEX_ALIGN_CENTER : LV_FLEX_ALIGN_START;
+        /* Asked first, and not only to save a repaint. Setting any flex
+         * property re-declares the object's layout as flex - which on a canvas
+         * screen undoes relayout_canvas's LV_LAYOUT_NONE and drops every placed
+         * child back into a column. A canvas wants START and already has it, so
+         * asking first is what keeps this from touching it at all. */
+        if (lv_obj_get_style_flex_main_place(screen->obj, 0) != want)
+            lv_obj_set_flex_align(screen->obj, want, LV_FLEX_ALIGN_CENTER,
+                                  LV_FLEX_ALIGN_CENTER);
+    }
+
+    /* A bare screen is the whole panel and nothing is drawn over it, so nothing
+     * is held back from it - which is the whole of what `frame: "bare"` buys.
+     * A carousel is the whole panel by design and the bar floats over it, which
+     * is why a full-panel mascot is not centred in what a bar left behind. */
+    bool bar = !g_bare && !carousel;
+    bool hint = !g_bare && corner;
+
+    int32_t below = hint ? CATNIP_FRAME_HINT_H + 4 : 0;
+
+    bool moved = set_pad(screen->obj, LV_STYLE_PAD_TOP, bar ? CATNIP_FRAME_BAR_H + 4 : 0);
+    moved |= set_pad(screen->obj, LV_STYLE_PAD_LEFT, (g_bare || carousel) ? 0 : 6);
+    moved |= set_pad(screen->obj, LV_STYLE_PAD_RIGHT, (g_bare || carousel) ? 0 : 6);
+    /* Settle it only when one of those actually wrote. The region has to be
+     * right before the slack is measured against it - but a relayout on a pass
+     * where nothing changed walks the whole tree for nothing, and this runs for
+     * every screen on every pass. */
+    if (moved) lv_obj_update_layout(screen->obj);
+
+    /* The frame's share, plus whatever a column of lines cannot use.
+     *
+     * One write, and the reason that matters is the reason everything else on
+     * this path is guarded: PAD_BOTTOM is a layout prop, so a write invalidates,
+     * and on this display an invalidation is the whole panel. This used to set
+     * the pad down to `below`, relayout, measure the slack against that, and set
+     * it back up - which meant that on any screen with a leftover, and a
+     * leftover is the ordinary case, *both* writes differed from what was stored
+     * and both fired. Every pass. On every list screen in the device.
+     *
+     * The mutate-to-measure is gone: what the slack has to be measured against
+     * is the untrimmed region, and the untrimmed region is the trimmed one plus
+     * the trim already applied - which is a number this screen can simply
+     * remember. */
+    int32_t slack = row_slack(screen, screen->slack);
+    screen->slack = slack;
+    if (set_pad(screen->obj, LV_STYLE_PAD_BOTTOM, below + slack))
+        lv_obj_update_layout(screen->obj);
+}
+
+/* How many whole lines of a list are on screen at once, or 0 when there is
+ * nothing to measure. The same arithmetic the region is cut by, asked the other
+ * way round: there it answers "how much is left over", here "how many fit". */
+int page_rows_of(Entry *e)
+{
+    uint32_t n;
+    int32_t gap, pitch, avail;
+
+    if (!e || e->kind != CATNIP_NODE_LIST) return 0;
+    n = lv_obj_get_child_count(e->obj);
+    if (n == 0) return 0;
+    avail = lv_obj_get_content_height(e->obj);
+    gap = lv_obj_get_style_pad_row(e->obj, 0);
+    pitch = lv_obj_get_height(lv_obj_get_child(e->obj, 0)) + gap;
+    if (pitch <= gap || avail <= 0) return 0;
+    return (int)((avail + gap) / pitch);
+}
+
+/* How much of the region a column of rows cannot use.
+ *
+ * A half-row peeking past the bottom edge reads as a rendering fault rather
+ * than as an invitation to scroll - and it is not needed as one, because the
+ * header's `3/11` already says there is more. So the leftover is taken off the
+ * region and the list keeps only the rows it can show whole.
+ *
+ * Taken off the *screen's* padding rather than out of the list's height, and
+ * that is not a detail. The list is a flex item and flex owns an item's main
+ * size; setting a height on it and asking for a relayout put the number in the
+ * style and left the object exactly as it was. The screen is nobody's flex
+ * item, so its padding is a number that means what it says - and the list still
+ * grows into whatever is left, which is what it was already doing.
+ *
+ * Returns 0 for every shape that cannot show half of anything: a carousel shows
+ * one cell, a mixer's columns are the height of the region by definition, and a
+ * grid pages.
+ *
+ * The pitch is taken from the first line, so a column whose lines are different
+ * heights - the type sample page is the only one there is - is cut against the
+ * first of them. That page is four lines and cannot overflow, so its cut is
+ * zero either way; a mixed column that did overflow would be cut a little
+ * wrong, which is a better failure than a half line and is not a shape anything
+ * builds. */
+int32_t row_slack(Entry *screen, int32_t applied)
+{
+    uint32_t n = lv_obj_get_child_count(screen->obj);
+    Entry *list = nullptr;
+    uint32_t rows;
+    int32_t gap, pitch, avail, whole;
+
+    for (uint32_t i = 0; i < n; i++) {
+        Entry *c = map_find((catnip_handle)(intptr_t)lv_obj_get_user_data(
+            lv_obj_get_child(screen->obj, (int32_t)i)));
+        /* A column of rows or a column of lines: both stack one thing per line
+         * down the region, and half of either at the bottom edge reads as a
+         * rendering fault. */
+        if (c && c->kind == CATNIP_NODE_LIST &&
+            (c->layout == CATNIP_LAYOUT_ROWS || c->layout == CATNIP_LAYOUT_TEXT))
+            list = c;
+    }
+    if (!list) return 0;
+    rows = lv_obj_get_child_count(list->obj);
+    if (rows == 0) return 0;
+
+    /* The region as it would be with nothing trimmed off it: what is there now,
+     * plus what was trimmed last time. Asked this way round because measuring it
+     * the other way - putting the pad back and relaying out - is a write, and a
+     * write here is a repaint of the whole panel. */
+    avail = lv_obj_get_content_height(list->obj) + applied;
+    gap = lv_obj_get_style_pad_row(list->obj, 0);
+    pitch = lv_obj_get_height(lv_obj_get_child(list->obj, 0)) + gap;
+    if (pitch <= gap || avail <= 0) return 0;
+    /* The last row on the page is followed by no gap, so the room a whole
+     * number of rows needs is one gap less than their pitch. */
+    whole = ((avail + gap) / pitch) * pitch - gap;
+    if (whole <= 0 || whole >= avail) return 0;
+    return avail - whole;
 }
 
 void apply_selection(Entry *e)
@@ -1012,6 +1280,45 @@ void apply_selection(Entry *e)
     uint32_t n = lv_obj_get_child_count(e->obj);
 
     bool carousel = e->layout == CATNIP_LAYOUT_CAROUSEL;
+    /* Which page of a grid is up. Derived from the selection rather than kept:
+     * the selection is the one piece of state, and a page that was remembered
+     * separately would be a second one to keep in step with it. Nothing is
+     * selected yet means the first page, which is what a grid opens on. */
+    bool grid = e->layout == CATNIP_LAYOUT_GRID;
+    bool mixer = e->layout == CATNIP_LAYOUT_MIXER;
+    /* A column of lines pages too, and on the same fixed boundaries: lines one
+     * to eight, then nine to sixteen. A window that slid to follow a cursor
+     * would show four to eleven, which is a different four lines every time it
+     * is opened - and on a page with no cursor drawn there is nothing to
+     * explain why. Where the boundaries fall is geometry, so it is measured
+     * rather than declared; the grid's and the mixer's are declared because
+     * their shapes are. */
+    /* A column pages, whether its lines carry a ring or not.
+     *
+     * Both did the same thing badly in different ways. A column of rows slid a
+     * viewport one row at a time, so the rows on screen were a different set
+     * every time the page was opened, and the header counted an ordinal - "row
+     * twelve of forty-five" - which is a number nobody can act on. A column of
+     * lines had no ring at all, so a press appeared to do nothing three times
+     * out of four.
+     *
+     * Paged, they are one shape: a page is a whole number of rows on a fixed
+     * boundary, the ring (where the shape draws one) moves within it, and the
+     * page turns under the ring when it steps off - which is exactly what the
+     * grid has always done. */
+    bool text = e->layout == CATNIP_LAYOUT_TEXT;
+    bool rows = e->layout == CATNIP_LAYOUT_ROWS;
+    int per = grid             ? CATNIP_GRID_PAGE
+              : mixer          ? CATNIP_MIXER_PAGE
+              : (text || rows) ? page_rows_of(e)
+                               : 0;
+    /* Told to the renderer, so the counter in the bar reads the same page this
+     * is about to draw. The declared shapes say nothing: the renderer already
+     * has their constants. */
+    if ((text || rows) && g_rt) catnip_render_set_page(g_rt, e->h, per);
+    bool paged = per > 0 && (grid || mixer || text || rows);
+    int page = (paged && e->selected > 0) ? e->selected / per : 0;
+    if (per <= 0) per = 1;
 
     e->sel_dirty = false;
     lv_obj_update_layout(e->obj);
@@ -1019,6 +1326,22 @@ void apply_selection(Entry *e)
         lv_obj_t *child = lv_obj_get_child(e->obj, i);
         bool on = ((int)i == e->selected);
 
+        if (paged) {
+            /* On this page or not drawn at all. Hiding takes a child out of the
+             * flex flow as well as out of the picture, so the page that is up
+             * fills the region exactly as it would if it were all there was -
+             * which is what makes a page a page rather than a viewport. */
+            if ((int)i / per == page) lv_obj_remove_flag(child, LV_OBJ_FLAG_HIDDEN);
+            else lv_obj_add_flag(child, LV_OBJ_FLAG_HIDDEN);
+
+            /* A ring where the shape draws one. A column of lines does not:
+             * its cursor is a reading position, and a ring round a fact would
+             * promise that pressing A on it did something. */
+            if (on && !text) lv_obj_add_state(child, LV_STATE_CHECKED);
+            else lv_obj_remove_state(child, LV_STATE_CHECKED);
+            /* And no scrolling into view: the page turned, so it is in view. */
+            continue;
+        }
         if (carousel) {
             /* Nothing to contrast with, so nothing is highlighted: the one
              * child that is shown is the selection. */
@@ -1029,6 +1352,10 @@ void apply_selection(Entry *e)
             continue;
         }
         if (on) {
+            /* Only the shapes that reach here, which is rows and a carousel: a
+             * column of lines took the paged branch above and never arrives.
+             * The guard that used to be on this line said so a second time and
+             * could not be false. */
             lv_obj_add_state(child, LV_STATE_CHECKED);
             scroll_into_view(e->obj, child);
         } else {
@@ -1094,10 +1421,9 @@ lv_obj_t *make_screen(void)
     lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(obj, 0, 0);
     make_column(obj, 6);
-    /* Room for the frame's bar, which is drawn on the top layer above every
-     * screen. The number is the frame's, so the two cannot drift apart - and a
-     * bare screen reserves none of it, because no bar is drawn over one. */
-    lv_obj_set_style_pad_top(obj, g_bare ? 0 : CATNIP_FRAME_BAR_H + 4, 0);
+    /* What the frame takes off it is apply_screen_region's, decided at the end
+     * of every pass from what the screen turned out to hold. Nothing is set
+     * here, because at create time it holds nothing. */
     return obj;
 }
 
@@ -1285,7 +1611,8 @@ int be_create(void *ud, catnip_handle h, catnip_handle parent, int index,
          * full-width rows, each with a hidden icon slot and left-ranged text,
          * stacked inside a container that was then told not to stack. */
         if (parent_entry && parent_entry->kind == CATNIP_NODE_LIST &&
-            parent_entry->layout != CATNIP_LAYOUT_CANVAS)
+            parent_entry->layout != CATNIP_LAYOUT_CANVAS &&
+            parent_entry->layout != CATNIP_LAYOUT_TEXT)
             obj = make_row(parent_obj);
         else obj = make_label(parent_obj);
         break;
@@ -1303,8 +1630,14 @@ int be_create(void *ud, catnip_handle h, catnip_handle parent, int index,
     e->obj = obj;
     e->kind = d->kind;
     e->selected = -1;
+    /* The two shapes whose children are not rows: a canvas places things in a
+     * region, and a column of text is lines rather than rows. Both get plain
+     * labels from make_*(), and this is what has to agree with that - a node
+     * marked as a row whose object is a bare label looks for a name widget that
+     * is not there, and quietly draws nothing. */
     e->row = parent_entry && parent_entry->kind == CATNIP_NODE_LIST &&
-             parent_entry->layout != CATNIP_LAYOUT_CANVAS && d->kind == CATNIP_NODE_LABEL;
+             parent_entry->layout != CATNIP_LAYOUT_CANVAS &&
+             parent_entry->layout != CATNIP_LAYOUT_TEXT && d->kind == CATNIP_NODE_LABEL;
     if (e->row) {
         /* The two widgets make_row() built, remembered here so nothing later
          * has to know what order they ended up in. */
@@ -1312,7 +1645,8 @@ int be_create(void *ud, catnip_handle h, catnip_handle parent, int index,
         e->name = lv_obj_get_child(obj, 1);
     }
 
-    if (parent_entry && parent_entry->kind == CATNIP_NODE_LIST) {
+    if (parent_entry && parent_entry->kind == CATNIP_NODE_LIST &&
+        parent_entry->layout != CATNIP_LAYOUT_TEXT) {
         style_as_row(obj);
         /* A row is a touch target even though it is not focusable: a finger can
          * name a row directly, where the joystick can only step to it. That
@@ -1408,6 +1742,14 @@ void be_show(void *ud, catnip_handle h)
 void be_end_pass(void *ud)
 {
     (void)ud;
+    /* The region first, for every screen, and only then what goes in it. A list
+     * that is cut to a whole number of rows has to be cut against the room it
+     * actually has, and the room it has is what the loop below decides. */
+    for (int i = 0; i < kMaxObjects; i++) {
+        Entry *e = &g_map[i];
+
+        if (e->used && e->kind == CATNIP_NODE_SCREEN) apply_screen_region(e);
+    }
     for (int i = 0; i < kMaxObjects; i++) {
         Entry *e = &g_map[i];
 

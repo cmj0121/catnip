@@ -29,6 +29,8 @@
 #include "catnip_render.h"
 #include "catnip_runtime.h"
 #include "catnip_device_info.h"
+#include "catnip_busy.h"
+#include "catnip_typescale.h"
 #include "catnip_app_grid.h"
 #include "catnip_menu.h"
 #include "catnip_ui.h"
@@ -198,34 +200,177 @@ int main(void)
         catnip_menu_free(menu);
     }
 
-    /* ---- a face, and the corner it may not use -------------------------- */
-    /* The clock's shape: the centrepiece first, so both of the others are on
-     * the bottom line - which is what "the order the children are named in is
-     * the layout" means, and what the clock's own face relies on. */
-    run("ui.screen{ id = 'face',\n"
-        "  ui.list{ id = 'canvas', layout = 'canvas',\n"
-        "    ui.label{ id = 'time', text = '14:03', style = 'display' },\n"
-        "    ui.label{ id = 'date', text = '2026-09-09', style = 'caption' },\n"
-        "    ui.label{ id = 'week', text = 'Tue', style = 'caption' } } }\n");
+    /* ---- a list shows whole rows, never half of one --------------------- */
+    /* Eleven rows into a region that fits some number of them: what is asserted
+     * is that the region is an exact number of rows tall, so the bottom edge
+     * cannot cut one in half. `3/11` in the header is what says there is more,
+     * and a half-row saying it as well reads as a fault rather than as an
+     * invitation. */
+    run("local rows = {}\n"
+        "for i = 1, 11 do rows[i] = ui.label{ id = 'r' .. i, text = 'row ' .. i } end\n"
+        "local list = ui.list{ id = 'rows', on_prev = function() end }\n"
+        "ui.screen{ list }\n"
+        "list:set_children(rows)\n");
+    /* Twice. A screen settles over two passes - the list's layout is what tells
+     * the screen how much of itself to reserve, and the rows are what say how
+     * tall a row is - and the device runs continuously, so the second pass is
+     * the state anyone ever sees. */
+    pass();
+    pass();
+    shot("list-page");
+    {
+        lv_obj_t *list = obj("rows");
+        lv_obj_t *r1 = obj("r1");
+
+        CHECK(list && r1, "the list and its rows are drawn");
+        if (list && r1) {
+            int32_t gap = lv_obj_get_style_pad_row(list, 0);
+            int32_t pitch = (int32_t)lv_obj_get_height(r1) + gap;
+            int32_t inner = (int32_t)lv_obj_get_content_height(list);
+
+            CHECK(pitch > gap, "a row has a height to measure");
+            lv_obj_t *scr = lv_obj_get_parent(list);
+
+            /* And the region it was cut out of is the one the frame left: the
+             * bar off the top, the hint off the bottom. A column of rows is the
+             * shape that reaches the bottom-left corner, so it is the shape
+             * that pays for the hint. */
+            CHECK(scr && lv_obj_get_style_pad_top(scr, 0) == CATNIP_FRAME_BAR_H + 4,
+                  "the bar's height comes off the top of a list screen");
+            /* At least the hint's share: what is under the last whole row is
+             * the hint's strip plus whatever a half-row would have taken, and
+             * the slack is why it is not exactly that. */
+            CHECK(scr && lv_obj_get_style_pad_bottom(scr, 0) >= CATNIP_FRAME_HINT_H + 4,
+                  "and the hint's off the bottom, because a row reaches its corner");
+            CHECK(scr && lv_obj_get_style_pad_bottom(scr, 0) <
+                             CATNIP_FRAME_HINT_H + 4 + pitch,
+                  "and never more than one row's worth beyond it");
+            CHECK(pitch > gap && (inner + gap) % pitch == 0,
+                  "and the region is a whole number of rows tall");
+            CHECK(inner < CATNIP_SCREEN_H,
+                  "which is less than the panel, because the bar and the hint "
+                  "take theirs first");
+        }
+    }
+
+    /* ---- one line on an empty screen is a middle ------------------------ */
+    /* A column stacks from the top, which is right for a page of things and
+     * wrong for a page that is one sentence: a line alone at the top of an
+     * empty screen reads as the first item of a list that never arrived. */
+    run("ui.screen{ ui.list{ id = 'e_rows', hidden = true, on_prev = function() end },\n"
+        "  ui.label{ id = 'e_say', text = 'nothing on the air', align = 'center' } }\n");
+    pass();
+    pass();
+    shot("empty-page");
+    {
+        lv_obj_t *say = obj("e_say");
+        int mid = CATNIP_SCREEN_H / 2;
+        lv_area_t at;
+
+        /* Absolute panel coordinates. lv_obj_get_y() answers relative to the
+         * parent's *content* area - it subtracts the padding - so a position
+         * compared against the panel's middle has to come from the coords. */
+        if (say) lv_obj_get_coords(say, &at);
+
+        CHECK(say != NULL, "the one line is drawn");
+        CHECK(say && at.y1 < mid && at.y2 > mid,
+              "and it straddles the middle of the panel rather than sitting on top");
+        CHECK(say && lv_obj_get_style_text_align(say, 0) == LV_TEXT_ALIGN_CENTER,
+              "centred across as well as down");
+    }
+
+    /* ---- the clock's face, as the app builds it ------------------------- */
+    /* Four children with the centrepiece second: the date is named before it so
+     * it is the top line, the weekday and the source line after it so they are
+     * the bottom one, first-to-the-left and last-to-the-right. That is the whole
+     * of what "the order the children are named in is the layout" means, and it
+     * is what puts where-the-time-came-from in the bottom-right corner without
+     * the app saying a coordinate.
+     *
+     * Bare, because the face is screen 1: no bar over it and no hint, so the
+     * bottom line starts at the panel's edge rather than clearing a corner
+     * nothing is drawn in. */
+    catnip_lvgl_backend_set_bare(true);
+    run("local days = {}\n"
+        "for i, d in ipairs({ 'S', 'M', 'T', 'W', 'T', 'F', 'S' }) do\n"
+        "  days[i] = ui.label{ id = 'day' .. i, text = d,\n"
+        "                      style = i == 5 and 'body' or 'caption' }\n"
+        "end\n"
+        "local week = ui.list{ id = 'week', layout = 'row', align = 'center' }\n"
+        "ui.screen{ id = 'face',\n"
+        "  ui.label{ id = 'date', text = '2026-09-10', style = 'title',\n"
+        "           align = 'left' },\n"
+        "  ui.label{ id = 'time', text = '14:32', style = 'display' },\n"
+        "  week,\n"
+        "  ui.label{ id = 'src', text = 'NTP 14:30', style = 'body' } }\n"
+        "week:set_children(days)\n");
+    pass();
     pass();
     shot("clock-face");
     {
         lv_obj_t *date = obj("date");
         lv_obj_t *week = obj("week");
+        lv_obj_t *src = obj("src");
         lv_obj_t *time_ = obj("time");
-        lv_obj_t *canvas = obj("canvas");
-        int floor_ = canvas ? (int)lv_obj_get_height(canvas) / 2 : 0;
+        int floor_ = CATNIP_SCREEN_H / 2;
 
-        CHECK(date && week && time_, "the face is drawn");
-        CHECK(date && week && lv_obj_get_y(date) > floor_ && lv_obj_get_y(week) > floor_,
-              "both of the ones named after the centrepiece are on the bottom line");
-        CHECK(date && week && lv_obj_get_x(week) > lv_obj_get_x(date),
+        CHECK(date && week && src && time_, "the face is drawn");
+        CHECK(date && lv_obj_get_y(date) < floor_,
+              "the one named before the centrepiece is the top line");
+        /* And in the corner it asked for. A line with nothing else on it is
+         * both the first and the last thing on its line, and the order alone
+         * cannot break that tie - `align` is what does. */
+        CHECK(date && lv_obj_get_x(date) < CATNIP_SCREEN_W / 4,
+              "and `align` put it at the left end rather than the middle");
+        /* Seven letters at one size, so the line does not shift at midnight
+         * when today moves from one of them to the next. */
+        {
+            lv_obj_t *d1 = obj("day1");
+            lv_obj_t *d5 = obj("day5");
+            CHECK(d1 && d5, "the strip is seven letters");
+            CHECK(d1 && d5 && lv_obj_get_height(d1) == lv_obj_get_height(d5),
+                  "the lit one is the same size as the rest, and differs only in ink");
+        }
+        CHECK(week && src && lv_obj_get_y(week) > floor_ && lv_obj_get_y(src) > floor_,
+              "and the two named after it are the bottom line");
+        /* The bottom line fits on the panel, both of it. Everything on a face
+         * used to be 24 px, which made this one line 328 px wide on a 320 px
+         * screen - it ran off the right-hand edge and crossed the strip on the
+         * way, and neither of the two assertions below could see it. */
+        CHECK(week && src &&
+                  lv_obj_get_x(week) + (int)lv_obj_get_width(week) <= lv_obj_get_x(src),
+              "and they do not overlap");
+        CHECK(week && src && lv_obj_get_x(src) > lv_obj_get_x(week),
               "which runs first-to-the-left, last-to-the-right");
-        /* And the bug the hint introduced the day it was drawn: the date sat
-         * underneath four arrows. */
-        CHECK(date && lv_obj_get_x(date) >= CATNIP_FRAME_HINT_W,
-              "and starts to the right of the control hint");
+        CHECK(src && lv_obj_get_x(src) + (int)lv_obj_get_width(src) > CATNIP_SCREEN_W / 2,
+              "so the source line ends up in the bottom-right corner");
+        /* The strip is centred on the panel and the source line is hard against
+         * the right edge: the two share the bottom line, and the one that is
+         * looked at rather than read is the one in the middle of it. */
+        CHECK(week && lv_obj_get_x(week) > CATNIP_SCREEN_W / 4 &&
+                  lv_obj_get_x(week) + (int)lv_obj_get_width(week) <
+                      3 * CATNIP_SCREEN_W / 4,
+              "and `align` put the strip in the middle of the bottom line");
+        CHECK(src &&
+                  lv_obj_get_x(src) + (int)lv_obj_get_width(src) >= CATNIP_SCREEN_W - 12,
+              "with the source line hard against the right edge");
     }
+    /* The corner rule, from the other side, on a face that says no `align` at
+     * all. A list reserves the hint's corner because its rows reach it; a bare
+     * face reserves nothing, because nothing is drawn over one - and reserving
+     * it anyway would be the platform taking 34 px for a hint it is not going
+     * to draw. */
+    run("ui.screen{ id = 'plain_face',\n"
+        "  ui.label{ id = 'pf_time', text = '14:32', style = 'display' },\n"
+        "  ui.label{ id = 'pf_a', text = 'left' },\n"
+        "  ui.label{ id = 'pf_b', text = 'right' } }\n");
+    pass();
+    {
+        lv_obj_t *a = obj("pf_a");
+        CHECK(a && lv_obj_get_x(a) < CATNIP_FRAME_HINT_W,
+              "a bare face holds nothing back for a hint it never gets");
+    }
+    catnip_lvgl_backend_set_bare(false);
 
     /* ---- a pushed screen with no centrepiece stacks --------------------- */
     /* `frame: "bare"` belongs to the app, not to one of its screens, so every
@@ -248,14 +393,20 @@ int main(void)
 
     catnip_lvgl_backend_set_bare(false);
     /* The Clock app's setter as the app actually builds it: the mixer, and the
-     * caption under it saying where the time came from (#84). The caption is
-     * the thing being checked - a line added under a list that grows is the
-     * classic way to add something nobody ever sees. */
+     * standard frame it pushes itself under. It used to carry a caption saying
+     * where the time came from; that line is on the face now, where a doubt
+     * about the time is actually had, rather than over the shoulder of somebody
+     * already answering it.
+     *
+     * The caption stays in this tree all the same, under a name that says what
+     * it is for: `align` reached the renderer once and then did nothing for a
+     * label that was not a row in a list, and the screen looked exactly as it
+     * had. Something has to hold that path down. */
     run("ui.screen{ id = 'setter',\n"
         "  ui.list{ id = 'cols', layout = 'mixer', on_prev = function() end,\n"
         "    ui.label{ id = 'c1', text = 'Y', value = 50 },\n"
         "    ui.label{ id = 'c2', text = 'M', value = 50 } },\n"
-        "  ui.label{ id = 'source', text = 'network time, synced 14:18',\n"
+        "  ui.label{ id = 'source', text = 'a line that must clear the corner',\n"
         "           style = 'body', align = 'right' } }\n");
     pass();
     /* With the hint drawn, because both live in the bottom-left corner and the
@@ -270,13 +421,11 @@ int main(void)
     catnip_frame_show(false);
     {
         lv_obj_t *src = obj("source");
-        CHECK(src != NULL, "the setter's source line exists");
+        CHECK(src != NULL, "a line under the columns exists");
         CHECK(src && lv_obj_get_y(src) + lv_obj_get_height(src) <= CATNIP_SCREEN_H,
               "and sits inside the panel rather than below its bottom edge");
         /* Ranged right, which is what keeps it out of the control hint's
-         * corner. Pinned because `align` reached the renderer and then did
-         * nothing for a label that was not a row in a list - it applied on one
-         * path and not the other, and the screen looked exactly as it had. */
+         * corner on a screen that does reserve one. */
         CHECK(src && lv_obj_get_style_text_align(src, 0) == LV_TEXT_ALIGN_RIGHT,
               "and is ranged right, clear of the hint's corner");
         CHECK(src && lv_obj_get_width(src) > CATNIP_SCREEN_W / 2,
@@ -318,63 +467,221 @@ int main(void)
                                 "heap 213 KB free",
                                 "mac 8C:BF:EA:11:22:33",
                                 "i2c 18 19 34 38 41 51 68"};
-        const catnip_info_key pref = {"Preference", "settings"};
-        const catnip_info_key diag = {"Diagnostic", "warning"};
         lv_obj_t *facts;
-        lv_obj_t *keys;
-        lv_obj_t *k1;
-        lv_obj_t *k2;
+        lv_obj_t *first;
+        lv_obj_t *second;
+        lv_obj_t *last;
 
         CHECK(info != NULL, "the device page is built");
-        catnip_device_info_show(info, rows, 11, &pref, &diag);
+        catnip_device_info_show(info, rows, 11);
+        pass();
         pass();
         shot("device-page");
         facts = obj("info_list");
-        keys = obj("info_keys");
-        k1 = obj("info_left");
-        k2 = obj("info_right");
-        CHECK(facts && keys && k1 && k2, "the facts and both tiles are drawn");
-        /* A list grows by default, because a list is usually the thing on a
-         * screen that should take what is left; a strip is the opposite, and
-         * one that also grew split the screen down the middle. */
-        CHECK(facts && keys && lv_obj_get_height(facts) > lv_obj_get_height(keys),
-              "the facts take the room and the strip takes only what it needs");
-        CHECK(k1 && k2 && lv_obj_get_x(k2) > lv_obj_get_x(k1),
-              "the two tiles sit side by side");
-        CHECK(k1 && k2 && lv_obj_get_width(k1) + lv_obj_get_width(k2) <= CATNIP_SCREEN_W,
-              "and share the width rather than overflowing it");
-        /* An icon over a word, which is what makes it a tile rather than a
-         * caption with a picture in front of it. */
-        CHECK(k1 && lv_obj_get_child_count(k1) == 2 &&
-                  lv_obj_get_y(lv_obj_get_child(k1, 0)) <
-                      lv_obj_get_y(lv_obj_get_child(k1, 1)),
-              "and each is its icon above its word");
+        first = obj("info1");
+        second = obj("info2");
+        last = obj("info11");
+        CHECK(facts && first, "the facts are drawn");
+        /* Nothing that acts is on it: the two tiles are behind A now, where
+         * every operation in the device is. */
+        CHECK(obj("info_left") == NULL && obj("info_right") == NULL,
+              "and nothing on the page is a button");
+        /* Lines, not rows. A row reserves 20 px in front of its text for an
+         * icon slot; a line of prose starts at the margin, because there is no
+         * icon coming and no column for one to line up with. */
+        CHECK(first && lv_obj_get_x(first) < 20,
+              "a line starts at the margin rather than behind an icon slot");
+        /* And the column takes the region, since it is the only thing on the
+         * screen now. */
+        CHECK(facts && lv_obj_get_height(facts) > CATNIP_SCREEN_H / 2,
+              "the facts take the room that is left");
+        CHECK(second && lv_obj_get_y(second) > lv_obj_get_y(first),
+              "and they run down it in the order they were given");
+        /* A page, on a fixed boundary: eleven facts do not fit, and the ones
+         * that do not are on the next page rather than below the fold. A window
+         * that slid to follow a cursor would show a different set of lines
+         * every time the page was opened, and nothing on it explains why. */
+        CHECK(last && lv_obj_has_flag(last, LV_OBJ_FLAG_HIDDEN),
+              "the eleventh is on the next page, not under the tenth");
+        CHECK(first && !lv_obj_has_flag(first, LV_OBJ_FLAG_HIDDEN),
+              "and the page starts at the first line, not wherever a cursor is");
+        /* And the bar it puts up, drawn over the facts it was asked from. */
+        {
+            static const char *const kNames[3] = {"Prefs", "Sizes", "Diag"};
+            static const catnip_icon kIcons[3] = {CATNIP_ICON_SETTINGS, CATNIP_ICON_FILE,
+                                                  CATNIP_ICON_WARNING};
+            catnip_frame_show(true);
+            catnip_frame_set_actions(kNames, kIcons, 3, 0, true);
+            pass();
+            shot("device-page-actions");
+            catnip_frame_set_actions(nullptr, nullptr, 0, 0, false);
+            catnip_frame_show(false);
+            pass();
+        }
         catnip_device_info_free(info);
+    }
+
+    /* ---- every type size, drawn in itself ------------------------------- */
+    /* The page exists to be looked at, so what is asserted is the one thing a
+     * picture cannot be trusted for: that the four lines really are four
+     * different sizes, largest first. */
+    {
+        catnip_typescale *ts = catnip_typescale_new(g_rt);
+        CHECK(ts != NULL, "the type sample page is built");
+        catnip_typescale_show(ts);
+        pass();
+        pass();
+        shot("type-sizes");
+        {
+            lv_obj_t *big = obj("ts_display");
+            lv_obj_t *t = obj("ts_title");
+            lv_obj_t *b = obj("ts_body");
+            lv_obj_t *c = obj("ts_caption");
+
+            CHECK(big && t && b && c, "one line per size");
+            CHECK(big && t && lv_obj_get_height(big) > lv_obj_get_height(t) && t && b &&
+                      lv_obj_get_height(t) > lv_obj_get_height(b) && b && c &&
+                      lv_obj_get_height(b) > lv_obj_get_height(c),
+                  "and each is smaller than the one above it, which is the whole page");
+        }
+        catnip_typescale_free(ts);
     }
 
     /* ---- the app grid: many apps, wrapping, pinned ones marked --------- */
     catnip_lvgl_backend_set_bare(false);
     {
         catnip_app_grid *g = catnip_app_grid_new(g_rt);
-        catnip_app_entry apps[6];
+        catnip_app_entry apps[8];
         lv_obj_t *c1;
         lv_obj_t *c6;
-        for (int i = 0; i < 6; i++) {
+        lv_obj_t *c7;
+        for (int i = 0; i < 8; i++) {
             memset(&apps[i], 0, sizeof(apps[i]));
             snprintf(apps[i].id, sizeof(apps[i].id), "app%d", i);
             snprintf(apps[i].name, sizeof(apps[i].name), "App %d", i);
             apps[i].compatible = 1;
         }
         CHECK(g != NULL, "the app grid is built");
-        catnip_app_grid_show(g, apps, 6, false, "app3"); /* app3 unpinned */
+        /* Eight, so there is a second page and a first page that is full. */
+        catnip_app_grid_show(g, apps, 8, false, "app3"); /* app3 unpinned */
+        pass();
         pass();
         shot("app-grid");
         c1 = obj("grid1");
         c6 = obj("grid6");
-        CHECK(c1 && c6, "the cells are drawn");
+        c7 = obj("grid7");
+        CHECK(c1 && c6 && c7, "the cells are drawn");
         CHECK(c1 && c6 && lv_obj_get_y(c6) > lv_obj_get_y(c1),
-              "and wrap onto further rows rather than off the edge");
+              "and wrap onto a second row rather than off the edge");
+        /* Six across two rows, and the seventh is on the next page rather than
+         * below the fold: it exists, it is simply not drawn. */
+        CHECK(c7 && lv_obj_has_flag(c7, LV_OBJ_FLAG_HIDDEN),
+              "the seventh is on the next page, not under the sixth");
+        CHECK(c1 && !lv_obj_has_flag(c1, LV_OBJ_FLAG_HIDDEN) && c6 &&
+                  !lv_obj_has_flag(c6, LV_OBJ_FLAG_HIDDEN),
+              "and all six of this page are up");
+        /* Both rows inside the region: a grid pages, so half a row is not a
+         * thing it can show, and the second row must be whole. */
+        CHECK(c6 && lv_obj_get_y(c6) + (int32_t)lv_obj_get_height(c6) <=
+                        CATNIP_SCREEN_H - CATNIP_FRAME_HINT_H,
+              "and the second row is clear of the hint's strip");
         catnip_app_grid_free(g);
+    }
+
+    /* ---- the action bar, and the hint riding on it ---------------------- */
+    /* What long A produces. Two things are checked and both are geometry the
+     * rules turn on: it sits at the foot of the panel with the content still
+     * visible above it, and the hint is lifted onto its shoulder rather than
+     * left underneath it. */
+    {
+        static const char *const kNames[3] = {"View", "Delete", "Reset card"};
+        static const catnip_icon kIcons[3] = {CATNIP_ICON_FILE, CATNIP_ICON_TRASH,
+                                              CATNIP_ICON_WARNING};
+        lv_obj_t *hint_obj;
+        int hint_y_down, hint_y_up;
+
+        catnip_frame_show(true);
+        catnip_frame_show_hint(true);
+        catnip_frame_set_hint(CATNIP_HINT_LEFT | CATNIP_HINT_RIGHT);
+        catnip_frame_set_actions(nullptr, nullptr, 0, 0, false);
+        pass();
+        /* The hint by its size, which is the one thing about it that is fixed:
+         * nothing in the node model owns it either, and after the bar exists it
+         * is no longer the last child of the top layer. */
+        hint_obj = nullptr;
+        for (uint32_t i = 0; i < lv_obj_get_child_count(lv_layer_top()); i++) {
+            lv_obj_t *c = lv_obj_get_child(lv_layer_top(), (int32_t)i);
+            if ((int)lv_obj_get_width(c) == CATNIP_FRAME_HINT_W &&
+                (int)lv_obj_get_height(c) == CATNIP_FRAME_HINT_H)
+                hint_obj = c;
+        }
+        hint_y_down = hint_obj ? (int)lv_obj_get_y(hint_obj) : 0;
+
+        catnip_frame_set_actions(kNames, kIcons, 3, 1, true);
+        pass();
+        shot("action-bar");
+        {
+            lv_obj_t *act = nullptr;
+            uint32_t n_top = lv_obj_get_child_count(lv_layer_top());
+            /* The bar is the widest thing on the top layer that is not the
+             * top bar: found by size rather than by a handle, because nothing
+             * in the node model owns it - that is the point of it. */
+            for (uint32_t i = 0; i < n_top; i++) {
+                lv_obj_t *c = lv_obj_get_child(lv_layer_top(), (int32_t)i);
+                if (lv_obj_get_y(c) > CATNIP_SCREEN_H / 2 &&
+                    lv_obj_get_width(c) > CATNIP_SCREEN_W / 2)
+                    act = c;
+            }
+            CHECK(act != NULL, "the action bar is drawn");
+            CHECK(act && lv_obj_get_y(act) + (int32_t)lv_obj_get_height(act) <=
+                             CATNIP_SCREEN_H,
+                  "at the foot of the panel, inside it");
+            CHECK(act && lv_obj_get_y(act) > CATNIP_SCREEN_H / 2,
+                  "and only across the bottom, so the content stays visible above it");
+            CHECK(act && lv_obj_get_child_count(act) == 3, "with a cell per action");
+        }
+        hint_y_up = hint_obj ? (int)lv_obj_get_y(hint_obj) : 0;
+        CHECK(hint_obj && hint_y_up < hint_y_down,
+              "and the hint has been lifted onto its shoulder rather than left under it");
+
+        catnip_frame_set_actions(nullptr, nullptr, 0, 0, false);
+        pass();
+        CHECK(hint_obj && (int)lv_obj_get_y(hint_obj) == hint_y_down,
+              "putting the bar away puts the hint back in its corner");
+        catnip_frame_show_hint(false);
+        catnip_frame_show(false);
+    }
+
+    /* ---- the busy ring -------------------------------------------------- */
+    /* The shape is pinned in test_busy.c; what is checked here is that the
+     * platform draws it over what is on screen rather than in place of it - the
+     * thing being waited for is usually about what is already there. */
+    {
+        lv_obj_t *ring = nullptr;
+
+        catnip_frame_set_busy("scanning");
+        pass();
+        shot("busy");
+        for (uint32_t i = 0; i < lv_obj_get_child_count(lv_layer_top()); i++) {
+            lv_obj_t *c = lv_obj_get_child(lv_layer_top(), (int32_t)i);
+            /* Eight dots and a word: the only thing on the top layer with nine
+             * children. Found by shape because nothing in the node model owns
+             * it, which is the whole point of it being the platform's. */
+            if (lv_obj_get_child_count(c) == CATNIP_BUSY_DOTS + 1) ring = c;
+        }
+        CHECK(ring != NULL, "the busy ring is drawn");
+        CHECK(ring && !lv_obj_has_flag(ring, LV_OBJ_FLAG_HIDDEN), "and it is up");
+        /* The whole panel, not a dialog over one: while it is up there is
+         * nothing true underneath to leave showing. */
+        CHECK(ring && (int)lv_obj_get_width(ring) == CATNIP_SCREEN_W &&
+                  (int)lv_obj_get_height(ring) == CATNIP_SCREEN_H,
+              "and it takes the whole panel rather than floating over it");
+        CHECK(ring && lv_obj_get_style_bg_opa(ring, 0) == LV_OPA_COVER,
+              "opaque, so the screen it replaced is not read through it");
+        catnip_frame_set_busy(nullptr);
+        pass();
+        CHECK(ring && lv_obj_has_flag(ring, LV_OBJ_FLAG_HIDDEN),
+              "and nothing to wait for puts it away");
     }
 
     /* ---- the control hint, drawn over a page ---------------------------- */

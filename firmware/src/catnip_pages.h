@@ -33,6 +33,7 @@
 #include "catnip_device_info.h"
 #include "catnip_app_grid.h"
 #include "catnip_menu.h"
+#include "catnip_bar.h"
 #include "catnip_runtime.h"
 #include "catnip_settings.h"
 #include "catnip_shell.h"
@@ -49,6 +50,7 @@ typedef enum {
     CATNIP_PAGE_INFO,     /* what this device is, and the two ways down */
     CATNIP_PAGE_PREF,     /* the preference page */
     CATNIP_PAGE_GRID,     /* the grid of every app (#71) */
+    CATNIP_PAGE_SIZES,    /* every type size, drawn in itself */
 } catnip_page;
 
 /* The board, as seen from here. Every callback may be NULL; a run with none of
@@ -122,6 +124,15 @@ catnip_page catnip_pages_current(const catnip_pages *p);
  * because launching is the shell's and what happens when it fails - put the
  * menu back rather than leave a blank screen - is the caller's. */
 const char *catnip_pages_take_launch(catnip_pages *p);
+
+/* The action catalogue of whichever platform page is up, and how many are in
+ * it. NULL and 0 for a page that offers nothing behind A.
+ *
+ * These pages are not apps and have no manifest to declare their actions in, so
+ * they declare them in C - and the bar that draws them cannot tell the
+ * difference, which is the point: the launcher offers no operations its apps
+ * could not have offered the same way. */
+const catnip_action *catnip_pages_actions(const catnip_pages *p, int *n);
 
 /* The launcher itself, for the two things the board still says to it directly:
  * that home is where the ring should open, and the app name in the bar. */

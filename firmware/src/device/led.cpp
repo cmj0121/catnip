@@ -44,6 +44,15 @@ uint8_t g_r = BRAND_R;
 uint8_t g_g = BRAND_G;
 uint8_t g_b = BRAND_B;
 
+/* The working colour: the same earthy yellow the busy ring is drawn in, because
+ * it is the same state and a device that said "working" in two colours would be
+ * saying two things. */
+const uint8_t BUSY_R = 0xD9;
+const uint8_t BUSY_G = 0xA4;
+const uint8_t BUSY_B = 0x41;
+
+bool g_busy = false;
+
 uint8_t g_level = 0;
 } /* namespace */
 
@@ -54,7 +63,12 @@ void catnip_led_begin(void)
 
 void catnip_led_dim(bool dim)
 {
+    if (dim == g_dim) return;
     g_dim = dim;
+    /* Repaint at the level the breath is already at: the colour changes with
+     * the dim now, and waiting for the next step of a 2.6-second breath to show
+     * it would read as the button not having worked. */
+    catnip_led_level(g_level);
 }
 
 void catnip_led_configure(uint8_t peak, float breaths_per_second)
@@ -86,14 +100,32 @@ void catnip_led_colour(uint8_t r, uint8_t g, uint8_t b)
     catnip_led_level(g_level);
 }
 
+void catnip_led_busy(bool on)
+{
+    if (on == g_busy) return;
+    g_busy = on;
+    /* Repaint at the level the breath is already at, for the reason
+     * catnip_led_colour gives: at the dim end of a 2.6-second breath, waiting
+     * for the next step reads as nothing having happened. */
+    catnip_led_level(g_level);
+}
+
 void catnip_led_level(uint8_t brightness)
 {
+    /* Three things this light can be saying, and they are asked in the order
+     * they matter. A dark screen first: a device with nothing on the panel is
+     * the one a person is most likely to think has died, and white is the
+     * colour that is plainly *not* the resting one. Then working. Then whatever
+     * colour is in use, which is the brand's until an app asks for another. */
+    uint8_t r = g_dim ? 0xFF : g_busy ? BUSY_R : g_r;
+    uint8_t g = g_dim ? 0xFF : g_busy ? BUSY_G : g_g;
+    uint8_t b = g_dim ? 0xFF : g_busy ? BUSY_B : g_b;
+
     g_level = brightness;
     /* Scale the colour rather than fading to white: a WS2812 has three separate
      * emitters, and dimming each in proportion keeps the hue. */
-    neopixelWrite(CATNIP_PIN_LED, (uint8_t)((g_r * brightness) / 255),
-                  (uint8_t)((g_g * brightness) / 255),
-                  (uint8_t)((g_b * brightness) / 255));
+    neopixelWrite(CATNIP_PIN_LED, (uint8_t)((r * brightness) / 255),
+                  (uint8_t)((g * brightness) / 255), (uint8_t)((b * brightness) / 255));
 }
 
 void catnip_led_breathe(void)

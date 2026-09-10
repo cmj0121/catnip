@@ -27,6 +27,7 @@
 #include <stdbool.h>
 
 #include "../catnip_render.h"
+#include "../catnip_bar.h"
 #include "../catnip_runtime.h"
 
 #ifdef __cplusplus
@@ -87,6 +88,14 @@ int catnip_ui_input_step(catnip_rt *rt);
  * screen would be a second hand on the wheel. enter_diag() calls this as part
  * of the same handoff that tears the app tree down. A no-op when no indev was
  * ever created, which is the boot-marker path into diag. */
+/* The action bar the input pass drives (long A). The loop offers actions to it
+ * after a drain and draws whatever it holds; everything else about it - which
+ * button means what while it is up - is the input pass's. */
+catnip_bar *catnip_ui_input_bar(void);
+
+/* Who the last long press asked options of, and about which row. */
+catnip_handle catnip_ui_input_options_asked(int *index);
+
 void catnip_ui_input_end(void);
 
 /* Where the focus ring is. The control hint asks, because what a direction does

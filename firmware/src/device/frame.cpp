@@ -1,11 +1,18 @@
 /* frame.cpp - see frame.h. */
 #include "frame.h"
 
+#include "catnip_icon_img.h"
+
+#include "../catnip_bar.h"
+#include "../catnip_busy.h"
+
 #include <lvgl.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "../catnip_render.h"
+#include "board.h"
+#include "catnip_font.h"
 #include "lvgl_backend.h"
 #include "ui_input_core.h"
 
@@ -29,6 +36,21 @@ lv_obj_t *g_counter;
  * that could place it could place it in the wrong corner. */
 lv_obj_t *g_hint;
 unsigned g_hint_mask; /* which directions are lit, for the draw below */
+/* The action bar: the panel, and one cell per action. Built once and reused,
+ * because a bar rebuilt on every long press would blink at exactly the moment
+ * somebody is looking at it. */
+/* The busy ring: a panel, its eight dots and the word under them. */
+lv_obj_t *g_busy;
+lv_obj_t *g_busy_dot[CATNIP_BUSY_DOTS];
+lv_obj_t *g_busy_word;
+unsigned g_busy_phase = (unsigned)-1;
+char g_busy_what[16];
+
+lv_obj_t *g_act;
+lv_obj_t *g_act_cell[CATNIP_BAR_CELLS];
+lv_obj_t *g_act_icon[CATNIP_BAR_CELLS];
+lv_obj_t *g_act_name[CATNIP_BAR_CELLS];
+int g_act_n;
 unsigned g_last_hint = ~0u;
 
 /* The lit ink: an earthy yellow, the colour of a key you press rather than of
@@ -191,7 +213,251 @@ bool ensure_bar(void)
     return g_battery && g_title && g_counter;
 }
 
+/* The bar itself, and three cells inside it. Three because that is the modal
+ * shape and the modal shape is the most there is: more than three on one item
+ * is a menu pretending to be a bar, and the answer to that is fewer verbs. */
+bool ensure_actions(void)
+{
+    if (g_act) return true;
+    if (!catnip_lvgl_backend_active()) return false;
+
+    g_act = lv_obj_create(lv_layer_top());
+    if (!g_act) return false;
+    lv_obj_set_size(g_act, LV_PCT(100) - 16, CATNIP_FRAME_ACT_H);
+    lv_obj_align(g_act, LV_ALIGN_BOTTOM_MID, 0, -6);
+    lv_obj_set_style_bg_color(g_act, lv_color_hex(kColBarBg), 0);
+    lv_obj_set_style_bg_opa(g_act, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(g_act, 1, 0);
+    lv_obj_set_style_border_color(g_act, lv_color_hex(catnip_color_faint()), 0);
+    lv_obj_set_style_radius(g_act, 10, 0);
+    lv_obj_set_style_pad_all(g_act, 4, 0);
+    lv_obj_set_flex_flow(g_act, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(g_act, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_remove_flag(g_act, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(g_act, LV_OBJ_FLAG_HIDDEN);
+
+    for (int i = 0; i < CATNIP_BAR_CELLS; i++) {
+        lv_obj_t *cell = lv_obj_create(g_act);
+        if (!cell) return false;
+        lv_obj_set_height(cell, LV_PCT(100));
+        lv_obj_set_flex_grow(cell, 1);
+        lv_obj_set_style_bg_opa(cell, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(cell, 0, 0);
+        lv_obj_set_style_border_width(cell, 2, LV_STATE_CHECKED);
+        lv_obj_set_style_border_color(cell, lv_color_hex(kColHintLit), LV_STATE_CHECKED);
+        lv_obj_set_style_radius(cell, 8, 0);
+        lv_obj_set_style_pad_all(cell, 2, 0);
+        lv_obj_set_style_pad_column(cell, 4, 0);
+        lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                              LV_FLEX_ALIGN_CENTER);
+        lv_obj_remove_flag(cell, LV_OBJ_FLAG_SCROLLABLE);
+        g_act_cell[i] = cell;
+
+        g_act_icon[i] = lv_image_create(cell);
+        g_act_name[i] = lv_label_create(cell);
+        if (!g_act_icon[i] || !g_act_name[i]) return false;
+        lv_obj_set_style_text_font(g_act_name[i], &catnip_font_16, 0);
+        /* An ellipsis rather than a clip. A name cut off mid-glyph reads as a
+         * different word, and the one thing a user must be able to trust about
+         * this bar is which of the three they are about to run - so a name too
+         * long for its third of the panel says so. Short names are the app's
+         * job, and this is what happens when one is not. */
+        lv_label_set_long_mode(g_act_name[i], LV_LABEL_LONG_DOT);
+        lv_obj_set_flex_grow(g_act_name[i], 1);
+        lv_obj_set_style_text_color(g_act_name[i], lv_color_hex(catnip_color_text()), 0);
+    }
+    return true;
+}
+
+/* The whole panel, and the ring in the middle of it.
+ *
+ * It floated over the content at first, on the argument that what is being
+ * waited for is usually about what is already there. That argument is wrong
+ * about this device: while it is up, nothing on the screen underneath is true
+ * any more - the app being loaded is not the menu behind it, and the list being
+ * scanned for is not the list still on screen. A half-covered screen of stale
+ * content invites reading, and everything there is to read is out of date.
+ *
+ * So it takes the panel, and it takes it from the bar and the hint too. The bar
+ * names a screen that is going away and the hint is a picture of controls that
+ * do nothing while this is up; both would be lying, quietly, in a corner. */
+const int kBusyR = 26;   /* the ring */
+const int kBusyDotR = 5; /* one dot */
+
+bool ensure_busy(void)
+{
+    if (g_busy) return true;
+    if (!catnip_lvgl_backend_active()) return false;
+
+    g_busy = lv_obj_create(lv_layer_top());
+    if (!g_busy) return false;
+    lv_obj_remove_style_all(g_busy);
+    lv_obj_set_size(g_busy, CATNIP_SCREEN_W, CATNIP_SCREEN_H);
+    lv_obj_set_pos(g_busy, 0, 0);
+    /* Opaque, and the ground the rest of the device uses: this is the same
+     * device with nothing on it yet, not a dialog over a screen. */
+    lv_obj_set_style_bg_color(g_busy, lv_color_hex(catnip_color_bg()), 0);
+    lv_obj_set_style_bg_opa(g_busy, LV_OPA_COVER, 0);
+    lv_obj_remove_flag(g_busy, LV_OBJ_FLAG_SCROLLABLE);
+    /* Nothing here is touchable: it is a picture of waiting, and a wait you
+     * could press would be promising a way to stop it. */
+    lv_obj_remove_flag(g_busy, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(g_busy, LV_OBJ_FLAG_HIDDEN);
+
+    for (int i = 0; i < CATNIP_BUSY_DOTS; i++) {
+        lv_obj_t *d = lv_obj_create(g_busy);
+        if (!d) return false;
+        lv_obj_remove_style_all(d);
+        lv_obj_set_size(d, 2 * kBusyDotR, 2 * kBusyDotR);
+        lv_obj_set_style_radius(d, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_bg_opa(d, LV_OPA_COVER, 0);
+        lv_obj_remove_flag(d, LV_OBJ_FLAG_CLICKABLE);
+        g_busy_dot[i] = d;
+    }
+    g_busy_word = lv_label_create(g_busy);
+    if (!g_busy_word) return false;
+    lv_obj_set_style_text_font(g_busy_word, &catnip_font_16, 0);
+    lv_obj_set_style_text_color(g_busy_word, lv_color_hex(catnip_color_faint()), 0);
+    /* Under the ring rather than at the foot of the panel: the two are one
+     * thing being said, and a word alone at the bottom of an empty screen would
+     * read as a caption for the emptiness. */
+    lv_obj_align(g_busy_word, LV_ALIGN_CENTER, 0, kBusyR + kBusyDotR + 20);
+    return true;
+}
+
 } /* namespace */
+
+void catnip_frame_set_busy(const char *what)
+{
+    unsigned phase;
+
+    if (!what || !what[0]) {
+        /* Only on the way down, and only once: hiding invalidates, and on this
+         * display an invalidation is the whole panel. */
+        if (g_busy && g_busy_phase != (unsigned)-1) {
+            lv_obj_add_flag(g_busy, LV_OBJ_FLAG_HIDDEN);
+            g_busy_phase = (unsigned)-1;
+            g_busy_what[0] = '\0';
+        }
+        return;
+    }
+    if (!ensure_busy()) return;
+
+    if (strcmp(g_busy_what, what) != 0) {
+        snprintf(g_busy_what, sizeof(g_busy_what), "%s", what);
+        lv_label_set_text(g_busy_word, g_busy_what);
+    }
+    if (g_busy_phase == (unsigned)-1) lv_obj_remove_flag(g_busy, LV_OBJ_FLAG_HIDDEN);
+
+    /* One step is one repaint of the whole panel, which is what a spinner costs
+     * here - so it steps on the clock's cadence and not on the loop's, and a
+     * pass that lands inside the same step draws nothing at all. */
+    phase = catnip_busy_phase((unsigned)lv_tick_get());
+    if (phase == g_busy_phase) return;
+    g_busy_phase = phase;
+    {
+        catnip_busy_dot dots[CATNIP_BUSY_DOTS];
+        /* Centred across the panel, and one dot's radius down from the top so
+         * the dot at twelve o'clock is inside it rather than half off it. */
+        int n = catnip_busy_dots(phase, CATNIP_SCREEN_W / 2, CATNIP_SCREEN_H / 2, kBusyR,
+                                 dots, CATNIP_BUSY_DOTS);
+        for (int i = 0; i < n; i++) {
+            /* The tail is opacity rather than colour: one ink, so the ring is
+             * one object being lit rather than eight things of different
+             * kinds. */
+            uint8_t opa = (uint8_t)(40 + (215 * dots[i].level) / (CATNIP_BUSY_DOTS - 1));
+            lv_obj_set_pos(g_busy_dot[i], dots[i].x - kBusyDotR, dots[i].y - kBusyDotR);
+            lv_obj_set_style_bg_color(g_busy_dot[i], lv_color_hex(kColHintLit), 0);
+            lv_obj_set_style_bg_opa(g_busy_dot[i], opa, 0);
+        }
+    }
+}
+
+void catnip_frame_set_actions(const char *const *names, const catnip_icon *icons, int n,
+                              int focus, bool modal)
+{
+    static int shown_n = -1;
+    static int shown_focus = -1;
+    static bool shown_modal;
+    static char shown[CATNIP_BAR_CELLS][CATNIP_ACTION_NAME_MAX];
+
+    if (n < 0) n = 0;
+    if (n > CATNIP_BAR_CELLS) n = CATNIP_BAR_CELLS;
+
+    /* Nothing at all when nothing differs, and this guard is the difference
+     * between a device that answers a button and one that does not.
+     *
+     * The loop calls this every pass, because what is on the bar is read off
+     * the bar every pass. lv_obj_add_flag(HIDDEN) invalidates whenever HIDDEN
+     * is in the mask, without first asking whether the flag was already set -
+     * and this display renders LV_DISPLAY_RENDER_MODE_FULL, so any invalid area
+     * becomes the whole screen. Three hidden cells re-hidden once a pass was
+     * 153,600 bytes over the bus per pass, which pinned LVGL at 93% of the CPU
+     * and dropped the loop to nine passes a second. Nine passes a second is a
+     * device that feels broken. */
+    {
+        bool same =
+            (n == shown_n && modal == shown_modal && (!modal || focus == shown_focus));
+        for (int i = 0; same && i < n; i++)
+            same = strcmp(shown[i], names && names[i] ? names[i] : "") == 0;
+        if (same) return;
+    }
+    if (!ensure_actions()) return;
+    shown_n = n;
+    shown_focus = focus;
+    shown_modal = modal;
+    for (int i = 0; i < n; i++)
+        snprintf(shown[i], sizeof(shown[i]), "%s", names && names[i] ? names[i] : "");
+
+    for (int i = 0; i < CATNIP_BAR_CELLS; i++) {
+        if (i < n) {
+            lv_obj_remove_flag(g_act_cell[i], LV_OBJ_FLAG_HIDDEN);
+            lv_label_set_text(g_act_name[i], names && names[i] ? names[i] : "");
+            catnip_icon ic = icons ? icons[i] : CATNIP_ICON_NONE;
+            if (ic == CATNIP_ICON_NONE) {
+                lv_obj_add_flag(g_act_icon[i], LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_remove_flag(g_act_icon[i], LV_OBJ_FLAG_HIDDEN);
+                lv_image_set_src(g_act_icon[i],
+                                 &catnip_icon_img_14[ic - CATNIP_ICON_FOLDER]);
+            }
+            /* Ringed only when the bar steps. When it binds, the left one is A
+             * and the right one is B: a ring there would point at a button that
+             * is already under a thumb, and would invite a user to move it with
+             * directions the bar has deliberately not taken. */
+            if (modal && i == focus) lv_obj_add_state(g_act_cell[i], LV_STATE_CHECKED);
+            else lv_obj_remove_state(g_act_cell[i], LV_STATE_CHECKED);
+        } else {
+            lv_obj_add_flag(g_act_cell[i], LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
+    if ((n > 0) != (g_act_n > 0)) {
+        if (n > 0) lv_obj_remove_flag(g_act, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(g_act, LV_OBJ_FLAG_HIDDEN);
+    }
+    g_act_n = n;
+    /* The hint rides on the bar: it is lifted by exactly the bar's height, so
+     * it stays the lowest, leftmost thing that is not the bar. The bar keeps
+     * its full width because three cells need it, so it is the hint that
+     * moves. */
+    if (g_hint)
+        lv_obj_align(g_hint, LV_ALIGN_BOTTOM_LEFT, 2,
+                     n > 0 ? -(CATNIP_FRAME_ACT_H + 10) : -2);
+}
+
+int catnip_frame_action_at(int x, int y)
+{
+    if (!g_act || g_act_n <= 0) return -1;
+    for (int i = 0; i < g_act_n; i++) {
+        lv_area_t a;
+        lv_obj_get_coords(g_act_cell[i], &a);
+        if (x >= a.x1 && x <= a.x2 && y >= a.y1 && y <= a.y2) return i;
+    }
+    return -1;
+}
 
 void catnip_frame_show(bool on)
 {

@@ -218,7 +218,7 @@ int catnip_sched_step(catnip_sched *s)
 }
 
 int catnip_sched_dispatch(void *ud, catnip_rt *rt, int node_ref, const char *event,
-                          int index)
+                          int index, const char *arg)
 {
     catnip_sched *s = (catnip_sched *)ud;
     lua_State *L = catnip_rt_lua(rt);
@@ -241,11 +241,19 @@ int catnip_sched_dispatch(void *ud, catnip_rt *rt, int node_ref, const char *eve
     lua_remove(co, -2);
     lua_rawgeti(co, LUA_REGISTRYINDEX, node_ref);
     lua_pushstring(co, event);
+    /* An action carries which one before which row, because that is the order
+     * it reads in: `on_action(self, id, index)` - do this, to that. Everything
+     * else carries only the row. */
+    int nargs = 3;
+    if (arg) {
+        lua_pushstring(co, arg);
+        nargs = 4;
+    }
     if (index == CATNIP_INDEX_NONE) lua_pushnil(co);
     else lua_pushinteger(co, (lua_Integer)index + 1); /* one-based, like Lua */
 
     int nres = 0;
-    int r = lua_resume(co, L, 3, &nres);
+    int r = lua_resume(co, L, nargs, &nres);
     int rc = 0;
     if (r == LUA_YIELD) {
         rc = -1;
@@ -263,6 +271,26 @@ int catnip_sched_dispatch(void *ud, catnip_rt *rt, int node_ref, const char *eve
          * app with no on_back the ordinary case rather than an error. */
         if (nres >= 1 && lua_toboolean(co, 1))
             rc = (nres >= 2 && lua_toboolean(co, 2)) ? 1 : 0;
+        /* And an activation may answer with *which actions apply*, which is a
+         * list of ids out of the manifest's catalogue. It is read out here
+         * rather than left for the caller because the coroutine that holds it
+         * is unwound two lines below.
+         *
+         * Both of the events that mean "activate", and only those two. Long A
+         * is the canonical one; short A is for a screen with no selection, where
+         * long A has no item to be about and nothing else short A could mean -
+         * the clock's face and the device page are both that shape. No other
+         * handler's return value can become a bar, which is what keeps a stray
+         * truthy table from putting one up. */
+        if (r == LUA_OK && nres >= 2 && lua_istable(co, 2) &&
+            (strcmp(event, "options") == 0 || strcmp(event, "click") == 0)) {
+            lua_Integer len = (lua_Integer)lua_rawlen(co, 2);
+            for (lua_Integer i = 1; i <= len; i++) {
+                lua_rawgeti(co, 2, i);
+                catnip_render_put_action(rt, lua_tostring(co, -1));
+                lua_pop(co, 1);
+            }
+        }
     }
 
     luaL_unref(L, LUA_REGISTRYINDEX, node_ref); /* the dispatcher owns this ref */

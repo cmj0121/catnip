@@ -1,29 +1,34 @@
-"""Generate the `display` role's face: digits, large (#74).
+"""Generate the device's faces, out of the typeface in assets/fonts (#74).
 
-The largest font LVGL builds in is Montserrat 48, and 48 px is not a clock face
-on a 320x240 panel - it is a line of text that happens to be bigger. This makes
-one at whatever size the role actually wants, out of the same typeface LVGL's
-own faces are cut from.
+Every size the platform draws in, cut from one typeface and committed as C.
 
-**The typeface is not vendored.** `lvgl/scripts/built_in_font/Montserrat-Medium.ttf`
-is the file lv_font_conv was pointed at to produce every `lv_font_montserrat_*.c`
-in the library, and PlatformIO already fetches and pins that library. Copying it
-into this repository would be a second copy of something we already have, under
-a licence we would then have to carry ourselves.
+**Monaspace Neon, and it is monospaced on purpose.** Nearly everything this
+device shows is a value beside a label: a channel next to a name, a strength
+next to both, a heap size under a version. In a proportional face those columns
+line up only by accident - the number after a short name sits somewhere else
+than the number after a long one - and the page has to be read across instead of
+down. A monospaced face makes the columns a property of the type rather than of
+the strings that happen to be in them.
 
-**The output is committed**, the way `catnip_icon_img.c` is: a build on a bare
-runner must not need a TTF, a font renderer, or this script. What keeps the
-generated file honest is the same thing that keeps the icons honest - the
-generator is the source of truth and the check target notices drift.
+**The typeface is vendored**, in assets/fonts, with its OFL licence beside it.
+That is a cost and it is the first one this repository carries: the face this
+replaced arrived inside the pinned LVGL dependency, so nobody here owned it.
+Monaspace is SIL OFL 1.1, which permits it; the licence file is not optional
+paperwork but the condition under which the .otf may be here at all.
 
-**Digits and nothing else.** `display` is for a quantity that has earned the
-whole panel, and a face with letters in it would be reached for as "big text"
-within a week - at which point the five prose roles would no longer be the only
-way to set words. Restricting the glyphs is not an economy, it is what makes the
-rule enforceable: ask for `display` with letters and you get missing-glyph
-boxes, at the size you asked for, which is the loudest possible way to be told.
+**The output is committed**, the way the icons are: a build on a bare runner
+must not need a font renderer, and this script is not in the build. What keeps
+the generated file honest is the check target, which notices drift.
 
-Usage:  python3 tools/gen_font.py [size]
+**One face has digits and nothing else.** `display` is for a quantity that has
+earned the whole panel, and a face with letters in it would be reached for as
+"big text" within a week - at which point the five prose roles would no longer
+be the only way to set words. Restricting the glyphs is not an economy, it is
+what makes the rule enforceable: ask for `display` with letters and you get
+missing-glyph boxes, at the size you asked for, which is the loudest possible
+way to be told.
+
+Usage:  python3 tools/gen_font.py
         python3 tools/gen_font.py --check   (does the committed file still match?)
 """
 import os
@@ -34,31 +39,36 @@ try:
 except ImportError:  # pragma: no cover - the message is the whole handling
     sys.exit(
         "gen_font: needs Pillow (pip install pillow). The generated .c is "
-        "committed, so only someone changing the face needs this."
+        "committed, so only someone changing the faces needs this."
     )
 
 FIRMWARE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OTF = os.path.join(FIRMWARE, "assets", "fonts", "MonaspaceNeon-Regular.otf")
+OUT = os.path.join(FIRMWARE, "src", "device", "catnip_font.c")
 
-# The typeface, inside the pinned LVGL dependency. Looked for rather than
-# assumed, because PlatformIO puts libdeps under the build directory and a clean
-# tree has not fetched them yet.
-TTF = os.path.join(
-    FIRMWARE, ".pio", "libdeps", "meowkit", "lvgl", "scripts", "built_in_font",
-    "Montserrat-Medium.ttf",
-)
+BPP = 4
 
-OUT = os.path.join(FIRMWARE, "src", "device", "catnip_font_display.c")
+# Printable ASCII. Not a smaller set: these faces set prose, and prose that
+# silently loses a bracket or a slash is worse than one that is a kilobyte
+# larger. Not a larger one either - anything past ASCII is a decision about
+# which language this device speaks, and it does not have one yet.
+PROSE = "".join(chr(c) for c in range(0x20, 0x7F))
 
 # `0-9` and the three separators a readout needs: a clock's colon, a decimal
 # point, a minus. A space, so a caller can pad without falling off the cmap.
-GLYPHS = " -.0123456789:"
+DIGITS = " -.0123456789:"
 
-DEFAULT_SIZE = 96
-BPP = 4
+FACES = [
+    ("catnip_font_10", 10, PROSE),
+    ("catnip_font_16", 16, PROSE),
+    ("catnip_font_20", 20, PROSE),
+    ("catnip_font_24", 24, PROSE),
+    ("catnip_font_display", 96, DIGITS),
+]
 
 
 def render(font, ch, canvas, origin):
-    """The glyph's ink, as (bbox, pixel-getter) in canvas coordinates.
+    """The glyph's ink, as (image, bbox) in canvas coordinates.
 
     Drawn at a known baseline origin so the offsets below are measured against
     the baseline rather than against wherever PIL happened to put the box.
@@ -100,27 +110,16 @@ def hexrow(data, per_line=16):
     return "\n".join(lines)
 
 
-def main():
-    args = sys.argv[1:]
-    check = "--check" in args
-    args = [a for a in args if a != "--check"]
-    size = int(args[0]) if args else DEFAULT_SIZE
-
-    if not os.path.exists(TTF):
-        sys.exit(
-            "gen_font: %s is missing.\n"
-            "It arrives with the pinned LVGL dependency - run a device build "
-            "first (make device), which fetches it." % TTF
-        )
-
-    font = ImageFont.truetype(TTF, size)
+def cut(name, size, glyphs):
+    """One face, as the block of C that declares it."""
+    font = ImageFont.truetype(OTF, size)
     ascent, descent = font.getmetrics()
     canvas = (size * 3, (ascent + descent) * 3)
     origin = (size, ascent + size // 2)
 
     bitmap = bytearray()
     dsc = [(0, 0, 0, 0, 0, 0)]  # id 0 is reserved, and LVGL expects it present
-    for ch in GLYPHS:
+    for ch in glyphs:
         img, box = render(font, ch, canvas, origin)
         adv = int(round(font.getlength(ch) * 16))
         if box is None:  # a space has advance and no ink
@@ -132,12 +131,12 @@ def main():
         bitmap.extend(data)
 
     # A single contiguous range would need the glyphs to be contiguous in
-    # Unicode, and " -." then a gap then "0-9:" is not. Two ranges cost two cmap
-    # entries and keep the lookup a subtraction rather than a search.
+    # Unicode, and " -." then a gap then "0-9:" is not. One cmap entry per run
+    # keeps the lookup a subtraction rather than a search.
     runs = []
     start = 0
-    for i in range(1, len(GLYPHS) + 1):
-        if i == len(GLYPHS) or ord(GLYPHS[i]) != ord(GLYPHS[i - 1]) + 1:
+    for i in range(1, len(glyphs) + 1):
+        if i == len(glyphs) or ord(glyphs[i]) != ord(glyphs[i - 1]) + 1:
             runs.append((start, i - start))
             start = i
     cmaps = []
@@ -148,35 +147,18 @@ def main():
             "        .unicode_list = NULL, .glyph_id_ofs_list = NULL, "
             ".list_length = 0,\n"
             "        .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY\n"
-            "    }" % (ord(GLYPHS[first]), length, first + 1)
+            "    }" % (ord(glyphs[first]), length, first + 1)
         )
 
     body = [
-        "/*",
-        " * Generated by tools/gen_font.py - do not edit by hand.",
-        " *",
-        " * Size: %d px, %d bpp, from the Montserrat-Medium.ttf that ships inside" % (size, BPP),
-        " * the pinned LVGL dependency - the same file its own built-in faces are",
-        " * cut from. Glyphs: %s" % repr(GLYPHS),
-        " *",
-        " * Committed rather than generated at build time, the way the icons are:",
-        " * a build on a bare runner must not need a TTF or a font renderer.",
-        " */",
-        "#include <lvgl.h>",
+        "/* ---- %s: %d px, %d glyphs ---------------------------------- */" % (
+            name, size, len(glyphs)),
         "",
-        "#include \"catnip_font_display.h\"",
-        "",
-        # Tables of numbers, laid out to be read as a grid. clang-format would
-        # reflow them into a paragraph and then disagree with this generator
-        # forever after - the same bargain gen_icons.py makes with its own
-        # tables, and for the same reason.
-        "/* clang-format off */",
-        "",
-        "static LV_ATTRIBUTE_LARGE_CONST const uint8_t glyph_bitmap[] = {",
+        "static LV_ATTRIBUTE_LARGE_CONST const uint8_t %s_bitmap[] = {" % name,
         hexrow(bitmap),
         "};",
         "",
-        "static const lv_font_fmt_txt_glyph_dsc_t glyph_dsc[] = {",
+        "static const lv_font_fmt_txt_glyph_dsc_t %s_dsc[] = {" % name,
     ]
     for i, (bi, adv, bw, bh, ox, oy) in enumerate(dsc):
         body.append(
@@ -187,17 +169,17 @@ def main():
     body += [
         "};",
         "",
-        "static const lv_font_fmt_txt_cmap_t cmaps[] = {",
+        "static const lv_font_fmt_txt_cmap_t %s_cmaps[] = {" % name,
         ",\n".join(cmaps),
         "};",
         "",
-        "static const lv_font_fmt_txt_dsc_t font_dsc = {",
-        "    .glyph_bitmap = glyph_bitmap,",
-        "    .glyph_dsc = glyph_dsc,",
-        "    .cmaps = cmaps,",
-        "    /* No kerning: the pairs this face can form are digits against",
-        "     * digits, and a clock whose colon crept left when the minute",
-        "     * changed would be worse than one that never moves. */",
+        "static const lv_font_fmt_txt_dsc_t %s_font_dsc = {" % name,
+        "    .glyph_bitmap = %s_bitmap," % name,
+        "    .glyph_dsc = %s_dsc," % name,
+        "    .cmaps = %s_cmaps," % name,
+        "    /* No kerning. The face is monospaced, so every pair is already the",
+        "     * same width apart; a kerning table would be a list of zeroes with",
+        "     * a lookup in front of it. */",
         "    .kern_dsc = NULL,",
         "    .kern_scale = 0,",
         "    .cmap_num = %d," % len(cmaps),
@@ -206,27 +188,62 @@ def main():
         "    .bitmap_format = 0,",
         "};",
         "",
-        "const lv_font_t catnip_font_display = {",
+        "const lv_font_t %s = {" % name,
         "    .get_glyph_dsc = lv_font_get_glyph_dsc_fmt_txt,",
         "    .get_glyph_bitmap = lv_font_get_bitmap_fmt_txt,",
         "    .line_height = %d," % (ascent + descent),
         "    .base_line = %d," % descent,
         "    .subpx = LV_FONT_SUBPX_NONE,",
-        "    .underline_position = %d," % -(size // 12),
+        "    .underline_position = %d," % -(max(size // 12, 1)),
         "    .underline_thickness = %d," % max(1, size // 24),
-        "    .dsc = &font_dsc,",
+        "    .dsc = &%s_font_dsc," % name,
         "};",
         "",
-        "/* clang-format on */",
+    ]
+    return "\n".join(body), len(bitmap)
+
+
+def main():
+    check = "--check" in sys.argv[1:]
+
+    if not os.path.exists(OTF):
+        sys.exit(
+            "gen_font: %s is missing.\n"
+            "It is vendored in this repository - see assets/fonts." % OTF
+        )
+
+    head = [
+        "/*",
+        " * Generated by tools/gen_font.py - do not edit by hand.",
+        " *",
+        " * Every face the platform draws in, cut from",
+        " * assets/fonts/MonaspaceNeon-Regular.otf at %d bpp." % BPP,
+        " *",
+        " * Committed rather than generated at build time, the way the icons",
+        " * are: a build on a bare runner must not need a font renderer.",
+        " */",
+        "#include <lvgl.h>",
+        "",
+        "#include \"catnip_font.h\"",
+        "",
+        # Tables of numbers, laid out to be read as a grid. clang-format would
+        # reflow them into a paragraph and then disagree with this generator
+        # forever after - the same bargain gen_icons.py makes with its own
+        # tables, and for the same reason.
+        "/* clang-format off */",
         "",
     ]
-
-    text = "\n".join(body)
+    blocks = []
+    sizes = []
+    for name, size, glyphs in FACES:
+        block, nbytes = cut(name, size, glyphs)
+        blocks.append(block)
+        sizes.append((name, nbytes))
+    text = "\n".join(head + blocks + ["/* clang-format on */", ""])
 
     if check:
         # The committed file is the artefact and this script is its source, so
-        # the two disagreeing means somebody edited the artefact. Said here
-        # rather than only promised in a comment, which is what it was.
+        # the two disagreeing means somebody edited the artefact.
         have = ""
         if os.path.exists(OUT):
             with open(OUT, "r", encoding="utf-8") as f:
@@ -234,18 +251,19 @@ def main():
         if have != text:
             sys.exit(
                 "gen_font: %s does not match what this script produces.\n"
-                "Run: python3 tools/gen_font.py %d"
-                % (os.path.relpath(OUT, FIRMWARE), size)
+                "Run: python3 tools/gen_font.py"
+                % os.path.relpath(OUT, FIRMWARE)
             )
         print("gen_font: %s is up to date" % os.path.relpath(OUT, FIRMWARE))
         return
 
     with open(OUT, "w", encoding="utf-8") as f:
         f.write(text)
-    print(
-        "gen_font: %d px, %d glyphs, %d bytes of bitmap -> %s"
-        % (size, len(GLYPHS), len(bitmap), os.path.relpath(OUT, FIRMWARE))
-    )
+    total = sum(n for _, n in sizes)
+    for name, n in sizes:
+        print("gen_font:   %-22s %7d bytes" % (name, n))
+    print("gen_font: %d bytes of bitmap -> %s"
+          % (total, os.path.relpath(OUT, FIRMWARE)))
 
 
 main()

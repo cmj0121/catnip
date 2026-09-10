@@ -15,10 +15,11 @@
 --
 --   * a short A, or a tap, activates the selected row - a folder is entered, a
 --     file is shown;
---   * a long A opens that row's options, built at the moment it is asked
---     because which actions apply depends on whether the row is a file or a
---     folder - which is why there are no Delete and Reset buttons any more.
---     Deleting is done *to an item*, so it lives on the item;
+--   * a long A asks which of this app's actions apply to that row, and the
+--     platform draws them as a bar rising from the bottom. This app answers
+--     with ids out of its own manifest and builds nothing - which is why there
+--     are no Delete and Reset buttons any more. Deleting is done *to an item*,
+--     so it lives on the item;
 --   * a short B climbs one directory and says it handled it, and at the top of
 --     the card it declines, which is how the platform knows to close the app.
 --     There is no Up button for the same reason there is no Back button: B is
@@ -40,7 +41,6 @@ local rows, status
 -- because ui.push takes a screen node as readily as a spec.
 local viewer, viewer_name, viewer_text
 local confirm, confirm_text
-local menu, menu_rows
 local pending -- what the confirmation's Confirm button will run
 
 local function join(a, b)
@@ -140,7 +140,6 @@ local function ask(prompt, action)
                                     local run = pending
                                     pending = nil
                                     ui.pop() -- the question
-                                    ui.pop() -- the options it was asked from
                                     if run then run() end
                                   end } }
   end
@@ -186,74 +185,34 @@ local function reset_card()
   end)
 end
 
--- The actions an item can offer. Each is a row in the options menu: a name, the
--- glyph the platform draws for it, and what it does. `when` decides whether it
--- applies to the item that was asked about, which is the reason this menu is
--- built at on_options time and could not have been a fixed structure.
--- `confirms` says the action pushes a question of its own, so the menu is left
--- standing under it and `ask` unwinds both. It is a field rather than a list of
--- which functions are special, because a fourth confirming action should be one
--- more table entry and not an edit in two places.
-local ACTIONS = {
-  { id = "open",   name = "Open",   icon = "folder",
-    when = function(e) return e.is_dir end,
-    run  = enter },
-  { id = "view",   name = "View",   icon = "file",
-    when = function(e) return not e.is_dir end,
-    run  = show_file },
-  { id = "delete", name = "Delete", icon = "trash", confirms = true,
-    when = function(e) return not e.is_dir end,
-    run  = delete },
-  { id = "format", name = "Reset card", icon = "warning", confirms = true,
-    when = function() return true end,
-    run  = reset_card },
-}
-
--- Long A: the options for one item. The menu is an ordinary pushed screen
--- holding an ordinary selectable list, so B closes it with nothing written here
--- and the platform frames it exactly like every other screen.
+-- Long A: which of the manifest's actions apply to this item.
+--
+-- The answer, and nothing else. The platform draws them, so every app's Delete
+-- is the same word beside the same glyph reached by the same press - which is
+-- the whole reason the catalogue lives in the manifest and the bar is not this
+-- app's to build. This used to build and push a screen of its own, which is
+-- exactly the thing the rule exists to stop: an app that draws its own menu
+-- eventually draws a different Delete.
+--
+-- Which ones apply depends on the item, which is why this is a function and not
+-- a fixed list: a folder cannot be viewed and a file cannot be entered.
 local function options(_, index)
   local e = B.entries[index or B.sel]
   if not e then return end
+  if e.is_dir then return { "open", "format" } end
+  return { "view", "delete", "format" }
+end
 
-  local applicable = {}
-  for _, a in ipairs(ACTIONS) do
-    if a.when(e) then applicable[#applicable + 1] = a end
-  end
-
-  if not menu then
-    menu_rows = ui.list{ id = "menu_rows",
-                         on_prev = function(self) self.selected = math.max(1, (self.selected or 1) - 1) end,
-                         on_next = function(self)
-                           self.selected = math.min(#self.children, (self.selected or 1) + 1)
-                         end,
-                         on_click = function(self, i)
-                           local pick = self.picks[i or self.selected]
-                           if not pick then return end
-                           if i then self.selected = i end
-                           -- An action that asks a question keeps the menu
-                           -- underneath it, so `ask` can unwind both at once;
-                           -- anything else is done with the menu right away.
-                           if not pick.confirms then ui.pop() end
-                           pick.run(self.entry)
-                         end }
-    menu = ui.push{ id = "menu", menu_rows }
-  else
-    ui.push(menu)
-  end
-
-  local old, kids = menu_rows.children, {}
-  for i, a in ipairs(applicable) do
-    kids[i] = old[i] or ui.label{ id = "act" .. i }
-    kids[i].text = a.name
-    kids[i].icon = a.icon
-  end
-  menu_rows:set_children(kids)
-  -- The actions themselves, and the one item they are all about: a table per
-  -- row carrying a copy of both would say nothing more.
-  menu_rows.picks = applicable
-  menu_rows.entry = e
-  menu_rows.selected = 1
+-- And what one does when it is chosen. The id is the seam: the manifest names
+-- it, `options` answers with it, the platform draws it, and it comes back here
+-- unchanged.
+local function act(_, id, index)
+  local e = B.entries[index or B.sel]
+  if id == "format" then reset_card() return end
+  if not e then return end
+  if id == "open" then enter(e)
+  elseif id == "view" then show_file(e)
+  elseif id == "delete" then delete(e) end
 end
 
 -- Short A, or a tap. A tap names the row it landed on and the joystick names
@@ -272,7 +231,8 @@ rows = ui.list{ id = "rows",
                 on_prev = function() move(-1) end,
                 on_next = function() move(1) end,
                 on_click = activate,
-                on_options = options }
+                on_options = options,
+                on_action = act }
 status = ui.label{ id = "status", hidden = true }
 
 -- Short B. Climbing is content replacement rather than a pushed screen, so it

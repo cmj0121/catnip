@@ -67,6 +67,20 @@ void catnip_wifi_end(void);
  * background. */
 int catnip_wifi_scan(catnip_wifi_ap *out, int max);
 
+/* Whether a scan is in the air right now. The platform draws the busy ring off
+ * this: an app that scans says nothing about waiting, because what waiting
+ * looks like is not an app's to decide. */
+bool catnip_wifi_scanning(void);
+
+/* Throw away whatever the last scan found and go and look again.
+ *
+ * The driver already rescans behind a caller that keeps polling, so this is not
+ * about getting fresh results - it is about *saying so*. A page that answers a
+ * press with the same list it was already showing has not answered it; this is
+ * what makes the busy ring come back up, which is the device saying "yes, I
+ * heard you, and I am looking". */
+void catnip_wifi_rescan(void);
+
 #ifdef __cplusplus
 }
 #endif
