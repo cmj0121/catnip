@@ -1152,7 +1152,14 @@ void apply_screen_region(Entry *screen)
  *
  * Returns 0 for every shape that cannot show half of anything: a carousel shows
  * one cell, a mixer's columns are the height of the region by definition, and a
- * grid pages. */
+ * grid pages.
+ *
+ * The pitch is taken from the first line, so a column whose lines are different
+ * heights - the type sample page is the only one there is - is cut against the
+ * first of them. That page is four lines and cannot overflow, so its cut is
+ * zero either way; a mixed column that did overflow would be cut a little
+ * wrong, which is a better failure than a half line and is not a shape anything
+ * builds. */
 int32_t row_slack(Entry *screen)
 {
     uint32_t n = lv_obj_get_child_count(screen->obj);
@@ -1163,7 +1170,12 @@ int32_t row_slack(Entry *screen)
     for (uint32_t i = 0; i < n; i++) {
         Entry *c = map_find((catnip_handle)(intptr_t)lv_obj_get_user_data(
             lv_obj_get_child(screen->obj, (int32_t)i)));
-        if (c && c->kind == CATNIP_NODE_LIST && c->layout == CATNIP_LAYOUT_ROWS) list = c;
+        /* A column of rows or a column of lines: both stack one thing per line
+         * down the region, and half of either at the bottom edge reads as a
+         * rendering fault. */
+        if (c && c->kind == CATNIP_NODE_LIST &&
+            (c->layout == CATNIP_LAYOUT_ROWS || c->layout == CATNIP_LAYOUT_TEXT))
+            list = c;
     }
     if (!list) return 0;
     rows = lv_obj_get_child_count(list->obj);
