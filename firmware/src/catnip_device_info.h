@@ -66,6 +66,16 @@ enum {
     CATNIP_INFO_LEFT,
     CATNIP_INFO_RIGHT,
 };
+/* Rewrite the fact lines in place, keeping the page - the ring's position, the
+ * list's scroll, everything the retained renderer is for.
+ *
+ * The facts go stale while they are being read: a card comes out, the battery
+ * moves. A page that answered correctly on the way in and then quietly stopped
+ * is the failure this page exists to avoid, so whoever shows it is expected to
+ * keep asking. A row count different from the page's is ignored - that is a
+ * different page, and the caller should show() it instead. */
+void catnip_device_info_update(catnip_device_info *d, const char *const *rows, int n);
+
 int catnip_device_info_take_action(catnip_device_info *d);
 
 void catnip_device_info_free(catnip_device_info *d);

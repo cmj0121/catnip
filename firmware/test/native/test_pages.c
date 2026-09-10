@@ -53,6 +53,7 @@ static int failures;
 static struct {
     catnip_handle h;
     char id[32];
+    char text[64];
     int live;
 } g_obj[SLOTS];
 
@@ -67,6 +68,7 @@ static int be_create(void *ud, catnip_handle h, catnip_handle parent, int index,
         g_obj[i].live = 1;
         g_obj[i].h = h;
         snprintf(g_obj[i].id, sizeof(g_obj[i].id), "%s", d->id ? d->id : "");
+        snprintf(g_obj[i].text, sizeof(g_obj[i].text), "%s", d->text ? d->text : "");
         return 0;
     }
     return -1;
@@ -76,8 +78,10 @@ static void be_update(void *ud, catnip_handle h, const catnip_node_desc *d)
 {
     (void)ud;
     for (int i = 0; i < SLOTS; i++)
-        if (g_obj[i].live && g_obj[i].h == h)
+        if (g_obj[i].live && g_obj[i].h == h) {
             snprintf(g_obj[i].id, sizeof(g_obj[i].id), "%s", d->id ? d->id : "");
+            snprintf(g_obj[i].text, sizeof(g_obj[i].text), "%s", d->text ? d->text : "");
+        }
 }
 
 static void be_destroy(void *ud, catnip_handle h)
@@ -102,6 +106,16 @@ static const char *id_of(catnip_handle h)
     return "";
 }
 
+/* What a named node currently reads, so an in-place rewrite can be told from a
+ * rebuild: a rebuild would give the line a new handle, and this follows the
+ * name rather than the handle. */
+static const char *text_of(const char *id)
+{
+    for (int i = 0; i < SLOTS; i++)
+        if (g_obj[i].live && strcmp(g_obj[i].id, id) == 0) return g_obj[i].text;
+    return "";
+}
+
 /* ---- the board, as a set of counters ------------------------------------ */
 
 static struct {
@@ -112,13 +126,17 @@ static struct {
     uint32_t epoch;
 } g_board;
 
+/* What the board would say about the card right now. The test moves it to stand
+ * in for a card being pushed in while the page is open. */
+static const char *g_card_row = "card none";
+
 static int env_info_rows(void *ud, char (*rows)[CATNIP_INFO_ROW_MAX], int max)
 {
     (void)ud;
     if (max < 3) return 0;
     snprintf(rows[0], CATNIP_INFO_ROW_MAX, "catnip v0.0.0-test");
     snprintf(rows[1], CATNIP_INFO_ROW_MAX, "heap 213 KB free");
-    snprintf(rows[2], CATNIP_INFO_ROW_MAX, "card none");
+    snprintf(rows[2], CATNIP_INFO_ROW_MAX, "%s", g_card_row);
     return 3;
 }
 
@@ -280,6 +298,26 @@ int main(void)
      * while, where A did nothing at all, which is the bug that made the page
      * look broken on arrival. */
     CHECK(focus_is("info_list"), "the ring opens on the facts, which scroll");
+
+    /* ---- the facts are re-asked while the page is up -------------------- */
+    /* A card pushed in while the device page is open has to show up on it: the
+     * page's whole promise is that its facts are current, and it used to ask
+     * only on the way in. */
+    CHECK(strcmp(text_of("info3"), "card none") == 0, "the card line reads what it read");
+    {
+        catnip_handle was = catnip_ui_input_focus(&g_in);
+        g_card_row = "card 32768 MB";
+        catnip_pages_glance(g_pages);
+        catnip_render_drain(g_rt);
+        catnip_render(g_rt, &kBackend);
+        CHECK(strcmp(text_of("info3"), "card 32768 MB") == 0,
+              "a card appearing while the page is open changes the line");
+        /* In place: the ring is still on the same node, which a rebuild would
+         * not have left it on. */
+        CHECK(catnip_ui_input_focus(&g_in) == was,
+              "and the page is rewritten rather than rebuilt, so the ring stays");
+        g_card_row = "card none";
+    }
     CHECK(hint() & CATNIP_HINT_DOWN, "so down scrolls them");
     CHECK(hint() & CATNIP_HINT_RIGHT, "and right reaches the buttons");
 

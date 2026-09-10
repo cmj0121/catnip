@@ -47,6 +47,14 @@ typedef struct {
      * device/imu.h), so three of these six have nothing to report. */
     void (*imu)(void *ud, float out[6]);
     long (*rtc_now)(void *ud); /* unix epoch seconds */
+    /* When the network last set the clock, as a local epoch, or 0 for "not
+     * since this boot" (#84). It answers where the time on screen came from,
+     * which is a different question from what the time is - and the one asked
+     * by anyone about to overwrite it by hand. Not persisted: an RTC that
+     * survived a power cycle holds a number whose origin it does not record,
+     * and a stored answer would be this firmware claiming to know something it
+     * cannot check. */
+    long (*ntp_last)(void *ud);
     /* Set the clock. Returns non-zero when it took. NULL, or a zero return,
      * both mean "this device cannot be told the time", which an app has to be
      * able to find out - a setter that silently does nothing is worse than one

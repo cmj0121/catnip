@@ -126,7 +126,31 @@ void catnip_pages_glance(catnip_pages *p)
     int32_t y;
     uint32_t mo, d, h, mi, wd;
 
-    if (!p || !p->menu || p->page != CATNIP_PAGE_HOME) return;
+    if (!p) return;
+
+    /* The device page's facts go stale while they are being read: a card comes
+     * out, the battery moves, a sync finishes. The page said as much about
+     * itself - "asked afresh every time it is opened, because a page of facts
+     * that were true a while ago is worse than no page" - and then only asked
+     * on the way in. So it is asked again on this same slow cadence, and the
+     * lines are rewritten in place: rebuilding would throw away the ring's
+     * position and the scroll, and a page that jumped under the reader every
+     * two seconds would be its own kind of broken. */
+    if (p->page == CATNIP_PAGE_INFO && p->env.info_rows) {
+        static char rows[CATNIP_INFO_MAX_ROWS][CATNIP_INFO_ROW_MAX];
+        const char *ptrs[CATNIP_INFO_MAX_ROWS];
+        int n = p->env.info_rows(p->env.ud, rows, CATNIP_INFO_MAX_ROWS);
+        int i;
+
+        if (n < 0) n = 0;
+        if (n > CATNIP_INFO_MAX_ROWS) n = CATNIP_INFO_MAX_ROWS;
+        for (i = 0; i < n; i++)
+            ptrs[i] = rows[i];
+        catnip_device_info_update(p->info, ptrs, n);
+        return;
+    }
+
+    if (!p->menu || p->page != CATNIP_PAGE_HOME) return;
     /* Only while the ring is what is on screen: the launcher outlives the
      * menu's tree, so testing it asked "does a launcher exist" - which is
      * always - and answered by going to the I2C bus for a clock nobody could

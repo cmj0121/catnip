@@ -390,17 +390,16 @@ static int env_info_rows(void *ud, char (*rows)[CATNIP_INFO_ROW_MAX], int max)
     (void)ud;
     if (max < 12) return 0;
 
+    /* The order is what a reader can see without scrolling, and the page shows
+     * only its first few lines: what changes and what gets checked goes first -
+     * the version, then the clock, the battery and the card. The chip revision
+     * and the MAC are looked *up*, once, by somebody who came here on purpose,
+     * and they can be scrolled to.
+     *
+     * This is not cosmetic. The clock's line was seventh, which on a page that
+     * shows two and a half of eleven meant the one fact somebody had come to
+     * check was off the bottom of a screen that gave no sign there was more. */
     snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "catnip %s", CATNIP_VERSION);
-    snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "built %s", CATNIP_BUILD_DATE);
-    snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "%s rev %d, %d MHz", ESP.getChipModel(),
-             ESP.getChipRevision(), (int)ESP.getCpuFreqMHz());
-    snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "flash %u MB",
-             (unsigned)(ESP.getFlashChipSize() / (1024U * 1024U)));
-    snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "psram %u KB free of %u MB",
-             (unsigned)(ESP.getFreePsram() / 1024U),
-             (unsigned)(ESP.getPsramSize() / (1024U * 1024U)));
-    snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "heap %u KB free",
-             (unsigned)(ESP.getFreeHeap() / 1024U));
     {
         uint32_t t = catnip_rtc_now();
         if (t) {
@@ -422,6 +421,16 @@ static int env_info_rows(void *ud, char (*rows)[CATNIP_INFO_ROW_MAX], int max)
         snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "card %llu MB",
                  (unsigned long long)(SD_MMC.cardSize() / (1024ULL * 1024ULL)));
     else snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "card none");
+    snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "built %s", CATNIP_BUILD_DATE);
+    snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "%s rev %d, %d MHz", ESP.getChipModel(),
+             ESP.getChipRevision(), (int)ESP.getCpuFreqMHz());
+    snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "flash %u MB",
+             (unsigned)(ESP.getFlashChipSize() / (1024U * 1024U)));
+    snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "psram %u KB free of %u MB",
+             (unsigned)(ESP.getFreePsram() / 1024U),
+             (unsigned)(ESP.getPsramSize() / (1024U * 1024U)));
+    snprintf(rows[n++], CATNIP_INFO_ROW_MAX, "heap %u KB free",
+             (unsigned)(ESP.getFreeHeap() / 1024U));
 
     {
         uint64_t mac = ESP.getEfuseMac();

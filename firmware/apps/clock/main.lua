@@ -119,8 +119,35 @@ list = ui.list{ id = "setter", layout = "mixer",
   on_lower = function() put(sel, at[sel] - 1) end }
 list:set_children(cols)
 
+-- Where the time you are about to overwrite came from.
+--
+-- It matters most on exactly this page: a clock the network set is already
+-- right, and hand-setting it is usually a mistake somebody is one press away
+-- from making. So the setter says so, and says nothing when there is nothing to
+-- say - a clock set by hand is not a failure and does not need annotating.
+--
+-- `service.ntp.last()` is about this run, not all time: the RTC survives a
+-- power cycle holding a number whose origin it does not record, so "not synced"
+-- here means "not since this boot", and the wording avoids claiming otherwise.
+local function source_line()
+  local t = service.ntp.last()
+  if not t then return "" end
+  return string.format("network time, synced %02d:%02d",
+                       (t % 86400) // 3600, (t % 3600) // 60)
+end
+
+-- In the body role, not the caption one. A caption is a footnote, and this is
+-- not a footnote: on the page where you are about to overwrite the time, "this
+-- came off the network" is the most useful sentence on the screen, and the one
+-- most likely to stop a mistake. It is read, so it is written in the ink that
+-- is meant to be read.
+-- Ranged right, because the bottom-left corner of every screen belongs to the
+-- control hint and a line starting there would be read through four arrows.
+local source = ui.label{ id = "source", text = source_line(), style = "body",
+                         align = "right" }
+
 -- Nothing claims B, so the platform takes it and leaves - which is exactly
 -- "leave without saving", and it costs no code to say so. The write happens on
 -- A and nowhere else, so no way out of here saves by accident.
-ui.screen{ list }
+ui.screen{ list, source }
 paint()

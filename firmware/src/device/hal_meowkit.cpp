@@ -49,6 +49,7 @@
 #include <Arduino.h>
 
 #include "display.h"
+#include "net_time.h"
 #include "wifi.h"
 #include "hal_meowkit.h"
 #include "imu.h"
@@ -123,6 +124,12 @@ long hal_rtc_now(void *ud)
 {
     (void)ud;
     return (long)catnip_rtc_now();
+}
+
+long hal_ntp_last(void *ud)
+{
+    (void)ud;
+    return (long)catnip_net_time_last();
 }
 
 int hal_rtc_set(void *ud, long epoch)
@@ -203,6 +210,7 @@ const catnip_hal *catnip_meowkit_hal_begin(void)
     g_hal.imu = hal_imu;
     g_hal.rtc_now = hal_rtc_now;
     g_hal.rtc_set = hal_rtc_set;
+    g_hal.ntp_last = hal_ntp_last;
     /* No longer the stubs this file used to apologise for: an app that asks
      * service.wifi.status() now gets the radio's real answer (#82). */
     g_hal.wifi_status = hal_wifi_status;

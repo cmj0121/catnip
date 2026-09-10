@@ -79,10 +79,19 @@ catnip_sync_state catnip_net_time_poll(void);
  * is - JOINING or QUERYING, and nothing once it has settled. */
 bool catnip_net_time_busy(void);
 
-/* The local epoch of the last successful sync, or 0 for "never synced" - the
- * honest answer to the device page's "has this actually worked", which is a
- * different question from "what time is it". */
+/* The local epoch of the last successful sync, or 0 for "not since this boot".
+ *
+ * Deliberately not persisted. It answers "where did the time on this screen
+ * come from", and that is a question about this run: an RTC that survived a
+ * power cycle is holding a number whose origin it does not record, and a stored
+ * "synced last Tuesday" would be this firmware claiming to know something about
+ * a register it cannot actually check. */
 uint32_t catnip_net_time_last(void);
+
+/* Where a sync got to, for the one line that reports it. Distinguishes a sync
+ * that failed - worth saying, because it is actionable - from one that was
+ * never asked for, which is not. */
+catnip_sync_state catnip_net_time_state(void);
 
 #ifdef __cplusplus
 }

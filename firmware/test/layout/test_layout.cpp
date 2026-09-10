@@ -232,22 +232,68 @@ int main(void)
      * screen it pushes is bare too - and a page of columns wants stacking, not
      * placing. Laid out as a face it collapsed into the top-left corner, which
      * is what "the editor is hard to modify" turned out to mean. */
+    /* First the bare-screen case this section has always covered: a pushed
+     * screen with no centrepiece stacks rather than being placed. */
     catnip_lvgl_backend_set_bare(true);
+    run("ui.screen{ id = 'bare_setter',\n"
+        "  ui.list{ id = 'bcols', layout = 'mixer', on_prev = function() end,\n"
+        "    ui.label{ id = 'b1', text = 'Y', value = 50 },\n"
+        "    ui.label{ id = 'b2', text = 'M', value = 50 } } }\n");
+    pass();
+    {
+        lv_obj_t *bc = obj("bcols");
+        CHECK(bc && lv_obj_get_height(bc) >= CATNIP_SCREEN_H - 20,
+              "a bare screen with no centrepiece fills its height");
+    }
+
+    catnip_lvgl_backend_set_bare(false);
+    /* The Clock app's setter as the app actually builds it: the mixer, and the
+     * caption under it saying where the time came from (#84). The caption is
+     * the thing being checked - a line added under a list that grows is the
+     * classic way to add something nobody ever sees. */
     run("ui.screen{ id = 'setter',\n"
         "  ui.list{ id = 'cols', layout = 'mixer', on_prev = function() end,\n"
         "    ui.label{ id = 'c1', text = 'Y', value = 50 },\n"
-        "    ui.label{ id = 'c2', text = 'M', value = 50 } } }\n");
+        "    ui.label{ id = 'c2', text = 'M', value = 50 } },\n"
+        "  ui.label{ id = 'source', text = 'network time, synced 14:18',\n"
+        "           style = 'body', align = 'right' } }\n");
+    pass();
+    /* With the hint drawn, because both live in the bottom-left corner and the
+     * hint is on the layer above: if the reserved corner is not actually being
+     * respected, this is where it shows. */
+    catnip_frame_show(true);
+    catnip_frame_show_hint(true);
+    catnip_frame_set_hint(CATNIP_HINT_LEFT | CATNIP_HINT_RIGHT);
     pass();
     shot("setter");
+    catnip_frame_show_hint(false);
+    catnip_frame_show(false);
+    {
+        lv_obj_t *src = obj("source");
+        CHECK(src != NULL, "the setter's source line exists");
+        CHECK(src && lv_obj_get_y(src) + lv_obj_get_height(src) <= CATNIP_SCREEN_H,
+              "and sits inside the panel rather than below its bottom edge");
+        /* Ranged right, which is what keeps it out of the control hint's
+         * corner. Pinned because `align` reached the renderer and then did
+         * nothing for a label that was not a row in a list - it applied on one
+         * path and not the other, and the screen looked exactly as it had. */
+        CHECK(src && lv_obj_get_style_text_align(src, 0) == LV_TEXT_ALIGN_RIGHT,
+              "and is ranged right, clear of the hint's corner");
+        CHECK(src && lv_obj_get_width(src) > CATNIP_SCREEN_W / 2,
+              "with the width to be ranged within");
+    }
     {
         lv_obj_t *cols = obj("cols");
         lv_obj_t *c1 = obj("c1");
         lv_obj_t *c2 = obj("c2");
 
         CHECK(cols && lv_obj_get_width(cols) >= CATNIP_SCREEN_W - 20,
-              "a bare screen with no centrepiece fills its width");
-        CHECK(cols && lv_obj_get_height(cols) >= CATNIP_SCREEN_H - 20,
-              "and its height, rather than collapsing into a corner");
+              "the setter's columns fill the width");
+        /* The mixer takes what is left after the caption, so it is most of the
+         * panel but not all of it - which is the point: a list that took all of
+         * it would push the caption off the bottom. */
+        CHECK(cols && lv_obj_get_height(cols) > CATNIP_SCREEN_H / 2,
+              "and most of the height, leaving the caption its line");
         CHECK(c1 && c2 && lv_obj_get_x(c2) > lv_obj_get_x(c1),
               "and its columns run across it rather than stacking");
         CHECK(c1 && c2 && lv_obj_get_height(c1) == lv_obj_get_height(c2),
@@ -258,7 +304,20 @@ int main(void)
     catnip_lvgl_backend_set_bare(false);
     {
         catnip_device_info *info = catnip_device_info_new(g_rt);
-        const char *rows[3] = {"catnip v0.0.0", "heap 213 KB free", "card none"};
+        /* The real page's shape: eleven facts, of which the clock is the
+         * seventh. What a reader can actually see without scrolling is the
+         * question a screenshot answers and a node assertion cannot. */
+        const char *rows[11] = {"catnip v0.4.0",
+                                "clock 2026-09-10 14:18 (ntp)",
+                                "battery 82%",
+                                "card none",
+                                "built 2026-09-10",
+                                "ESP32-S3 rev 2, 240 MHz",
+                                "flash 16 MB",
+                                "psram 7168 KB free of 8 MB",
+                                "heap 213 KB free",
+                                "mac 8C:BF:EA:11:22:33",
+                                "i2c 18 19 34 38 41 51 68"};
         const catnip_info_key pref = {"Preference", "settings"};
         const catnip_info_key diag = {"Diagnostic", "warning"};
         lv_obj_t *facts;
@@ -267,7 +326,7 @@ int main(void)
         lv_obj_t *k2;
 
         CHECK(info != NULL, "the device page is built");
-        catnip_device_info_show(info, rows, 3, &pref, &diag);
+        catnip_device_info_show(info, rows, 11, &pref, &diag);
         pass();
         shot("device-page");
         facts = obj("info_list");

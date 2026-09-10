@@ -67,6 +67,14 @@ static long m_rtc(void *ud)
     (void)ud;
     return 1700000000L;
 }
+/* When the network last set the clock. 0 is "not since this boot", which the
+ * API must hand to Lua as nil rather than as an epoch of zero. */
+static long m_ntp_last_v = 0;
+static long m_ntp_last(void *ud)
+{
+    (void)ud;
+    return m_ntp_last_v;
+}
 static void m_gpio_mode(void *ud, int pin, const char *mode)
 {
     mock *m = ud;
@@ -170,6 +178,7 @@ int main(void)
     hal.button = m_button;
     hal.imu = m_imu;
     hal.rtc_now = m_rtc;
+    hal.ntp_last = m_ntp_last;
     hal.gpio_mode = m_gpio_mode;
     hal.gpio_write = m_gpio_write;
     hal.gpio_read = m_gpio_read;
@@ -193,6 +202,20 @@ int main(void)
     lua_pop(L, 1);
 
     /* Mock recorded the write-side calls. */
+    /* service.ntp.last() - the Clock app asks it to say where the time it is
+     * about to overwrite came from (#84). Absence is nil, not 0: a script that
+     * forgot to check would otherwise format the epoch and print 1970. */
+    m_ntp_last_v = 0;
+    CHECK(catnip_rt_dostring(rt, "__t = service.ntp.last()", "=t") == 0 &&
+              (lua_getglobal(L, "__t"), lua_isnil(L, -1)),
+          "service.ntp.last() is nil when nothing synced this boot");
+    lua_pop(L, 1);
+    m_ntp_last_v = 1789035519L;
+    CHECK(catnip_rt_dostring(rt, "__t = service.ntp.last()", "=t") == 0 &&
+              (lua_getglobal(L, "__t"), lua_tointeger(L, -1) == 1789035519L),
+          "and the epoch of the last sync when there was one");
+    lua_pop(L, 1);
+
     CHECK(mk.vibrate_ms == 150, "vibrate reached the HAL");
     CHECK(mk.r == 1 && mk.g == 2 && mk.b == 3, "led reached the HAL");
     CHECK(mk.brightness == 50, "brightness reached the HAL");

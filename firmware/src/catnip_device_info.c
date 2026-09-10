@@ -54,11 +54,26 @@ static const char CATNIP_INFO_LUA[] =
     "  local bar = ui.list{ id = 'info_keys', layout = 'row' }\n"
     "  bar:set_children(keys)\n"
     "  ui.screen{ list, bar, id = 'info_screen' }\n"
+    "end\n"
+    /* Rewrite the facts without rebuilding the page.
+     *
+     * They go stale while they are being read - a card comes out, the battery
+     * moves, the heap moves - and rebuilding the screen to say so would throw
+     * away the ring's position and the list's scroll, which is precisely what a
+     * retained renderer exists to keep. One property write per line that
+     * actually differs, so a page of unchanged facts costs no repaint at all -
+     * which matters here, because this display repaints whole. */
+    "function __catnip_info_update(lines)\n"
+    "  for i, line in ipairs(lines) do\n"
+    "    local node = ui.get('info' .. i)\n"
+    "    if node and node.text ~= line then node.text = line end\n"
+    "  end\n"
     "end\n";
 
 struct catnip_device_info {
     catnip_rt *rt;
     int action;
+    int rows; /* how many fact lines are on the page, for update() */
 };
 
 static int info_action_cb(lua_State *L)
@@ -121,6 +136,7 @@ void catnip_device_info_show(catnip_device_info *d, const char *const *rows, int
 
     if (n < 0) n = 0;
     if (n > CATNIP_INFO_MAX_ROWS) n = CATNIP_INFO_MAX_ROWS;
+    d->rows = n;
     d->action = CATNIP_INFO_NONE;
 
     lua_getglobal(L, "__catnip_info_build");
@@ -132,6 +148,30 @@ void catnip_device_info_show(catnip_device_info *d, const char *const *rows, int
     push_key(L, left);
     push_key(L, right);
     if (lua_pcall(L, 3, 0, 0) != LUA_OK) catnip_rt_report_error(d->rt, L);
+}
+
+void catnip_device_info_update(catnip_device_info *d, const char *const *rows, int n)
+{
+    lua_State *L;
+    int i;
+
+    if (!d) return;
+    L = catnip_rt_lua(d->rt);
+    if (!L) return;
+    if (n < 0) n = 0;
+    if (n > CATNIP_INFO_MAX_ROWS) n = CATNIP_INFO_MAX_ROWS;
+    /* A different number of lines is a different page: writing the first few
+     * over the old ones would leave the tail of the previous page underneath
+     * them. The caller shows() in that case; this only ever rewrites. */
+    if (n != d->rows) return;
+
+    lua_getglobal(L, "__catnip_info_update");
+    lua_newtable(L);
+    for (i = 0; i < n; i++) {
+        lua_pushstring(L, rows[i] ? rows[i] : "");
+        lua_rawseti(L, -2, i + 1);
+    }
+    if (lua_pcall(L, 1, 0, 0) != LUA_OK) catnip_rt_report_error(d->rt, L);
 }
 
 int catnip_device_info_take_action(catnip_device_info *d)
