@@ -3,7 +3,8 @@
 **Languages:** English · [繁體中文](app-ui-spec.zh-TW.md)
 
 What an app provides, what the platform provides, and how the two meet. All of
-it works today except where a line says otherwise.
+it works today except where a line says otherwise; _What this asks for that is
+not built_ at the foot of the page is the list of those, together.
 
 ## The canvas
 
@@ -74,10 +75,107 @@ forms the top line and what you named after it the bottom, each running
 first-to-the-left and last-to-the-right. **The order you name them in is the
 layout**, and you still never say where anything goes.
 
-More than six icons scrolls rather than paginating: the selection leads and the
-view follows, exactly as a list does, so there is one scrolling model and not
-two. A grid is `ui.list{ layout = "grid" }` — the same node, the same `selected`
+More than six icons is **the next page**, not a longer scroll. The columns are
+fixed at three and the rows at two, and a seventh icon does not reflow the six
+above it into a tighter arrangement — a grid that became four columns on a longer
+card would move every icon whose position a user had learned. The selection still
+leads: it steps cell by cell, and when it steps off the page the page turns under
+it. A grid is `ui.list{ layout = "grid" }` — the same node, the same `selected`
 integer, the same events; only the flow differs.
+
+### The five screens
+
+The shapes above say what the content _is_. This says what **chrome** goes around
+it — and chrome is not chosen one piece at a time. There are five screens in the
+device, an app picks one, and everything else follows from that pick.
+
+| Screen             | Main region      | Header | Control hint    | Action bar |
+| ------------------ | ---------------- | ------ | --------------- | ---------- |
+| **1. Full screen** | anything         | none   | none            | none       |
+| **2. Mascot**      | one icon         | over   | optional, float | may float  |
+| **3. Icon grid**   | 3x2 icons, paged | always | floats          | may float  |
+| **4. List**        | rows of text     | always | reserved corner | may float  |
+| **5. Setting**     | values, paged    | always | floats          | may float  |
+
+**1. Full screen** (`frame: "bare"`). The platform draws **nothing** — no bar, no
+hint, no counter, not one pixel — and keeps exactly one gesture, long B. This is
+the only screen where an app is alone with the panel, and that is the whole of
+what it buys: there is no reserved corner to work around because there is nothing
+reserved.
+
+**2. Mascot / single icon.** One icon, centred, sized against **the full 240** —
+the content is not pushed down by the bar, the bar **floats over it**. The bar is
+always drawn. The hint is optional here and nowhere else, because a centred
+figure leaves both bottom corners empty whether or not anything is put in one.
+
+**3. Icon grid.** Three columns, two rows, paged, as above. The header is not
+optional here: `2/3` is the only thing on the screen that says a third page
+exists, and a grid without it is a grid that appears to be all there is.
+
+**4. List.** One item per row, one row per line, and **the region's height is cut
+to a whole number of rows**. A half-row peeking past the bottom edge reads as a
+rendering fault rather than as an invitation to scroll, and it is not needed as
+one: `3/11` in the header already says there is more, which is the second reason
+the header is not optional here either.
+
+**5. Setting.** The **Values** shape, paged — as many columns as fit at a
+readable width, and the next screenful is the next page rather than a sideways
+scroll. It is the one screen with a gesture of its own; see _Setting something_.
+
+### The floating widgets
+
+Two things float above the main region. Both are the platform's, neither is
+reachable from a tree, and both sit on the top layer so an app cannot draw over
+one:
+
+**The control hint**, bottom-left. Whether it costs the app anything is a
+per-screen answer, and the question is always the same one: _can the content
+reach that corner?_ A list can — its bottom row runs the full width — so the list
+screen **reserves** the corner and the region is that much narrower. A grid, a
+mascot and a setting page cannot: their content is columns or a centred figure,
+the corner is empty either way, and the hint **floats** with nothing given up.
+Full screen draws none at all.
+
+**The action bar**, along the bottom, and it has two shapes.
+
+_Two icons_ — the ordinary case, and it is **not a menu**. The left one _is_ A and
+the right one _is_ B: the bar is a picture of the two buttons already under the
+user's thumbs, not a third thing to aim at. The default pair is Yes / No. An app
+may override the affirmative and may override what B cancels; B stays the
+negative one, and the platform refuses to bind it to an action the manifest
+marks destructive.
+
+_Three icons_ — a modal, because three does not map onto two buttons. While it is
+up the bar takes left and right for itself: they step between the three, A runs
+the focused one, B puts the bar away. Up and down still belong to the content
+underneath, which stays visible.
+
+A tap runs an icon directly in either shape. That is the finger's only route to
+Cancel, which is the reason the bar carries a visible one at all.
+
+**When both are up, the hint rides on the bar.** The bar rises from the bottom
+edge and needs its full width for two or three icons, so it does not start to the
+right of anything; the hint is lifted by exactly the bar's height and sits on its
+top-left shoulder. It is still the lowest, leftmost thing that is not the bar,
+which is the only sense in which "bottom-left" was ever a position rather than a
+rank.
+
+**And it answers for the bar, because the bar is what is listening.** The rule
+has not changed — a direction is lit when whatever owns it does something with it
+— only the owner has. In the two-icon shape the bar owns no directions at all
+(the icons _are_ A and B), so every arrow keeps meaning what the page underneath
+means and the hint changes nothing but its height. In the three-icon shape the
+bar owns left and right, so those two are lit for stepping between the three
+while up and down go on answering for the content below. A user who has just
+been handed a third choice is exactly the user who needs telling that left and
+right now do something, which is the case the hint was built for.
+
+An app that set `"hints": false` gets no hint here either. The bar is unaffected
+by that flag: it is not an explanation of the controls, it is one of them.
+
+**Long B is the safety zone and is never on the bar.** Short B is negotiable —
+an app may claim it, and the bar may rebind it. Long B reaches the cat from any
+depth and reaches no handler of anyone's.
 
 **Every row reserves a leading icon slot**, whether it has an icon or not: 14 px
 for the glyph and 6 px of gap, so text starts 20 px in. Always, rather than only
@@ -121,6 +219,20 @@ optional.
     rendering of nothing.
 
 ## The gestures
+
+Four of them mean the same thing everywhere in the device, platform screens and
+apps alike. An app that means something else by one of these is not different,
+it is wrong:
+
+| Gesture     | Means           | Which is to say                        |
+| ----------- | --------------- | -------------------------------------- |
+| **Short A** | select          | activate the thing that is focused     |
+| **Short B** | cancel          | put back, climb, or leave              |
+| **Long A**  | more options    | the action bar, for the selected item  |
+| **Long B**  | exit to the cat | the platform's, at every depth, always |
+
+Everything else depends on where you are — which is exactly why the device draws
+a picture of it in the corner.
 
 | Gesture          | Meaning                                                              | Reaches you as                         |
 | ---------------- | -------------------------------------------------------------------- | -------------------------------------- |
@@ -170,10 +282,11 @@ gains its arrow with no line written anywhere.
 everywhere — activate, and leave — and a hint is for what changes.
 
 It is drawn by the platform on the top layer, like the bar, so no app can draw
-one, move one, or discover whether one is up. The corner it occupies is reserved
-the way the bar's height is: a canvas's bottom line starts to the right of it, and
-a column leaves room below. **A `frame: "bare"` app reserves neither**, because
-no bar and no hint are drawn over one.
+one, move one, or discover whether one is up. **What it costs is per-screen**,
+per _The floating widgets_ above: a list reserves the corner and gets a narrower
+bottom row for it, a grid and a setting page and the mascot give up nothing
+because their content never reaches that corner, and a `frame: "bare"` app
+reserves nothing because nothing is drawn over one.
 
 **A line at the foot of a page can move out of its way.** A column ranges its
 text left, which puts the start of the bottom line right where the hint is, so a
@@ -217,7 +330,7 @@ you know what you are being handed:
 | Nothing destructive is ever one tap away                      | which is why operations live behind long A, and not on the screen |
 
 There is deliberately **no inertia and no momentum**: the carousel has a handful
-of positions and the grid scrolls a row at a time, and momentum is a solution to
+of positions and the grid turns a page at a time, and momentum is a solution to
 long lists that here would only overshoot the thing being aimed at.
 
 That line is where it is on purpose, and it earns its place twice. Leaving is the
@@ -316,7 +429,7 @@ The manifest carries the knobs; Lua carries the behaviour.
 | `name`                                | manifest | default title, and the name on your page              |
 | `icon`                                | manifest | your identity icon; absent → the mascot               |
 | `actions[]`                           | manifest | the action catalogue: `id`, `name`, `icon`            |
-| `frame`                               | manifest | `"standard"` (default) or `"bare"`                    |
+| `frame`                               | manifest | `"standard"` (default) or `"bare"` — screen 1 or 2–5  |
 | `counter`                             | manifest | `false` if you are not a list                         |
 | `hints`                               | manifest | `false` to draw no control hint over you              |
 | `ui.title(s)`                         | Lua      | a title that changes at runtime                       |
@@ -338,6 +451,24 @@ size and no colour in your tree, for the same reason there are no coordinates.
 | `primary` | the affirmative one of two                       |
 | `danger`  | the one that cannot be undone                    |
 | `display` | _one number_ large enough to own the screen      |
+
+The sizes are the platform's and are not yours to set, but they are worth
+writing down because they are the reason a role is enough:
+
+| Role      | Size | Why that one                                        |
+| --------- | ---- | --------------------------------------------------- |
+| `body`    | 16   | a full row of a list, read at arm's length          |
+| `title`   | 20   | a heading, one step clear of the rows under it      |
+| `caption` | 10   | working, deliberately not competing with the answer |
+| `display` | 96   | one number owning the panel                         |
+
+`body` and `title` were 14 and 16. A list is the screen this device spends most
+of its time being, and 14 is a size you read by leaning in — which on a device
+held in two hands at a desk is the wrong posture to design for. The step also
+keeps the gap between body and title: moving one and not the other would have
+left a heading a hair larger than its rows, which is worse than no heading. It
+costs rows per page, and _The five screens_ already says the region is cut to
+whole rows, so what it costs is visible rather than clipped.
 
 **`display` takes digits and nothing else** — `0-9`, a colon, a full stop, a
 dash. Ask for it with letters in the string and you get missing-glyph boxes, on
@@ -431,21 +562,39 @@ end
 
 ## Example: the Clock
 
-_Designed, not built (#73)._ The File Browser above is a list; this is the other
-end of the same vocabulary, and it needs nothing the platform does not already
-have.
+_The face is built; the setter is not (#73)._ The File Browser above is a list;
+this is the other end of the same vocabulary, and it needs nothing the platform
+does not already have. **It is three screens**, and naming which of the five each
+one is settles almost every question about it:
+
+| Level        | Screen      | Shows                                         | Reached by              |
+| ------------ | ----------- | --------------------------------------------- | ----------------------- |
+| **Carousel** | Mascot      | `14:32` — and nothing else                    | left/right from the cat |
+| **Face**     | Full screen | time, date, weekday, where the time came from | short A                 |
+| **Setter**   | Setting     | hour, minute, day, month, year                | short A                 |
+
+Short B climbs back down the same three, and long B goes to the cat from any of
+them.
+
+**The carousel shows the time and stops there.** It is one position on a ring of
+apps, one of a handful the user will step past looking for something else, and
+what it owes them at that speed is the one fact they came for. A date and a
+weekday and a sync line at carousel size are four things to read where one was
+asked for; put them where there is room and they are worth reading.
+
+**The face is the whole panel** — `frame: "bare"`, no bar, no counter, **no
+hint**. That is the point of promoting it: this is a clock being looked at, and
+a clock being looked at should have nothing on it that is about the device.
 
 ```text
 ┌────────────────────────────────────────────────┐
 │  09-09                                         │  caption
 │                                                │
-│                                                │
 │                 14:32                          │  display
-│                                                │
 │                                                │
 │           S   M   T  [W]  T   F   S            │  caption, one lit
 │                                                │
-│  ▮ 87%                                         │  caption
+│                       network time, 14:02      │  caption
 └────────────────────────────────────────────────┘
 ```
 
@@ -460,17 +609,30 @@ ui.screen{ ui.list{
   ui.label{ id = "date",    text = "09-09",             style = "caption" },
   ui.label{ id = "time",    text = "14:32",             style = "display" },
   ui.label{ id = "weekday", text = "S M T [W] T F S",   style = "caption" },
-  ui.label{ id = "battery", text = "▮ 87%",             style = "caption" },
+  ui.label{ id = "source",  text = "network time, 14:02",
+                            style = "caption", align = "right" },
 }}
 ```
+
+**Where the time came from lives here and only here.** Not on the carousel, where
+it would be three quarters of what is on screen; and not on the setter, where a
+line saying the network already answered this would be reading over the shoulder
+of someone in the middle of answering it themselves. On the face it is the one
+place a doubt about the time can be settled, which is when anyone ever asks.
+
+An unsynced clock says nothing rather than saying it is unsynced — the line is
+simply absent. _(Today the shipped face is not yet `bare` and the line is
+right-aligned to clear the hint's corner. When the face becomes screen 1 there is
+no corner to clear, and `align` there becomes a choice rather than a workaround.)_
 
 **An unset clock says so.** The RTC comes up never having been set, and a
 confident `00:00` on the first of January is worse than an admission: it will be
 believed. So the same face shows `--:--` at the same size and in the same place,
 with **no** letter lit in the strip — seven positions, none of them today — and
-one line of `caption` under it saying to hold A.
+one line of `caption` under it saying to press A.
 
-**Setting it is a mixer**, the shape from _What the main region holds_:
+**Setting it is the Setting screen**, unchanged, which is the whole reason for
+naming the five:
 
 ```text
       14      32       9      Sep     2026
@@ -480,15 +642,18 @@ one line of `caption` under it saying to hold A.
      Hour    Min     Day    Month    Year
 ```
 
-`ui.list{ layout = "mixer" }` is yours as much as it is the preference page's,
-and using it here costs a user nothing to learn: left and right choose a field,
-A makes it live, up and down change it, a finger sets it directly, B lets go and
-B again leaves. **Hours and minutes wrap** where a preference clamps — 23 goes to
-00, because a clock is a ring and a brightness is not.
+Left and right choose a column, A focuses it, up and down change it, A writes it,
+B puts it back — the preference page's page, with the clock's numbers in it, and
+a user who has changed the brightness once has already learned this. **Hours and
+minutes wrap** where a preference clamps: 23 goes to 00, because a clock is a
+ring and a brightness is not.
 
-The screen is reached from `on_options`, which is what long A delivers, so the
-clock is doing exactly what the File Browser does with its actions — asking the
-platform for the one gesture that means "there is more here", and answering it.
+**Short A reaches it from the face, where long A would be the rule.** Rule 7 puts
+operations behind long A because there is a selected item for them to act on; the
+face has no selection and nothing else short A could possibly mean, so the clock
+spends it on the one operation it has. Long A does the same thing, so a user
+arriving from any other app finds it where they expect. Nothing is drawn either
+way, which is the part of rule 7 that actually binds.
 
 ## Home, and where your app is found
 
@@ -557,35 +722,58 @@ the cat, and is not one in any sense a person holding it cares about.
 ### Setting something
 
 Every page that sets a value works the same way, whether it is the platform's or
-yours — the preference page and the clock's setter are the same six words:
+yours — the preference page and the clock's setter are the same page. It is the
+**Setting** screen from _The five screens_: the Values shape, paged like the
+grid, and **two levels**.
 
-|               |                                           |
-| ------------- | ----------------------------------------- |
-| Left / Right  | choose a column                           |
-| Up / Down     | change the one you are on; hold to repeat |
-| Drag a column | set it to where your finger is            |
-| Tap a column  | move to it, and stay                      |
-| **Short A**   | **keep it and leave**                     |
-| **Short B**   | **put it back and leave**                 |
-| Long B        | home, keeping                             |
+|              | Unfocused — you are on the page  | Focused — you are on one column      |
+| ------------ | -------------------------------- | ------------------------------------ |
+| Up / Down    | previous / next page             | change this value; hold to repeat    |
+| Left / Right | step between this page's columns | nothing                              |
+| **Short A**  | **focus the column**             | **write it, and let go**             |
+| **Short B**  | **leave the page**               | **put this column back, and let go** |
+| **Double A** | **write everything and leave**   | **write everything and leave**       |
+| Long B       | home                             | home                                 |
+| Tap a column | focus it                         | set it to where your finger is       |
+
+**Focus is not a mode. It is select and cancel, one level down.** A selects: on
+the page that means this column, on the column it means this value. B cancels: on
+the column that means the value you were changing, on the page it means the page.
+The four fixed gestures still mean exactly what they mean everywhere else, and
+nothing new has to be learned — which is also why up and down are lit in both
+levels without the hint having to say anything different. They do something in
+both; that is all the hint ever claims.
+
+**Left and right go dead inside a column**, and that is the one thing the level
+buys that is worth paying a gesture for. Changing a value is the one place in
+the device where a sideways push that landed on the neighbour would be silently
+wrong — you would have moved a number you were not looking at. Unfocused, the
+same push is free.
 
 **A value is applied as you step it**, because one you cannot see while choosing
-it is one you choose twice — and B putting it back is what lets "leave without
-saving" mean anything. Nothing is written until A.
+it is one you choose twice. What A writes is what you have already been looking
+at; what B puts back is what the column held when you focused it. So leaving the
+page unfocused loses nothing that was not already returned.
 
-There is no "now you are editing" state, and that is what B buys: a press that
-can be taken back does not need guarding against. A tap and a press of A are the
-same event and not the same act — a finger carries the column it landed on, so
-it moves there and stays; a press has none to carry, so it can only mean the
-page. **The grid is the exception to "down is settings"**: inside it, down
-is the next row, because a rule that let a long list fall out of itself while
-being scrolled would cost more than the one gesture it saves.
+**Double A writes everything and leaves, and it exists only here.** Every other
+screen in the device has one meaning for A and this one has two, so the shape has
+somewhere to fit; and this is the only screen where "and I am done" is a distinct
+thing to say, because it is the only one where you may have set three things and
+would otherwise have to walk back out past all three. A finger says it the same
+way — two taps.
 
-**The grid is everything.** Up from anywhere on the carousel opens the main
-region's six-icon shape: a 3x2 grid of every app there is, scrolling when there
-are more than six. Finding the twelfth app is two screens rather than twelve
-steps, which is what the carousel alone could not do — a carousel is a
-shortlist, and it stops working the moment it is used as a directory.
+A tap and a press of A are the same event and not the same act: a finger carries
+the column it landed on, so it focuses that one; a press has none to carry, so it
+can only mean whichever the ring is already on. **The grid is the exception to "down is settings"**: inside it, down
+moves the selection on and turns the page under it when it runs out, because a
+rule that let a long list fall out of itself while being walked would cost more
+than the one gesture it saves.
+
+**The grid is everything.** Up from anywhere on the carousel opens the **Icon
+grid** screen: 3x2, every app there is, **paged** when there are more than six.
+Finding the twelfth app is two pages rather than twelve steps, which is what the
+carousel alone could not do — a carousel is a shortlist, and it stops working the
+moment it is used as a directory.
 
 The focused icon is ringed, and its name is the header's `[TITLE]` — so an icon
 needs no label under it and the name is still there to read.
@@ -614,7 +802,7 @@ are focused, so it is read on its own rather than in a column — make it stand
 alone.
 
 Touch reaches most of this without any addition: a swipe steps the carousel and
-scrolls the grid the way the joystick does, and a tap picks out an icon.
+turns the grid's pages the way the joystick does, and a tap picks out an icon.
 
 **In the grid a tap selects and stops there.** Launching is short A and pinning
 is long A, and a finger does neither. The grid is where a stray touch would cost
@@ -622,3 +810,32 @@ the most — start the wrong app, or unpin the one you rely on — and the guard
 against that is not a confirmation but that touch simply cannot reach the act.
 A tap still moves the ring, so a finger is the fast way to _get_ somewhere and
 the joystick is what commits.
+
+## What this asks for that is not built
+
+_The five screens_ is a description of where the device is going, not only of
+where it is. Six things in it are the platform's to change and one is an app's,
+and they are separable — each is worth having on its own, and none of them waits
+on another:
+
+| #   | Change                                                                        | Where                                  |
+| --- | ----------------------------------------------------------------------------- | -------------------------------------- |
+| 1   | The grid pages instead of scrolling; three columns, fixed                     | `catnip_app_grid.c`, the grid layout   |
+| 2   | The list region is cut to a whole number of rows                              | the frame's region maths               |
+| 3   | `body` 14 → 16, `title` 16 → 20                                               | `lvgl_backend.cpp` role → font         |
+| 4   | The setting screen: paged, two levels of focus, double A                      | the preference page and the input pass |
+| 5   | The hint reserves its corner on lists, floats elsewhere, and rides on the bar | the frame                              |
+| 6   | The action bar: the two-icon and three-icon shapes                            | new                                    |
+| 7   | The clock becomes three screens                                               | `apps/clock/main.lua`, `manifest.json` |
+
+**One app changes, and it is the clock.** The File Browser and the WiFi Prober
+are both list screens and neither has a line to edit: every one of 1–5 is the
+platform's side of a seam these two already sit behind, which is the argument
+for the seam. An app that had to be edited to get a taller `body` would mean the
+roles never worked.
+
+Each of 1–6 is testable at the host layer that already exists — `test/native`
+for what the input pass and the page machine decide, `test/layout` for what LVGL
+actually places, and screenshots out of the latter for what it looks like.
+Number 7 is testable the way `test_filebrowser.c` tests the browser: load the
+app's Lua, drive it, and read the tree back.
