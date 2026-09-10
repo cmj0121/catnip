@@ -287,10 +287,30 @@ static void power_off(void)
     catnip_power_off();
 }
 
-static void poll_power_button(void)
+/* The power button, asked of the PMIC over I2C.
+ *
+ * On a cadence, because the loop runs at several hundred passes a second and
+ * two register reads at 100 kHz cost about 450 us of every one of them - a
+ * fifth of the whole pass spent asking a button that a human presses at most
+ * twice a second whether it has moved. Twenty times a second is far inside what
+ * anyone can tell apart on a press, and the PMIC latches the event rather than
+ * reporting a level, so nothing is missed between asks.
+ *
+ * `force` is for the paths that must not wait for the cadence: the diagnostic
+ * page is the whole loop while it is up, and the boot animation runs before
+ * there is a loop at all. */
+static unsigned g_pmu_last;
+static void poll_power_button_at(unsigned now, bool force)
 {
+    if (!force && (unsigned)(now - g_pmu_last) < 50u) return;
+    g_pmu_last = now;
     if (catnip_pmu_power_key_held()) power_off();
     if (catnip_pmu_power_key_pressed()) set_screen(!g_screen_on);
+}
+
+static void poll_power_button(void)
+{
+    poll_power_button_at((unsigned)millis(), false);
 }
 
 /* Read the owner's settings and act on them. Where they come from and which
@@ -716,10 +736,27 @@ static void draw_actions(void)
  * cannot make it: its face wants the panel and its setter wants the bar back.
  *
  * In the menu neither answers yes: no screen there sets `frame`, and the shell
- * reports bare only while an app is actually running. */
-static bool app_is_bare()
+ * reports bare only while an app is actually running.
+ *
+ * Asked of Lua, so asked only when the answer can have moved.
+ *
+ * It is one pcall into the runtime, which is about 210 us on this chip - a
+ * sixth of a pass spent asking a question whose answer changes when an app
+ * pushes a screen and at no other time. A screen can only appear or vanish
+ * through a handler (the drain), a page or shell transition, or an app's own
+ * chunk being stepped; `moved` is those three, and it is worked out before this
+ * is called because the region has to be right before the tree is drawn. */
+static bool app_is_bare(bool moved)
 {
-    return g_rt && catnip_ui_bare(g_rt, catnip_shell_bare(g_shell) != 0);
+    static bool cached;
+    static bool asked;
+
+    if (!g_rt) return false;
+    if (moved || !asked) {
+        cached = catnip_ui_bare(g_rt, catnip_shell_bare(g_shell) != 0);
+        asked = true;
+    }
+    return cached;
 }
 
 void loop()
@@ -734,7 +771,10 @@ void loop()
          * than from any of the switches the page is testing. */
         catnip_diag_step();
         catnip_lvgl_step();
-        poll_power_button();
+        /* Forced: the diagnostic page is the whole loop, and its passes are
+         * slow enough that a cadence would be the only thing reading the
+         * button. */
+        poll_power_button_at((unsigned)millis(), true);
         catnip_led_breathe();
         /* Holding B is the way out, and it goes back to the cat rather than
          * through a restart: the page borrowed lv_screen_active() and gives it
@@ -762,7 +802,15 @@ void loop()
     /* The slot, before anything reads it. A card that arrived brings apps with
      * it and a card that left takes them away, and either way the list on
      * screen is wrong until it is rebuilt. */
-    if (catnip_sd_poll()) {
+    /* And the slot, on a slower one still. A card is put in by hand and the
+     * answer costs a mount check; four times a second is faster than anyone can
+     * push one in and let go, and it was being asked four hundred and sixty
+     * times a second. */
+    static unsigned sd_last;
+    unsigned now_ms = (unsigned)millis();
+    bool ask_sd = (unsigned)(now_ms - sd_last) >= 250u;
+    if (ask_sd) sd_last = now_ms;
+    if (ask_sd && catnip_sd_poll()) {
         bool mounted = catnip_sd_mounted();
         catnip_meowkit_hal_set_fs(mounted);
         if (g_shell && catnip_shell_state(g_shell) != CATNIP_SHELL_RUNNING) {
@@ -814,6 +862,7 @@ void loop()
     /* The menu and a running app are the same kind of tree; which is up is the
      * shell's state, and the transitions between them are here (#33). */
     bool stepped = false;
+    catnip_page page_was = catnip_pages_current(g_pages);
     /* The platform's own screens, before the shell's states: none of them is
      * one. While one is up the menu's pick is not read and no app can start,
      * because the tree on screen is that page's and there is nothing on it to
@@ -867,14 +916,20 @@ void loop()
      * a bar. Asked of the visible screen first and of the manifest only when
      * the screen said nothing, so an app whose screens are all one shape still
      * declares it once and the clock can hand the bar back for its setter. */
-    const bool bare = app_is_bare();
+    /* Everything that can have moved the tree since the last pass drew it. */
+    const bool moved =
+        delivered > 0 || stepped || catnip_pages_current(g_pages) != page_was;
+    const bool bare = app_is_bare(moved);
     catnip_lvgl_backend_set_bare(bare);
 
     /* After the drain that ran the app's handlers and before the tree is drawn,
      * because a bar put up now is a bar the user sees this frame. */
     offer_actions();
 
-    if (g_rt && g_be) catnip_render(g_rt, g_be);
+    /* How many objects the pass touched, which is the honest answer to "did
+     * anything on screen change" - and the only one, since an app writes a
+     * property without telling anybody. */
+    const int drawn = (g_rt && g_be) ? catnip_render(g_rt, g_be) : 0;
 
     /* Carry any clock sync forward (#84): it joins the network, asks the time
      * and writes the RTC over several passes, dropping the radio when it is
@@ -898,7 +953,25 @@ void loop()
      * directions needing no explanation, and either is reason enough. */
     catnip_frame_show_hint(catnip_lvgl_backend_active() && !bare &&
                            catnip_shell_hints(g_shell));
-    catnip_frame_set_hint(catnip_ui_input_hint(g_rt, catnip_ui_input_focused()));
+    /* The hint and the counter are both read out of the tree, and both cost a
+     * walk of it. What they say changes when the tree changes or when the ring
+     * moves, and on a device sitting still neither does - so both are asked
+     * only then, and the answers stand until something moves.
+     *
+     * The drawing behind them is guarded too, and separately: that guard is
+     * about not repainting, this one is about not asking. */
+    {
+        static catnip_handle focus_was = CATNIP_HANDLE_NONE;
+        static bool asked;
+        catnip_handle focus_now = catnip_ui_input_focused();
+
+        if (moved || drawn || focus_now != focus_was || !asked) {
+            focus_was = focus_now;
+            asked = true;
+            catnip_frame_set_hint(catnip_ui_input_hint(g_rt, focus_now));
+            catnip_frame_step(g_rt);
+        }
+    }
     /* And the bar of actions, if one is up. It is drawn after the hint because
      * putting it up lifts the hint onto its shoulder, and the hint has to exist
      * to be lifted. */
@@ -926,5 +999,20 @@ void loop()
          * change while they are up, where the ring's does on every step. */
     }
     catnip_toast_step();
-    catnip_frame_step(g_rt);
+
+    /* And give the rest of the system the pass back when this one did nothing.
+     *
+     * A loop with no yield in it runs as fast as the CPU will go - about nine
+     * hundred passes a second here - and every one of those passes is time the
+     * idle task does not get. FreeRTOS uses the idle task for its own
+     * housekeeping and the SoC uses it to clock down, so a busy loop is not
+     * only a flat battery: it is the one shape that starves the scheduler on a
+     * device that is also running a radio.
+     *
+     * One millisecond, and only when the pass found nothing to do. That is a
+     * ceiling of about five hundred passes a second, which is still two orders
+     * of magnitude faster than a thumb - and the moment anything happens, the
+     * next pass is immediate again, so the yield can never be in the way of a
+     * press it has already seen. */
+    if (!delivered && !stepped && !drawn && gesture == CATNIP_UI_GESTURE_NONE) delay(1);
 }

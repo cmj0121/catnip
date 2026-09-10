@@ -236,8 +236,14 @@ int main(void)
              * that pays for the hint. */
             CHECK(scr && lv_obj_get_style_pad_top(scr, 0) == CATNIP_FRAME_BAR_H + 4,
                   "the bar's height comes off the top of a list screen");
-            CHECK(scr && lv_obj_get_style_pad_bottom(scr, 0) == CATNIP_FRAME_HINT_H + 4,
+            /* At least the hint's share: what is under the last whole row is
+             * the hint's strip plus whatever a half-row would have taken, and
+             * the slack is why it is not exactly that. */
+            CHECK(scr && lv_obj_get_style_pad_bottom(scr, 0) >= CATNIP_FRAME_HINT_H + 4,
                   "and the hint's off the bottom, because a row reaches its corner");
+            CHECK(scr && lv_obj_get_style_pad_bottom(scr, 0) <
+                             CATNIP_FRAME_HINT_H + 4 + pitch,
+                  "and never more than one row's worth beyond it");
             CHECK(pitch > gap && (inner + gap) % pitch == 0,
                   "and the region is a whole number of rows tall");
             CHECK(inner < CATNIP_SCREEN_H,

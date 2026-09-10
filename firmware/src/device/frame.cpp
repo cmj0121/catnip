@@ -264,9 +264,35 @@ bool ensure_actions(void)
 void catnip_frame_set_actions(const char *const *names, const catnip_icon *icons, int n,
                               int focus)
 {
-    if (!ensure_actions()) return;
+    static int shown_n = -1;
+    static int shown_focus = -1;
+    static char shown[3][CATNIP_ACTION_NAME_MAX];
+
     if (n < 0) n = 0;
     if (n > 3) n = 3;
+
+    /* Nothing at all when nothing differs, and this guard is the difference
+     * between a device that answers a button and one that does not.
+     *
+     * The loop calls this every pass, because what is on the bar is read off
+     * the bar every pass. lv_obj_add_flag(HIDDEN) invalidates whenever HIDDEN
+     * is in the mask, without first asking whether the flag was already set -
+     * and this display renders LV_DISPLAY_RENDER_MODE_FULL, so any invalid area
+     * becomes the whole screen. Three hidden cells re-hidden once a pass was
+     * 153,600 bytes over the bus per pass, which pinned LVGL at 93% of the CPU
+     * and dropped the loop to nine passes a second. Nine passes a second is a
+     * device that feels broken. */
+    {
+        bool same = (n == shown_n && (n < 3 || focus == shown_focus));
+        for (int i = 0; same && i < n; i++)
+            same = strcmp(shown[i], names && names[i] ? names[i] : "") == 0;
+        if (same) return;
+    }
+    if (!ensure_actions()) return;
+    shown_n = n;
+    shown_focus = focus;
+    for (int i = 0; i < n; i++)
+        snprintf(shown[i], sizeof(shown[i]), "%s", names && names[i] ? names[i] : "");
 
     for (int i = 0; i < 3; i++) {
         if (i < n) {
@@ -291,9 +317,6 @@ void catnip_frame_set_actions(const char *const *names, const catnip_icon *icons
         }
     }
 
-    /* The same guard the bar and the hint give at length: on a display that
-     * renders the whole panel, an invalidation that changes nothing still costs
-     * 153,600 bytes over the bus. */
     if ((n > 0) != (g_act_n > 0)) {
         if (n > 0) lv_obj_remove_flag(g_act, LV_OBJ_FLAG_HIDDEN);
         else lv_obj_add_flag(g_act, LV_OBJ_FLAG_HIDDEN);

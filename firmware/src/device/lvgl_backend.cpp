@@ -121,6 +121,7 @@ bool g_bare;
 
 void apply_list_layout(Entry *e);
 void apply_screen_region(Entry *screen);
+int32_t row_slack(Entry *screen);
 
 Entry *map_find(catnip_handle h)
 {
@@ -1077,6 +1078,25 @@ void apply_list_layout(Entry *e)
  * centrepiece are middles, and taking 34 px from either for a hint that will be
  * drawn over empty panel is the platform charging rent on space it is not
  * using. */
+/* A style write that asks first.
+ *
+ * lv_obj_set_style_pad_*() refreshes the style and invalidates whether or not
+ * the value differs, and this display renders LV_DISPLAY_RENDER_MODE_FULL - so
+ * an invalidation that changes nothing still costs 153,600 bytes over the bus.
+ * The region is decided every pass from what the screen holds, and what it
+ * holds hardly ever changes, so nearly every one of those writes was a repaint
+ * of a screen that had not moved. */
+void set_pad(lv_obj_t *obj, lv_style_prop_t prop, int32_t want)
+{
+    lv_style_value_t now;
+    if (lv_obj_get_local_style_prop(obj, prop, &now, 0) == LV_STYLE_RES_FOUND &&
+        now.num == want)
+        return;
+    lv_style_value_t v;
+    v.num = want;
+    lv_obj_set_local_style_prop(obj, prop, v, 0);
+}
+
 void apply_screen_region(Entry *screen)
 {
     uint32_t n;
@@ -1103,61 +1123,61 @@ void apply_screen_region(Entry *screen)
     bool bar = !g_bare && !carousel;
     bool hint = !g_bare && corner;
 
-    lv_obj_set_style_pad_top(screen->obj, bar ? CATNIP_FRAME_BAR_H + 4 : 0, 0);
-    lv_obj_set_style_pad_bottom(screen->obj, hint ? CATNIP_FRAME_HINT_H + 4 : 0, 0);
-    lv_obj_set_style_pad_left(screen->obj, (g_bare || carousel) ? 0 : 6, 0);
-    lv_obj_set_style_pad_right(screen->obj, (g_bare || carousel) ? 0 : 6, 0);
+    int32_t below = hint ? CATNIP_FRAME_HINT_H + 4 : 0;
+
+    set_pad(screen->obj, LV_STYLE_PAD_TOP, bar ? CATNIP_FRAME_BAR_H + 4 : 0);
+    set_pad(screen->obj, LV_STYLE_PAD_LEFT, (g_bare || carousel) ? 0 : 6);
+    set_pad(screen->obj, LV_STYLE_PAD_RIGHT, (g_bare || carousel) ? 0 : 6);
+    /* The frame's share first, then whatever a column of rows cannot use - the
+     * slack has to be measured against the region the frame actually left, so
+     * the two are set in that order and the second reads the first. */
+    set_pad(screen->obj, LV_STYLE_PAD_BOTTOM, below);
+    lv_obj_update_layout(screen->obj);
+    set_pad(screen->obj, LV_STYLE_PAD_BOTTOM, below + row_slack(screen));
 }
 
-/* Cut a column of rows to a whole number of them.
+/* How much of the region a column of rows cannot use.
  *
  * A half-row peeking past the bottom edge reads as a rendering fault rather
  * than as an invitation to scroll - and it is not needed as one, because the
- * header's `3/11` already says there is more. So the list keeps only the rows
- * it can show whole and the remainder is left as empty panel above the hint.
+ * header's `3/11` already says there is more. So the leftover is taken off the
+ * region and the list keeps only the rows it can show whole.
  *
- * The allotment is re-derived rather than remembered: flex is asked for it
- * afresh every time, because what is left for this list depends on whatever
- * else is on the screen, and a height cut once and then kept would never grow
- * back when a status line above it went away.
+ * Taken off the *screen's* padding rather than out of the list's height, and
+ * that is not a detail. The list is a flex item and flex owns an item's main
+ * size; setting a height on it and asking for a relayout put the number in the
+ * style and left the object exactly as it was. The screen is nobody's flex
+ * item, so its padding is a number that means what it says - and the list still
+ * grows into whatever is left, which is what it was already doing.
  *
- * Only a column of rows, and only one that is the screen's own child. A
- * carousel shows one cell, a mixer's columns are the height of the region by
- * definition, and a grid pages rather than scrolls - none of them can show half
- * of anything. */
-void fit_whole_rows(Entry *e)
+ * Returns 0 for every shape that cannot show half of anything: a carousel shows
+ * one cell, a mixer's columns are the height of the region by definition, and a
+ * grid pages. */
+int32_t row_slack(Entry *screen)
 {
-    Entry *screen = map_find(e->parent);
-    uint32_t n = lv_obj_get_child_count(e->obj);
-    int32_t gap, pitch, avail, rows, inner;
+    uint32_t n = lv_obj_get_child_count(screen->obj);
+    Entry *list = nullptr;
+    uint32_t rows;
+    int32_t gap, pitch, avail, whole;
 
-    if (e->layout != CATNIP_LAYOUT_ROWS || n == 0) return;
-    if (!screen || screen->kind != CATNIP_NODE_SCREEN) return;
+    for (uint32_t i = 0; i < n; i++) {
+        Entry *c = map_find((catnip_handle)(intptr_t)lv_obj_get_user_data(
+            lv_obj_get_child(screen->obj, (int32_t)i)));
+        if (c && c->kind == CATNIP_NODE_LIST && c->layout == CATNIP_LAYOUT_ROWS) list = c;
+    }
+    if (!list) return 0;
+    rows = lv_obj_get_child_count(list->obj);
+    if (rows == 0) return 0;
 
-    /* Give the room back before measuring it, so this reads the space flex
-     * would allot now and not the space it allotted last time. */
-    lv_obj_set_flex_grow(e->obj, 1);
-    lv_obj_set_height(e->obj, LV_SIZE_CONTENT);
-    lv_obj_mark_layout_as_dirty(screen->obj);
-    lv_obj_update_layout(screen->obj);
-    avail = lv_obj_get_content_height(e->obj);
-
-    gap = lv_obj_get_style_pad_row(e->obj, 0);
-    pitch = lv_obj_get_height(lv_obj_get_child(e->obj, 0)) + gap;
-    if (pitch <= gap || avail <= 0) return; /* a row with no height yet */
-
+    avail = lv_obj_get_content_height(list->obj);
+    gap = lv_obj_get_style_pad_row(list->obj, 0);
+    pitch = lv_obj_get_height(lv_obj_get_child(list->obj, 0)) + gap;
+    if (pitch <= gap || avail <= 0) return 0;
     /* The last row on the page is followed by no gap, so the room a whole
      * number of rows needs is one gap less than their pitch. */
-    rows = (avail + gap) / pitch;
-    if (rows < 1) return;
-    inner = rows * pitch - gap;
-    if (inner >= avail) return; /* already exact - leave flex holding it */
-
-    lv_obj_set_flex_grow(e->obj, 0);
-    lv_obj_set_height(e->obj, inner + lv_obj_get_height(e->obj) -
-                                  lv_obj_get_content_height(e->obj));
-    lv_obj_mark_layout_as_dirty(screen->obj);
-    lv_obj_update_layout(screen->obj);
+    whole = ((avail + gap) / pitch) * pitch - gap;
+    if (whole <= 0 || whole >= avail) return 0;
+    return avail - whole;
 }
 
 void apply_selection(Entry *e)
@@ -1176,7 +1196,6 @@ void apply_selection(Entry *e)
 
     e->sel_dirty = false;
     lv_obj_update_layout(e->obj);
-    fit_whole_rows(e);
     for (uint32_t i = 0; i < n; i++) {
         lv_obj_t *child = lv_obj_get_child(e->obj, i);
         bool on = ((int)i == e->selected);

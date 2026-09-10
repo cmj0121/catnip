@@ -251,7 +251,27 @@ void catnip_meowkit_hal_set_fs(bool available)
 
 void catnip_meowkit_hal_poll(void)
 {
+    /* The switches every pass, and only the switches. They are what a press
+     * has to be seen by, and the loop's rate is the resolution of that.
+     *
+     * The other two are I2C reads on a 100 kHz bus, and each costs a few
+     * hundred microseconds - at several hundred passes a second that was most
+     * of the pass, spent asking two parts that cannot answer differently that
+     * fast. The accelerometer is configured at 100 Hz and cannot report faster
+     * than it samples; a battery moves over minutes. So each is asked at a rate
+     * it can actually change at, which leaves the bus and the CPU for the
+     * things that do. */
+    static uint32_t imu_last;
+    static uint32_t pmu_last;
+    uint32_t now = millis();
+
     catnip_input_poll();
-    catnip_imu_poll();
-    catnip_pmu_poll();
+    if ((uint32_t)(now - imu_last) >= 20u) {
+        imu_last = now;
+        catnip_imu_poll();
+    }
+    if ((uint32_t)(now - pmu_last) >= 500u) {
+        pmu_last = now;
+        catnip_pmu_poll();
+    }
 }
