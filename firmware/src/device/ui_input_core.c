@@ -361,11 +361,30 @@ int catnip_ui_input_run(catnip_ui_input *in, catnip_rt *rt, const catnip_ui_samp
 
     /* And now what the directions asked for, each acted on by what it means
      * rather than by which switch it was. */
+    /* How far one press moves the reading position.
+     *
+     * One line in a column of rows, where the ring is drawn and a press that
+     * moved it one row is a press whose whole effect is visible. A page in a
+     * column of *lines*, where nothing is drawn around anything: there, three
+     * presses out of four would move a cursor nobody can see and appear to do
+     * nothing at all, and the fourth would jump. A page every time is a press
+     * that always moves the page.
+     *
+     * The number comes from whatever draws, because it is geometry. Nothing to
+     * ask, or an answer of nothing, falls back to one - a page of one line is
+     * wrong but it is not stuck. */
+    int step = 1;
+    if (layout == CATNIP_LAYOUT_TEXT && env && env->page_rows) {
+        int rows = env->page_rows(env->ud, in->focus);
+        if (rows > 1) step = rows;
+    }
     if ((m_up == CATNIP_DIR_PREV && dpad_up) || (m_left == CATNIP_DIR_PREV && step_back))
-        post_if_event(in, rt, CATNIP_BTN_UP);
+        for (int k = 0; k < step; k++)
+            post_if_event(in, rt, CATNIP_BTN_UP);
     if ((m_down == CATNIP_DIR_NEXT && dpad_down) ||
         (m_right == CATNIP_DIR_NEXT && step_fwd))
-        post_if_event(in, rt, CATNIP_BTN_DOWN);
+        for (int k = 0; k < step; k++)
+            post_if_event(in, rt, CATNIP_BTN_DOWN);
     /* A carousel is stepped with the same two events a column gets from up and
      * down - only the direction that reaches them changes, because that is the
      * direction the arrangement makes obvious. */

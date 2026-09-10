@@ -86,8 +86,15 @@ int env_action_at(void *ud, int x, int y)
  * loop owned would be a second copy of that state to keep in step. */
 catnip_bar g_bar;
 
+int env_page_rows(void *ud, catnip_handle list)
+{
+    (void)ud;
+    return catnip_lvgl_backend_page_rows(list);
+}
+
 const catnip_ui_env kEnv = {env_mixer_at,  env_mixer_pct, env_cancel_touch,
-                            env_action_at, nullptr,       &g_bar};
+                            env_action_at, env_page_rows, nullptr,
+                            &g_bar};
 
 } /* namespace */
 

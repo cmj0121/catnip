@@ -103,6 +103,12 @@ int catnip_lvgl_backend_mixer_at(int x, int y, catnip_handle *h, int *pct);
  * Returns -1 when `h` is not a mixer column that is currently drawn. */
 int catnip_lvgl_backend_mixer_pct(catnip_handle h, int y);
 
+/* How many whole lines of the list `h` are on screen at once, or 0 when there
+ * is nothing to measure. Geometry, which is why it is here: a column of lines
+ * moves a page at a time, on fixed boundaries, and only the drawing knows where
+ * those boundaries fall. */
+int catnip_lvgl_backend_page_rows(catnip_handle h);
+
 #ifdef __cplusplus
 }
 #endif

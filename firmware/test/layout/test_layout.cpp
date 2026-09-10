@@ -469,6 +469,7 @@ int main(void)
                                 "i2c 18 19 34 38 41 51 68"};
         lv_obj_t *facts;
         lv_obj_t *first;
+        lv_obj_t *second;
         lv_obj_t *last;
 
         CHECK(info != NULL, "the device page is built");
@@ -478,6 +479,7 @@ int main(void)
         shot("device-page");
         facts = obj("info_list");
         first = obj("info1");
+        second = obj("info2");
         last = obj("info11");
         CHECK(facts && first, "the facts are drawn");
         /* Nothing that acts is on it: the two tiles are behind A now, where
@@ -493,8 +495,16 @@ int main(void)
          * screen now. */
         CHECK(facts && lv_obj_get_height(facts) > CATNIP_SCREEN_H / 2,
               "the facts take the room that is left");
-        CHECK(last == NULL || lv_obj_get_y(last) > lv_obj_get_y(first),
+        CHECK(second && lv_obj_get_y(second) > lv_obj_get_y(first),
               "and they run down it in the order they were given");
+        /* A page, on a fixed boundary: eleven facts do not fit, and the ones
+         * that do not are on the next page rather than below the fold. A window
+         * that slid to follow a cursor would show a different set of lines
+         * every time the page was opened, and nothing on it explains why. */
+        CHECK(last && lv_obj_has_flag(last, LV_OBJ_FLAG_HIDDEN),
+              "the eleventh is on the next page, not under the tenth");
+        CHECK(first && !lv_obj_has_flag(first, LV_OBJ_FLAG_HIDDEN),
+              "and the page starts at the first line, not wherever a cursor is");
         /* And the bar it puts up, drawn over the facts it was asked from. */
         {
             static const char *const kNames[3] = {"Prefs", "Sizes", "Diag"};

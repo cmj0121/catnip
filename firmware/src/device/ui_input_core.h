@@ -69,6 +69,11 @@ typedef struct {
      * the one piece of chrome a finger may press: it is the finger's only route
      * to Cancel, since back and home have no touch. */
     int (*action_at)(void *ud, int x, int y);
+    /* How many whole lines of `list` are on screen at once, or 0 when that
+     * cannot be answered. Geometry, so it is asked of whatever draws - and it
+     * is asked at all because a column of *lines* moves a page at a time and a
+     * page is a number only the drawing knows. */
+    int (*page_rows)(void *ud, catnip_handle list);
     void *ud;
     /* The action bar, when one is up. While it is, A and B are its own and, in
      * the modal shape, so are left and right - and the content underneath keeps

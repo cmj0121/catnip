@@ -212,20 +212,6 @@ int catnip_wifi_scan(catnip_wifi_ap *out, int max)
     int n = WiFi.scanComplete();
     uint32_t now = millis();
 
-    /* TEMPORARY: what the radio is actually answering. */
-    {
-        static int last_n = -99;
-        static uint32_t last_log;
-        if (n != last_n || (uint32_t)(now - last_log) > 2000u) {
-            last_n = n;
-            last_log = now;
-            Serial.printf("[catnip] scan: complete=%d status=%d sleep=%d awake=%d "
-                          "asked=%d answered=%d\n",
-                          n, (int)WiFi.status(), (int)WiFi.getSleep(), 0,
-                          (int)g_scan_asked, (int)g_scan_answered);
-        }
-    }
-
     if (!g_scan_asked || (uint32_t)(now - g_scan_last_ask) > SCAN_ASK_GRACE_MS) {
         g_scan_asked = true;
         g_scan_answered = false;

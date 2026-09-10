@@ -122,6 +122,7 @@ bool g_bare;
 void apply_list_layout(Entry *e);
 void apply_screen_region(Entry *screen);
 int32_t row_slack(Entry *screen);
+int page_rows_of(Entry *e);
 
 Entry *map_find(catnip_handle h)
 {
@@ -754,6 +755,11 @@ int catnip_lvgl_backend_mixer_at(int x, int y, catnip_handle *h, int *pct)
     return 0;
 }
 
+int catnip_lvgl_backend_page_rows(catnip_handle h)
+{
+    return page_rows_of(map_find(h));
+}
+
 int catnip_lvgl_backend_mixer_pct(catnip_handle h, int y)
 {
     Entry *e = mixer_column(h);
@@ -1167,6 +1173,24 @@ void apply_screen_region(Entry *screen)
     set_pad(screen->obj, LV_STYLE_PAD_BOTTOM, below + row_slack(screen));
 }
 
+/* How many whole lines of a list are on screen at once, or 0 when there is
+ * nothing to measure. The same arithmetic the region is cut by, asked the other
+ * way round: there it answers "how much is left over", here "how many fit". */
+int page_rows_of(Entry *e)
+{
+    uint32_t n;
+    int32_t gap, pitch, avail;
+
+    if (!e || e->kind != CATNIP_NODE_LIST) return 0;
+    n = lv_obj_get_child_count(e->obj);
+    if (n == 0) return 0;
+    avail = lv_obj_get_content_height(e->obj);
+    gap = lv_obj_get_style_pad_row(e->obj, 0);
+    pitch = lv_obj_get_height(lv_obj_get_child(e->obj, 0)) + gap;
+    if (pitch <= gap || avail <= 0) return 0;
+    return (int)((avail + gap) / pitch);
+}
+
 /* How much of the region a column of rows cannot use.
  *
  * A half-row peeking past the bottom edge reads as a rendering fault rather
@@ -1234,8 +1258,18 @@ void apply_selection(Entry *e)
      * selected yet means the first page, which is what a grid opens on. */
     bool grid = e->layout == CATNIP_LAYOUT_GRID;
     bool mixer = e->layout == CATNIP_LAYOUT_MIXER;
-    int per = grid ? CATNIP_GRID_PAGE : CATNIP_MIXER_PAGE;
-    int page = ((grid || mixer) && e->selected > 0) ? e->selected / per : 0;
+    /* A column of lines pages too, and on the same fixed boundaries: lines one
+     * to eight, then nine to sixteen. A window that slid to follow a cursor
+     * would show four to eleven, which is a different four lines every time it
+     * is opened - and on a page with no cursor drawn there is nothing to
+     * explain why. Where the boundaries fall is geometry, so it is measured
+     * rather than declared; the grid's and the mixer's are declared because
+     * their shapes are. */
+    bool text = e->layout == CATNIP_LAYOUT_TEXT;
+    int per = grid ? CATNIP_GRID_PAGE : text ? page_rows_of(e) : CATNIP_MIXER_PAGE;
+    int page =
+        ((grid || mixer || text) && per > 0 && e->selected > 0) ? e->selected / per : 0;
+    if (per <= 0) per = 1;
 
     e->sel_dirty = false;
     lv_obj_update_layout(e->obj);
@@ -1243,7 +1277,7 @@ void apply_selection(Entry *e)
         lv_obj_t *child = lv_obj_get_child(e->obj, i);
         bool on = ((int)i == e->selected);
 
-        if (grid || mixer) {
+        if (grid || mixer || text) {
             /* On this page or not drawn at all. Hiding takes a child out of the
              * flex flow as well as out of the picture, so the page that is up
              * fills the region exactly as it would if it were all there was -
