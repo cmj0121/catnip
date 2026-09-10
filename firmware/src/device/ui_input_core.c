@@ -43,6 +43,12 @@ static void post_if_long_event(catnip_ui_input *in, catnip_rt *rt, catnip_button
     catnip_render_post(rt, to, event, catnip_render_selected(rt, to));
 }
 
+/* Whether a column is engaged, for the hint - which is asked by the frame with
+ * no input state in its hand. Published rather than passed because the hint's
+ * question is "what do the four directions do right now", and right now is a
+ * property of the one input pass there is. */
+static bool g_hint_engaged;
+
 /* Whether the ring has anywhere to go either way. It clamps at the ends, so
  * this is a question about where it is in the order and not about how many
  * stops there are - at the last one, right moves nothing, and an arrow lit for
@@ -64,33 +70,53 @@ static void focus_room(const catnip_handle *order, int n, catnip_handle focus, b
     *fwd = at + 1 < n;
 }
 
-unsigned catnip_ui_input_hint(catnip_rt *rt, catnip_handle focus)
+/* Where the ring is, as the one struct both the press and the arrow are asked
+ * about. Written once so the two cannot be asked different questions - which is
+ * the whole reason the meaning table is a function and not a switch in the
+ * input pass. */
+static void where_is(catnip_rt *rt, catnip_handle focus, bool engaged,
+                     catnip_dir_where *w)
 {
     catnip_handle order[CATNIP_UI_MAX_FOCUS];
-    catnip_node_layout layout;
-    unsigned events;
+    int n = catnip_render_focus_order(rt, order, CATNIP_UI_MAX_FOCUS);
+    int shown = 0, total = 0, per, page;
+
+    if (n > CATNIP_UI_MAX_FOCUS) n = CATNIP_UI_MAX_FOCUS;
+    focus_room(order, n, focus, &w->ring_back, &w->ring_fwd);
+    w->layout = catnip_render_layout(rt, focus);
+    w->events = catnip_render_events(rt, focus);
+    w->engaged = engaged && w->layout == CATNIP_LAYOUT_MIXER;
+    w->page_back = false;
+    w->page_fwd = false;
+
+    /* How many pages the shape under the ring has, from the same counter the
+     * bar draws - one derivation, so an arrow cannot be lit for a page the
+     * header says does not exist. It answers in pages for exactly the shapes
+     * that page, which is why nothing here has to know which those are. */
+    per = w->layout == CATNIP_LAYOUT_GRID ? CATNIP_GRID_PAGE : CATNIP_MIXER_PAGE;
+    (void)per;
+    if (catnip_render_counter(rt, focus, &shown, &total) && total > 1) {
+        page = shown; /* already one-based, and already a page for these shapes */
+        w->page_back = page > 1;
+        w->page_fwd = page < total;
+    }
+}
+
+unsigned catnip_ui_input_hint(catnip_rt *rt, catnip_handle focus)
+{
+    catnip_dir_where w;
     unsigned mask = 0;
-    bool back, fwd;
-    int n;
 
     if (!rt) return 0;
-    n = catnip_render_focus_order(rt, order, CATNIP_UI_MAX_FOCUS);
-    if (n > CATNIP_UI_MAX_FOCUS) n = CATNIP_UI_MAX_FOCUS;
-    focus_room(order, n, focus, &back, &fwd);
-    layout = catnip_render_layout(rt, focus);
-    events = catnip_render_events(rt, focus);
+    where_is(rt, focus, g_hint_engaged, &w);
 
-    if (catnip_ui_input_dir(CATNIP_BTN_UP, layout, events, back, fwd) !=
-        CATNIP_DIR_NOTHING)
+    if (catnip_ui_input_dir(CATNIP_BTN_UP, &w) != CATNIP_DIR_NOTHING)
         mask |= CATNIP_HINT_UP;
-    if (catnip_ui_input_dir(CATNIP_BTN_DOWN, layout, events, back, fwd) !=
-        CATNIP_DIR_NOTHING)
+    if (catnip_ui_input_dir(CATNIP_BTN_DOWN, &w) != CATNIP_DIR_NOTHING)
         mask |= CATNIP_HINT_DOWN;
-    if (catnip_ui_input_dir(CATNIP_BTN_LEFT, layout, events, back, fwd) !=
-        CATNIP_DIR_NOTHING)
+    if (catnip_ui_input_dir(CATNIP_BTN_LEFT, &w) != CATNIP_DIR_NOTHING)
         mask |= CATNIP_HINT_LEFT;
-    if (catnip_ui_input_dir(CATNIP_BTN_RIGHT, layout, events, back, fwd) !=
-        CATNIP_DIR_NOTHING)
+    if (catnip_ui_input_dir(CATNIP_BTN_RIGHT, &w) != CATNIP_DIR_NOTHING)
         mask |= CATNIP_HINT_RIGHT;
     return mask;
 }
@@ -155,19 +181,28 @@ int catnip_ui_input_run(catnip_ui_input *in, catnip_rt *rt, const catnip_ui_samp
      * is how the first press after coming back from an app went missing. */
     in->focus = catnip_ui_focus_step(order, n, in->focus, 0);
 
+    /* A column stays taken up only while the ring is still on it and the shape
+     * under it is still a page of values. Both can stop being true without a
+     * press - an app rebuilds, a screen is popped - and a level that outlived
+     * what it was about would send the next up-press into a value nobody is
+     * looking at. */
+    layout = catnip_render_layout(rt, in->focus);
+    events = catnip_render_events(rt, in->focus);
+    if (in->engaged && (in->focus != in->engaged_on || layout != CATNIP_LAYOUT_MIXER))
+        in->engaged = false;
+
     /* What each direction means where the ring is. Asked before the ring moves,
      * because the meaning belongs to the node the press was made on - and asked
      * of ui_input_map.c rather than decided here, so the on-screen hint and this
      * cannot disagree about whether a direction does anything (#80). */
-    layout = catnip_render_layout(rt, in->focus);
-    events = catnip_render_events(rt, in->focus);
     {
-        bool back, fwd;
-        focus_room(order, n, in->focus, &back, &fwd);
-        m_up = catnip_ui_input_dir(CATNIP_BTN_UP, layout, events, back, fwd);
-        m_down = catnip_ui_input_dir(CATNIP_BTN_DOWN, layout, events, back, fwd);
-        m_left = catnip_ui_input_dir(CATNIP_BTN_LEFT, layout, events, back, fwd);
-        m_right = catnip_ui_input_dir(CATNIP_BTN_RIGHT, layout, events, back, fwd);
+        catnip_dir_where w;
+        where_is(rt, in->focus, in->engaged, &w);
+        g_hint_engaged = in->engaged;
+        m_up = catnip_ui_input_dir(CATNIP_BTN_UP, &w);
+        m_down = catnip_ui_input_dir(CATNIP_BTN_DOWN, &w);
+        m_left = catnip_ui_input_dir(CATNIP_BTN_LEFT, &w);
+        m_right = catnip_ui_input_dir(CATNIP_BTN_RIGHT, &w);
     }
 
     /* A carousel does not repeat. Repeat was added for a value with sixty of
@@ -191,7 +226,10 @@ int catnip_ui_input_run(catnip_ui_input *in, catnip_rt *rt, const catnip_ui_samp
         int dir = 0;
         if (step_back && m_left == CATNIP_DIR_FOCUS_BACK) dir -= 1;
         if (step_fwd && m_right == CATNIP_DIR_FOCUS_FWD) dir += 1;
-        if (dir) in->focus = catnip_ui_focus_step(order, n, in->focus, dir);
+        if (dir) {
+            in->focus = catnip_ui_focus_step(order, n, in->focus, dir);
+            in->engaged = false;
+        }
     }
 
     /* A finger dragging over a column sets that column, absolutely. It is the
@@ -203,6 +241,32 @@ int catnip_ui_input_run(catnip_ui_input *in, catnip_rt *rt, const catnip_ui_samp
      * Only once the contact has travelled: a stationary touch is a tap, and a
      * tap on this page selects rather than sets. */
     if (!s->touch_down) {
+        /* A contact that ended without ever becoming a drag is a tap, and a tap
+         * on a page of values takes that column up - the same thing A does,
+         * said with a finger. It has to be noticed here because the tap itself
+         * goes straight from the panel to the app, carrying the column it
+         * landed on; the level is the platform's, and this is the only place
+         * that sees the contact end.
+         *
+         * Twice quickly is `save`, for the same reason two presses of A are:
+         * "and I am done" is a thing a finger has to be able to say too. */
+        if (in->touch_was_down && !in->drag_settled && layout == CATNIP_LAYOUT_MIXER) {
+            bool twice =
+                in->had_tap && (unsigned)(s->now - in->last_tap) < CATNIP_DOUBLE_MS;
+            if (twice && in->engaged) {
+                catnip_render_post(rt, in->focus, "save", CATNIP_INDEX_NONE);
+                in->engaged = false;
+                in->had_tap = false;
+            } else if (!in->engaged) {
+                in->engaged = true;
+                in->engaged_on = in->focus;
+                in->had_tap = true;
+                in->last_tap = s->now;
+                catnip_render_post(rt, in->focus, "engage",
+                                   catnip_render_selected(rt, in->focus));
+            }
+        }
+        in->touch_was_down = false;
         in->drag_col = CATNIP_HANDLE_NONE;
         in->drag_settled = false;
     } else if (!in->drag_settled && swipe != CATNIP_SWIPE_NONE) {
@@ -217,6 +281,7 @@ int catnip_ui_input_run(catnip_ui_input *in, catnip_rt *rt, const catnip_ui_samp
                 in->drag_col = col;
         }
     }
+    if (s->touch_down) in->touch_was_down = true;
     if (in->drag_col != CATNIP_HANDLE_NONE && env && env->mixer_pct) {
         int pct = env->mixer_pct(env->ud, in->drag_col, s->touch_y);
         if (pct >= 0) {
@@ -250,8 +315,69 @@ int catnip_ui_input_run(catnip_ui_input *in, catnip_rt *rt, const catnip_ui_samp
     if (m_down == CATNIP_DIR_LOWER && dpad_down && !dragged)
         catnip_render_post(rt, in->focus, "lower", CATNIP_INDEX_NONE);
 
-    if (a_press == CATNIP_PRESS_SHORT) post_if_event(in, rt, CATNIP_BTN_A);
-    if (c_press == CATNIP_PRESS_SHORT) post_if_event(in, rt, CATNIP_BTN_CENTRE);
+    /* A page is a screenful of the selection, said in the vocabulary that
+     * already exists: the selection is what the page is derived from, so moving
+     * it by a page *is* the page turning. A new event would have been a second
+     * way to say a thing prev and next already say, and every app that had one
+     * would have had to answer both. The app's own clamp at the ends is what
+     * stops a short last page walking off it. */
+    if (m_up == CATNIP_DIR_PAGE_BACK && dpad_up)
+        for (int k = 0; k < CATNIP_MIXER_PAGE; k++)
+            catnip_render_post(rt, in->focus, "prev", CATNIP_INDEX_NONE);
+    if (m_down == CATNIP_DIR_PAGE_FWD && dpad_down)
+        for (int k = 0; k < CATNIP_MIXER_PAGE; k++)
+            catnip_render_post(rt, in->focus, "next", CATNIP_INDEX_NONE);
+
+    /* A on a page of values, which is the one shape where A has two things to
+     * mean and therefore somewhere for a double press to fit.
+     *
+     * Unfocused it takes the column up and posts `engage`, which is the app's
+     * chance to remember what the column held - because B is going to be able
+     * to put it back. Focused it posts `click`, which is the same "activate"
+     * A means everywhere, and lets go. Twice in quick succession it posts
+     * `save`: keep all of it and leave, which the app does by leaving.
+     *
+     * Nothing about levels reaches an app that is not a page of values, and an
+     * app with no `save` handler simply has no double press. */
+    /* Anything else at all closes the window a double press lives in. "Twice"
+     * means twice *with nothing between*, which is what a person doing it means
+     * by it - and it is what keeps the ordinary sequence readable: taking a
+     * column up, stepping it, and pressing A to keep it is three presses of
+     * which two are A, and without this it would be a double press with a
+     * joystick push hidden in the middle of it. */
+    if (dpad_up || dpad_down || step_back || step_fwd || dragged) {
+        in->had_a = false;
+        in->had_tap = false;
+    }
+
+    if (a_press == CATNIP_PRESS_SHORT || c_press == CATNIP_PRESS_SHORT) {
+        bool mixer = layout == CATNIP_LAYOUT_MIXER;
+        bool twice = in->had_a && (unsigned)(s->now - in->last_a) < CATNIP_DOUBLE_MS;
+
+        if (mixer && in->engaged && twice) {
+            catnip_render_post(rt, in->focus, "save", CATNIP_INDEX_NONE);
+            in->engaged = false;
+            in->had_a = false;
+        } else if (mixer && !in->engaged) {
+            in->engaged = true;
+            in->engaged_on = in->focus;
+            /* Only an engage arms the second press. A commit does not, so
+             * keeping one column and then taking up the next is two presses of
+             * A that are never mistaken for one gesture. */
+            in->had_a = true;
+            in->last_a = s->now;
+            catnip_render_post(rt, in->focus, "engage",
+                               catnip_render_selected(rt, in->focus));
+        } else if (mixer) {
+            catnip_render_post(rt, in->focus, "click", CATNIP_INDEX_NONE);
+            in->engaged = false;
+            in->had_a = false;
+        } else {
+            in->had_a = false;
+            if (a_press == CATNIP_PRESS_SHORT) post_if_event(in, rt, CATNIP_BTN_A);
+            if (c_press == CATNIP_PRESS_SHORT) post_if_event(in, rt, CATNIP_BTN_CENTRE);
+        }
+    }
     if (a_press == CATNIP_PRESS_LONG) post_if_long_event(in, rt, CATNIP_BTN_A);
     if (c_press == CATNIP_PRESS_LONG) post_if_long_event(in, rt, CATNIP_BTN_CENTRE);
 
@@ -266,7 +392,19 @@ int catnip_ui_input_run(catnip_ui_input *in, catnip_rt *rt, const catnip_ui_samp
      * caller reads the answer afterwards. An app with no on_back posts into
      * nothing and claims nothing, which is how "B leaves it" stays the default. */
     if (b_press == CATNIP_PRESS_SHORT) {
-        catnip_handle screen = catnip_render_visible_screen(rt);
+        catnip_handle screen;
+
+        /* B one level down: it puts this column back and lets go, and the page
+         * stays. Cancel means the same thing it means everywhere - undo the
+         * thing you are on - and on a column the thing you are on is a value.
+         * It is why the level costs nothing to learn, and why nothing on the
+         * screen has to say which level you are at. */
+        if (in->engaged) {
+            catnip_render_post(rt, in->focus, "cancel", CATNIP_INDEX_NONE);
+            in->engaged = false;
+            return CATNIP_UI_GESTURE_NONE;
+        }
+        screen = catnip_render_visible_screen(rt);
         if (screen != CATNIP_HANDLE_NONE)
             catnip_render_post_claimable(rt, screen, "back", CATNIP_INDEX_NONE);
         return CATNIP_UI_GESTURE_BACK;

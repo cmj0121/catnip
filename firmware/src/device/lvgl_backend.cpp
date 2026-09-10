@@ -1128,7 +1128,9 @@ void apply_selection(Entry *e)
      * separately would be a second one to keep in step with it. Nothing is
      * selected yet means the first page, which is what a grid opens on. */
     bool grid = e->layout == CATNIP_LAYOUT_GRID;
-    int page = (grid && e->selected > 0) ? e->selected / CATNIP_GRID_PAGE : 0;
+    bool mixer = e->layout == CATNIP_LAYOUT_MIXER;
+    int per = grid ? CATNIP_GRID_PAGE : CATNIP_MIXER_PAGE;
+    int page = ((grid || mixer) && e->selected > 0) ? e->selected / per : 0;
 
     e->sel_dirty = false;
     lv_obj_update_layout(e->obj);
@@ -1137,13 +1139,12 @@ void apply_selection(Entry *e)
         lv_obj_t *child = lv_obj_get_child(e->obj, i);
         bool on = ((int)i == e->selected);
 
-        if (grid) {
-            /* On this page or not drawn at all. Hiding takes a cell out of the
-             * flex flow as well as out of the picture, so the six that are up
-             * fill the region exactly as they would if they were all there was
-             * - which is what makes a page a page rather than a viewport. */
-            if ((int)i / CATNIP_GRID_PAGE == page)
-                lv_obj_remove_flag(child, LV_OBJ_FLAG_HIDDEN);
+        if (grid || mixer) {
+            /* On this page or not drawn at all. Hiding takes a child out of the
+             * flex flow as well as out of the picture, so the page that is up
+             * fills the region exactly as it would if it were all there was -
+             * which is what makes a page a page rather than a viewport. */
+            if ((int)i / per == page) lv_obj_remove_flag(child, LV_OBJ_FLAG_HIDDEN);
             else lv_obj_add_flag(child, LV_OBJ_FLAG_HIDDEN);
 
             if (on) lv_obj_add_state(child, LV_STATE_CHECKED);

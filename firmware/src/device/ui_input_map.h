@@ -77,19 +77,39 @@ typedef enum {
     CATNIP_DIR_RING_FWD,
     CATNIP_DIR_LEAVE_UP,   /* off the ring: the grid of every app (#71) */
     CATNIP_DIR_LEAVE_DOWN, /* off the ring: what this device is */
+    CATNIP_DIR_PAGE_BACK,  /* a paged shape: the screenful before this one */
+    CATNIP_DIR_PAGE_FWD,
 } catnip_dir_meaning;
 
-/* `layout` is the focused node's and `events` its CATNIP_EV_* bits; `back` and
- * `fwd` say whether the ring has anywhere to go in each direction, which is a
- * question about where it is in the order rather than about how many stops
- * there are. The cursor clamps at the ends, so at the last stop `fwd` is false
- * and right is dimmed - and that is the honest answer, where "there is more
- * than one focusable" would light an arrow that moves nothing.
+/* Where the ring is, as everything that changes what a direction means there.
  *
- * Four arguments and no tree, so it stays a pure function a host test can drive
- * by stating a situation. */
-catnip_dir_meaning catnip_ui_input_dir(catnip_button button, catnip_node_layout layout,
-                                       unsigned events, bool back, bool fwd);
+ * A struct rather than a longer argument list because the list had grown to the
+ * point where a caller could swap two bools and still compile. It is still a
+ * plain statement of a situation with no tree in it, which is what lets a host
+ * test hold the convention still by writing one down. */
+typedef struct {
+    catnip_node_layout layout; /* the focused node's */
+    unsigned events;           /* its CATNIP_EV_* bits */
+    /* Whether the focus ring has anywhere to go each way. A question about
+     * where it is in the order rather than about how many stops there are: the
+     * cursor clamps, so at the last stop `ring_fwd` is false and right is
+     * dimmed - the honest answer, where "there is more than one focusable"
+     * would light an arrow that moves nothing. */
+    bool ring_back, ring_fwd;
+    /* Whether a mixer column has been taken up. It is not a mode: A selects,
+     * and on a page of values what A selects is a column - so this is one level
+     * further down the same two words, and B is what lets go of it. What it
+     * buys is that left and right go dead while a value is being changed, which
+     * is the one place in the device where a sideways push that landed on the
+     * neighbour would be silently wrong. */
+    bool engaged;
+    /* Whether a paged shape has another screenful either way. */
+    bool page_back, page_fwd;
+} catnip_dir_where;
+
+/* What `button` means at `where`. Pure, and with no tree in it, so a host test
+ * drives it by writing a situation down. */
+catnip_dir_meaning catnip_ui_input_dir(catnip_button button, const catnip_dir_where *w);
 
 /* The handle to focus after moving by `dir` (-1, 0 or +1) through `order`, the
  * live focusable handles the renderer hands back in tree order.

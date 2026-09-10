@@ -1094,6 +1094,13 @@ int catnip_render_counter(catnip_rt *rt, catnip_handle focus, int *n, int *total
         if (total) *total = (rows + CATNIP_GRID_PAGE - 1) / CATNIP_GRID_PAGE;
         return 1;
     }
+    /* And so does a page of values, for the same reason: the columns are side
+     * by side and a user reads them as a screenful, not as an eighth of one. */
+    if (list->layout == CATNIP_LAYOUT_MIXER) {
+        if (n) *n = list->selected / CATNIP_MIXER_PAGE + 1;
+        if (total) *total = (rows + CATNIP_MIXER_PAGE - 1) / CATNIP_MIXER_PAGE;
+        return 1;
+    }
     if (n) *n = list->selected + 1; /* one-based for display, converted once */
     if (total) *total = rows;
     return 1;

@@ -23,11 +23,17 @@ static const char CATNIP_SETTINGS_LUA[] =
     "function __catnip_settings_build(names, fills, blocks, labels, pos, ranges)\n"
     "  local rows = {}\n"
     "  local list\n"
-    /* One state, not two. A page of settings used to require A to make a column
-     * live before up and down meant anything, because arriving here by pushing
-     * down should not put a brightness under the joystick - but B discards now,
-     * so a press that can be taken back needs no guarding against. */
+    /* Two levels, and they are not two modes: A selects, and on a page of
+     * values what A selects is a column. `held` is what that column was when it
+     * was taken up, which is the only thing B needs to be able to put it back -
+     * and being able to put it back is what lets B mean cancel here exactly as
+     * it means cancel everywhere else.
+     *
+     * The platform owns which level you are at, because that is what decides
+     * what a *direction* means and the arrows in the corner have to agree. What
+     * arrives here is four events: engage, click, cancel, save. */
     "  local sel = 1\n"
+    "  local held = nil\n"
     /* A column is either a ladder of named rungs or a continuous range, and
      * `pos[i]` holds whichever that column deals in - the rung, or the value.
      * These three turn one into the other so nothing below has to ask twice. */
@@ -103,17 +109,35 @@ static const char CATNIP_SETTINGS_LUA[] =
     "      if sel < #rows then sel = sel + 1 end\n"
     "      paint()\n"
     "    end,\n"
-    /* Short A confirms the page: keep what is on it and leave. There is no
-     * "are you sure" because the page already shows exactly what it is about to
-     * keep, and a question whose answer is on the screen is worth not asking.
-     *
-     * A *tap* carries the column it landed on and only moves the ring there.
-     * The two are the same event and they are not the same act: a finger names
-     * a column, where a button press has no column to name and can therefore
-     * only mean the page. Making a tap confirm as well would leave no way to
-     * choose a column by touch without also leaving. */
+    /* A tap carries the column it landed on and moves the ring there; the
+     * platform then takes that column up, exactly as it does for a press of A,
+     * so a finger and a button say the same thing. */
     "    on_click = function(self, i)\n"
     "      if i then sel = i; paint(); return end\n"
+    /* Short A on a column that is taken up: keep it. Nothing is written here
+     * because a value is applied as it is stepped - what A does is let go of
+     * the undo, which is the whole of what "keep" can mean on a page where the
+     * change already happened. */
+    "      held = nil\n"
+    "    end,\n"
+    /* The column was taken up. Remember what it held, so B can put it back. */
+    "    on_engage = function(self, i)\n"
+    "      if i then sel = i end\n"
+    "      held = pos[sel]\n"
+    "      paint()\n"
+    "    end,\n"
+    /* B on a column: put it back, and it is applied on the way back exactly as
+     * it was applied on the way out - a brightness that reverted in a number
+     * and not on the panel would be a lie a user is looking straight at. */
+    "    on_cancel = function(self)\n"
+    "      if held then put(sel, held); held = nil; paint() end\n"
+    "    end,\n"
+    /* Two presses of A: keep all of it and leave. It is the one gesture in the
+     * device with a shape of its own and it exists here, because this is the
+     * only page where you may have set three things and would otherwise have to
+     * walk back out past all three. */
+    "    on_save = function(self)\n"
+    "      held = nil\n"
     "      __catnip_settings_done(1)\n"
     "    end,\n"
     /* Up and down are the value of whichever column the ring is on. */

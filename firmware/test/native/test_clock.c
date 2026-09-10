@@ -169,6 +169,20 @@ static void advance(unsigned long ms)
     catnip_render(g_rt, &BE);
 }
 
+static void post_at(const char *object, const char *event, int index)
+{
+    catnip_handle h = obj_handle(object);
+
+    if (h == CATNIP_HANDLE_NONE) {
+        printf("  FAIL - no live object named '%s'\n", object);
+        failures++;
+        return;
+    }
+    catnip_render_post(g_rt, h, event, index);
+    catnip_render_drain(g_rt);
+    catnip_render(g_rt, &BE);
+}
+
 static void post(const char *object, const char *event)
 {
     catnip_handle h = obj_handle(object);
@@ -343,13 +357,25 @@ int main(void)
               "and no letter bracketed, because none of them is today");
     CHECK_STR(text_of("face_src"), "press A to set it", "it says what to press");
 
-    printf("setting it writes the RTC\n");
+    printf("setting it is two levels, and B climbs back out of both\n");
     press_a_on_screen();
     CHECK(live("setter"), "A still opens the setter with no clock to read");
+    /* The events the input pass posts, in the order it posts them: A takes the
+     * column up, up and down are then its value, and B puts it back. */
+    post_at("setter", "engage", 0);
+    post("setter", "raise");
+    post("setter", "cancel");
+    CHECK(g_rtc_set_to < 0, "B on a column writes nothing at all");
+
+    post_at("setter", "engage", 0);
     post("setter", "raise");
     post("setter", "click");
-    CHECK(g_rtc_set_to > 0, "A on the setter writes a time");
-    CHECK(catnip_ui_depth(g_rt) == 1, "and comes back to the face rather than leaving");
+    CHECK(g_rtc_set_to > 0, "A on a column writes the time");
+    CHECK(catnip_ui_depth(g_rt) == 2, "and stays on the setter");
+
+    post("setter", "save");
+    CHECK(catnip_ui_depth(g_rt) == 1,
+          "two presses of A write it and come back to the face");
 
     free(app);
     catnip_sched_free(g_sched);

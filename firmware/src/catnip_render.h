@@ -184,6 +184,14 @@ typedef enum {
 #define CATNIP_GRID_ROWS 2
 #define CATNIP_GRID_PAGE (CATNIP_GRID_COLS * CATNIP_GRID_ROWS)
 
+/* And how many columns a page of values shows at once. Five is what stays
+ * readable across 320 px: a column narrower than about sixty leaves no room for
+ * the number printed above it, and a number that has to be guessed at is not a
+ * setting being shown. The clock's five fields are one page and the preference
+ * page's four are one page, which is the shape both were designed at; a sixth
+ * turns one rather than squeezing five. */
+#define CATNIP_MIXER_PAGE 5
+
 enum {
     /* Set on the kinds that can take input - button and list - unless the node
      * is hidden or disabled. The backend builds its input group out of these

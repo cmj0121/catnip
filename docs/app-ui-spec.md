@@ -833,11 +833,11 @@ on another:
 
 | #   | Change                                                                        | Where                                  |
 | --- | ----------------------------------------------------------------------------- | -------------------------------------- |
-| 1   | The grid pages instead of scrolling; three columns, fixed                     | `catnip_app_grid.c`, the grid layout   |
-| 2   | The list region is cut to a whole number of rows                              | the frame's region maths               |
-| 3   | `body` 14 → 16, `title` 16 → 20                                               | `lvgl_backend.cpp` role → font         |
-| 4   | The setting screen: paged, two levels of focus, double A                      | the preference page and the input pass |
-| 5   | The hint reserves its corner on lists, floats elsewhere, and rides on the bar | the frame                              |
+| 1   | ~~The grid pages instead of scrolling; three columns, fixed~~ — built         | `catnip_app_grid.c`, the grid layout   |
+| 2   | ~~The list region is cut to a whole number of rows~~ — built                  | the frame's region maths               |
+| 3   | ~~`body` 14 → 16, `title` 16 → 20~~ — built                                   | `lvgl_backend.cpp` role → font         |
+| 4   | ~~The setting screen: paged, two levels of focus, double A~~ — built          | the preference page and the input pass |
+| 5   | The hint reserves its corner where content reaches it — built; the bar is not | the frame                              |
 | 6   | The action bar: the two-icon and three-icon shapes                            | new                                    |
 | 7   | ~~The clock becomes three screens~~ — built                                   | `apps/clock/main.lua`, `manifest.json` |
 

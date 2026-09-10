@@ -188,17 +188,39 @@ local function commit()
   paint_face()
 end
 
+-- What the column held when it was taken up, which is the only thing B needs to
+-- be able to put it back.
+local held = nil
+
 setter = ui.list{ id = "setter", layout = "mixer",
-  on_prev = function() if sel > 1 then sel = sel - 1 end paint_setter() end,
-  on_next = function() if sel < #cols then sel = sel + 1 end paint_setter() end,
-  -- Short A is the whole confirmation. There is no "are you sure": the page
-  -- already shows exactly what it is about to write, and a question whose
-  -- answer is on the screen is a question worth not asking.
-  --
-  -- It writes and pops rather than writing and exiting. The app has a screen
-  -- under this one now, and leaving the device from the middle of it would skip
-  -- the one screen that shows what was just set.
-  on_click = function() commit(); ui.pop() end,
+  on_prev = function() if sel > 1 then sel = sel - 1 end held = nil paint_setter() end,
+  on_next = function() if sel < #cols then sel = sel + 1 end held = nil paint_setter() end,
+  -- A tap names the column it landed on; the platform then takes that column
+  -- up, exactly as it does for a press of A.
+  -- A on a column that is taken up writes the clock. There is no "are you
+  -- sure": the page already shows exactly what it is about to write, and a
+  -- question whose answer is on the screen is a question worth not asking.
+  on_click = function(self, i)
+    if i then sel = i; held = nil; paint_setter(); return end
+    commit(); held = nil
+  end,
+  on_engage = function(self, i)
+    if i then sel = i end
+    held = at[sel]
+    paint_setter()
+  end,
+  -- B on a column puts that column back and lets go. The clock is not written
+  -- on the way back, because it was not written on the way out either - the
+  -- columns are a number being built, and `commit` is the only thing that ever
+  -- reaches the RTC.
+  on_cancel = function()
+    if held then at[sel] = held; held = nil; paint_setter() end
+  end,
+  -- Two presses of A: write it and leave. It pops rather than exiting the app,
+  -- because there is a face under this screen now and leaving the device from
+  -- the middle of the setter would skip the one screen that shows what was
+  -- just set.
+  on_save = function() commit(); held = nil; ui.pop() end,
   on_raise = function() put(sel, at[sel] + 1) end,
   on_lower = function() put(sel, at[sel] - 1) end }
 setter:set_children(cols)

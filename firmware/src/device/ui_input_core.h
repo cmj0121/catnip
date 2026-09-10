@@ -87,7 +87,34 @@ typedef struct {
      * left-swipe changed four settings at once. */
     catnip_handle drag_col;
     bool drag_settled;
+    /* Whether the focused column has been taken up - the second level of a page
+     * of values. Kept here rather than in the app because it is what a
+     * *direction* means, and what a direction means is the platform's: the same
+     * function answers the press and lights the arrow, and an app that owned
+     * this would be able to make the two disagree.
+     *
+     * Dropped the moment the ring moves or the shape under it stops being a
+     * page of values, so it can never survive the column it was about. */
+    bool engaged;
+    catnip_handle engaged_on;
+    /* When A was last released short, for telling a second press from a first.
+     * Double A is the only gesture in the device with a shape of its own, and
+     * it exists on one screen: a page of values, where "and I am done" is a
+     * distinct thing to say because you may have set three of them. */
+    unsigned last_a;
+    bool had_a;
+    /* The same for a finger, which says it by tapping twice. */
+    unsigned last_tap;
+    bool had_tap;
+    bool touch_was_down;
 } catnip_ui_input;
+
+/* How close two short presses of A have to be to be one double press. Long
+ * enough that a deliberate second press lands inside it, short enough that
+ * committing one column and then committing another is not read as "and I am
+ * done" - which is the mistake this window is guarding, since both are things a
+ * user does on this page. */
+#define CATNIP_DOUBLE_MS 400u
 
 /* One pass. Posts prev / next / click / options to the focused node, moves the
  * focus cursor, and returns one of the CATNIP_UI_GESTURE_* values in

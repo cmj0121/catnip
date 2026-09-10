@@ -348,31 +348,54 @@ int main(void)
           "A on the left button opens the preference page");
     CHECK(title_is("Preference"), "and the bar says that too");
 
-    /* ---- a value is applied as it is stepped, and B puts it back -------- */
+    /* ---- two levels: the page, then one column of it -------------------- */
+    /* A selects, and on a page of values what A selects is a column. So up and
+     * down are the page until a column has been taken up, and the value only
+     * afterwards - which is the one thing that stops a page arrived at by
+     * pushing down putting a brightness under the joystick. */
     screen_was = cfg.screen_brightness;
     g_board.applies = 0;
     g_board.saves = 0;
     press(CATNIP_BTN_DOWN);
-    CHECK(cfg.screen_brightness < screen_was, "down steps the column the ring is on");
+    CHECK(cfg.screen_brightness == screen_was,
+          "down does nothing until a column has been taken up");
+
+    press(CATNIP_BTN_A);
+    press(CATNIP_BTN_DOWN);
+    CHECK(cfg.screen_brightness < screen_was, "A takes the column up and down steps it");
     CHECK(g_board.applies > 0, "and it is applied at once, so it can be seen");
     CHECK(g_board.saves == 0, "nothing is written yet");
 
+    /* B one level down: put this column back, and stay. Cancel means the same
+     * thing it means everywhere - undo the thing you are on - and the thing you
+     * are on is a value. */
     press(CATNIP_BTN_B);
     CHECK(cfg.screen_brightness == screen_was, "B puts back what was there");
-    CHECK(g_board.saves == 0, "and writes nothing at all");
+    CHECK(catnip_pages_current(g_pages) == CATNIP_PAGE_PREF, "and stays on the page");
+
+    press(CATNIP_BTN_B);
+    CHECK(g_board.saves == 0, "and a second B writes nothing at all");
     CHECK(catnip_pages_current(g_pages) == CATNIP_PAGE_INFO,
           "leaving returns to the page it was opened from, not to the cat");
 
-    /* ---- A keeps it, and writes once ----------------------------------- */
+    /* ---- A keeps a column; two of them keep the page and leave ---------- */
     press(CATNIP_BTN_RIGHT);
     press(CATNIP_BTN_A);
     CHECK(catnip_pages_current(g_pages) == CATNIP_PAGE_PREF, "back on the page");
+    press(CATNIP_BTN_A);
     press(CATNIP_BTN_DOWN);
     CHECK(g_board.saves == 0, "a step still writes nothing");
     press(CATNIP_BTN_A);
-    CHECK(cfg.screen_brightness < screen_was, "A keeps the change");
-    CHECK(g_board.saves == 1, "and writes it exactly once");
-    CHECK(catnip_pages_current(g_pages) == CATNIP_PAGE_INFO, "and returns to the hub");
+    CHECK(cfg.screen_brightness < screen_was, "A keeps the column");
+    CHECK(g_board.saves == 0, "and still writes nothing, because the page is still up");
+    CHECK(catnip_pages_current(g_pages) == CATNIP_PAGE_PREF, "and does not leave");
+
+    /* Twice, with nothing between: keep all of it and go. The step above is
+     * what makes the pair before it two presses rather than one gesture. */
+    press(CATNIP_BTN_A);
+    press(CATNIP_BTN_A);
+    CHECK(g_board.saves == 1, "two presses of A write it exactly once");
+    CHECK(catnip_pages_current(g_pages) == CATNIP_PAGE_INFO, "and return to the hub");
 
     /* ---- long B is home from anywhere ---------------------------------- */
     hold(CATNIP_BTN_B);
@@ -384,6 +407,7 @@ int main(void)
     press(CATNIP_BTN_RIGHT);
     press(CATNIP_BTN_A);
     g_board.saves = 0;
+    press(CATNIP_BTN_A);
     press(CATNIP_BTN_DOWN);
     hold(CATNIP_BTN_B);
     CHECK(catnip_pages_current(g_pages) == CATNIP_PAGE_HOME,
