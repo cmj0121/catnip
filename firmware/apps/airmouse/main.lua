@@ -28,9 +28,29 @@
 -- ---------------------------------------------------------------------------
 
 local FRAME_MS = 20 -- 50 reports a second, what a mouse is expected to produce
-local PX_PER_DEG = 10 -- cursor pixels per degree turned
 local RATE_DEADZONE = 3 -- dps. Under this it is noise, not aim.
 local MAX_STEP = 64 -- the most one report may carry (HID allows 127)
+
+-- Cursor pixels per degree turned, and the two are NOT the same number.
+--
+-- A single gain was the first version and it felt wrong in a specific way:
+-- left and right were sluggish next to up and down. That is not a tuning
+-- accident, it is two things multiplying:
+--
+--   The wrist is not symmetric. Flexion and extension - the up-and-down one -
+--   has something like 150 degrees of comfortable travel; radial and ulnar
+--   deviation, the side-to-side one, has about 50. The same wholehearted
+--   gesture produces roughly a third of the angle across as it does up.
+--
+--   And the screen is wide. A 16:9 display is about 1.8 times as many pixels
+--   across as down, so a given angle covers proportionally less of it.
+--
+-- The two compound, and a single gain makes the user pay for both. Pixels per
+-- degree is therefore per axis, and the horizontal one is larger so that the
+-- same effort covers the same *fraction of the screen* either way - which is
+-- what "as sensitive" actually means to a hand.
+local PX_PER_DEG_X = 20
+local PX_PER_DEG_Y = 10
 
 -- How sure of the grip the app has to be before it changes its mind about it.
 -- Gravity is a whole g, so half of one is well clear of any posture that is
@@ -79,10 +99,10 @@ end
 -- edge of the deadzone rather than from zero, so the first movement past it is
 -- one pixel and not thirty - the difference between a cursor you can aim and
 -- one that jumps the moment you are not perfectly still.
-local function step(rate)
+local function step(rate, px_per_deg)
   if rate > -RATE_DEADZONE and rate < RATE_DEADZONE then return 0 end
   local past = rate > 0 and (rate - RATE_DEADZONE) or (rate + RATE_DEADZONE)
-  local s = past * (FRAME_MS / 1000) * PX_PER_DEG
+  local s = past * (FRAME_MS / 1000) * px_per_deg
   if s > MAX_STEP then s = MAX_STEP end
   if s < -MAX_STEP then s = -MAX_STEP end
   return round(s)
@@ -116,12 +136,13 @@ end
 -- the part's Y axis and raising and lowering the tip (pitch) on its Z axis. The
 -- cursor follows the tip: point up and it goes up, swing left and it goes left.
 --
--- The signs are derived rather than tuned. Gyroscopes are right-handed about
--- each axis, and imu_map.c records which part axis lies along which screen edge,
--- so: with the glass to the right, swinging the tip right reads positive on gy,
--- which is a cursor step to the right; raising the tip reads positive on gz,
--- which is a step *up* the screen and therefore a negative dy, because screen y
--- counts downward. Mirror both for the other grip.
+-- The horizontal sign was derived and held up on the device; the vertical one
+-- was derived and was WRONG, and raising the tip drove the cursor down. It is
+-- now what a hand actually produced rather than what the right-hand rule was
+-- argued into, which is the only standing this kind of sign can have: the chain
+-- runs through the part's mounting, imu_map's frame, the panel rotation and the
+-- direction screen y counts, and being right about three of those four still
+-- gives a cursor that goes the wrong way. Mirrored for the other grip.
 --
 -- Global so the host test can drive it directly; everything else in this file
 -- is a radio or a clock.
@@ -130,8 +151,8 @@ function cursor_step(gy, gz, flipped)
   -- catnip_hal.h), so this is a real case, not a defensive one.
   if not gy or not gz then return 0, 0 end
   local across = flipped and -gy or gy
-  local down = flipped and gz or -gz
-  return step(across), step(down)
+  local down = flipped and -gz or gz
+  return step(across, PX_PER_DEG_X), step(down, PX_PER_DEG_Y)
 end
 
 -- The lift, as a state machine over the largest rate on any axis. Global for

@@ -244,10 +244,23 @@ int main(void)
     CHECK(dx > 0 && dy == 0, "swing it right, the cursor goes right");
     cursor(-60.0, 0.0, 0, &dx, &dy);
     CHECK(dx < 0 && dy == 0, "swing it left, the cursor goes left");
-    cursor(0.0, 60.0, 0, &dx, &dy);
-    CHECK(dy < 0 && dx == 0, "raise the tip, the cursor goes up");
+    /* The tip rising reads NEGATIVE on gz on this board. That was derived the
+     * other way round and was wrong on the device - the chain runs through the
+     * part's mounting, imu_map's frame, the panel rotation and the direction
+     * screen y counts, and being right about three of those four still gives a
+     * cursor that goes the wrong way. This is the measurement. */
     cursor(0.0, -60.0, 0, &dx, &dy);
+    CHECK(dy < 0 && dx == 0, "raise the tip, the cursor goes up");
+    cursor(0.0, 60.0, 0, &dx, &dy);
     CHECK(dy > 0 && dx == 0, "lower the tip, the cursor goes down");
+
+    /* Across must cover more ground than down for the same rate. The wrist has
+     * roughly a third the travel side to side that it has up and down, and a
+     * 16:9 screen is 1.8 times wider than it is tall; a single gain makes the
+     * user pay for both, which is exactly how it felt. */
+    cursor(60.0, 60.0, 0, &dx, &dy);
+    CHECK(dx > 0 && dy > 0, "both axes still move in their own direction");
+    CHECK(dx > dy, "and the same rate covers more ground across than down");
 
     printf("holding it the other way round mirrors both, and nothing else\n");
     /* The two grips are exact mirrors. If only one axis flipped, one of the
