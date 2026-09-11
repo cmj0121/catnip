@@ -145,8 +145,81 @@ Home 就是那隻**貓** —— mascot，每個手勢都能回到的唯一畫面
 
 **badge** 是一個數字,而數字長不成一個句子:`badge = 3` 是 cell 角落一個小圓點。
 **沒有不等於零** —— 沒 badge 的 cell 是還沒被數過,顯示 `0` 的 cell 是數過了、結果
-是空的。缺 `icon` 會退回 mascot;grid **從左上開始排**,所以不管這頁有四個還是六
-個,第一個 app 永遠在左上角那格。
+是空的。缺 `icon` 會退回中性的 **placeholder** 字形 —— 不是 mascot,因為 mascot 的
+意思是 _home_,不能同時又是 _某個 app_;grid **從左上開始排**,所以不管這頁有四個
+還是六個,第一個 app 永遠在左上角那格。
+
+## 內建的 app
+
+韌體內建四個 app,所以一台插槽空著的 MeowKit 開機後仍然有東西可用。它們是**普通的
+Lua app** —— 一樣的 `ui.*`、一樣的 `manifest.json`,沒有私有 API、沒有特權 —— 這正是
+重點:如果內建 app 需要你的 app 拿不到的東西,那這個平台就是在對它提供的能力說謊。
+它們排在前面、卡片上的 app 排在後面,所以卡片被拔掉時,那些永遠都在的 app 位置不會變。
+
+(卡片上同 `id` 的 app **應該**要蓋過內建的 —— 卡片要贏。這條規則還沒寫:目前兩個
+都會被列出來。見 [#51](https://github.com/cmj0121/catnip/issues/51)。)
+
+它們都從 home 進去,而 home 就是那隻貓:
+
+<img src="docs/assets/screens/launcher.png" alt="Launcher 的 landing page:Catnip mascot" width="320">
+
+底下每一張畫面都是**真正 renderer 自己畫出來的** —— 跟裝置上跑的是同一套 LVGL
+backend,由 host layout test 畫出、用 `CATNIP_SHOTS=<dir> .build/native/test_layout`
+寫成檔案。它們是這個 repo 裡程式碼的照片,不是 mockup;要更新它們是重跑一次 build,
+而不是重拍一張照。
+
+### File Browser
+
+<img src="docs/assets/screens/filebrowser.png" alt="File Browser:SD 卡上的資料夾與檔案列表" width="320">
+
+卡片的內容,做成一列一列可以走的 row。一個 row 是一個 icon 加一個名字;**路徑放在
+header**,因為一整排名字正是那種說不出自己在哪裡的形狀。**A** 打開資料夾或檢視檔案,
+**B** 往上一層,長按 **A** 列出 manifest 為那一列宣告的動作 —— 刪除會先問,而且問句
+裡會寫出檔名。
+
+它是 `fs.*` 當初就是為了它而做的 app,也是證明「卡片 app 和內建 app 是同一種東西」的
+那一個。`Reset card` 有宣告但還沒接上:在格式化做完之前,`fs.reset()` 回答的是
+_not available_([#46](https://github.com/cmj0121/catnip/issues/46))。
+
+### Clock
+
+<img src="docs/assets/screens/clock-face.png" alt="Clock:日期、時間、星期列,以及這個時間是哪裡來的" width="320">
+
+日期在角落,時間放到面板容得下的最大,星期是七個字母、今天那個被挑出來 —— 然後在最
+下面,是**這個時間從哪裡來**:`NTP` 加上最後一次同步的時間,或者什麼都沒有,代表這
+個時鐘至今只被一根拇指設定過。一個沒辦法告訴你它是哪一種的時鐘,遲早會在不該被相信
+的時候被相信。
+
+它用 `frame: "bare"` 畫面,並宣告 `glance: "time"`,所以 carousel 不用打開它就能顯示
+它的錶面。用手設定時間在 **A** 後面。沒設定過的時鐘顯示 `--:--`,而不是一個看起來很
+合理的謊。
+
+### Scanner
+
+<img src="docs/assets/screens/scanner-grid.png" alt="Scanner:各種無線電的 grid,WiFi 與 BLE 帶著計數,IR 與 NFC 為灰色" width="320">
+
+這塊板子上每一種無線電附近有什麼。一個協定一格,**計數在角落**,亮著的那一格是此刻
+正在聽的無線電 —— 一次只聽一個,因為 2.4 GHz 前端是共用的,兩個同時掃就是兩個都變慢。
+**A** 打開那個協定的列表,訊號強的在前。
+
+**WiFi 和 BLE 是活的。IR 和 NFC 畫成灰色而不是不畫**:「這塊板子聽不到」跟「外面什麼
+都沒有」是兩種不同的答案,一個只顯示能用的東西的 grid 沒辦法區分它們。計數 _不存在_
+代表還沒去找;計數是 `0` 代表找過了、沒找到。
+
+偵測到訊號源之後去啟動對應的 app,是還沒做的那一半
+([#57](https://github.com/cmj0121/catnip/issues/57)、[#50](https://github.com/cmj0121/catnip/issues/50))
+—— 目前 Scanner 只回報,還不會交棒。
+
+### Matrix Rain
+
+<img src="docs/assets/screens/matrix-rain.png" alt="Matrix Rain:一整面落下的綠色字元" width="320">
+
+字元落滿整個 bare 面板,而且**沒有任何東西可以按**。它的價值在於它是其他三個都不是的
+那種形狀:第一個照自己的時鐘重畫、而不是等按鍵的 app,也是第一個需要 `color` 的 —— 因
+為在這裡顏色**就是**內容,不是平台挑給它的角色。
+
+如果一個 frame loop 對 app 來說很難寫,那是平台該修的問題,而這裡就是它第一個現形的
+地方。
 
 ## 讓它變成你的
 

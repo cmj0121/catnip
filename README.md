@@ -150,9 +150,94 @@ never a caption, never a second line.
 A **badge** is a number and a number cannot grow into a sentence: `badge = 3` is
 a small disc on the cell's corner. **Absent is not zero** — a cell with no badge
 has not been counted yet, while a cell showing `0` was counted and came to
-nothing. A missing `icon` falls back to the mascot, and the grid **packs from the
-top left**, so the first app is always the top-left cell whether the page holds
-four or six.
+nothing. A missing `icon` falls back to a neutral **placeholder** glyph — not the
+mascot, which means _home_ and may not also mean _some app_ — and the grid
+**packs from the top left**, so the first app is always the top-left cell whether
+the page holds four or six.
+
+## The apps it ships with
+
+Four apps are built into the firmware, so a MeowKit with an empty slot still
+does something. They are **ordinary Lua apps** — the same `ui.*`, the same
+`manifest.json`, no private API and no privileges — which is the point: if a
+built-in needed something your app cannot have, the platform would be lying
+about what it offers. They are listed first and the card's apps after, so the
+ones that are always there keep their place when the card is pulled.
+
+(A card app is _meant_ to shadow a built-in of the same `id` — the card should
+win. That rule is not written yet: today both are listed. See
+[#51](https://github.com/cmj0121/catnip/issues/51).)
+
+Home is where they are all reached from, and home is the cat:
+
+<img src="docs/assets/screens/launcher.png" alt="The launcher's landing page: the Catnip mascot" width="320">
+
+Every screen below is the **real renderer's own output** — the same LVGL backend
+the device runs, drawn by the host layout tests and written out with
+`CATNIP_SHOTS=<dir> .build/native/test_layout`. They are pictures of the code in
+this repo rather than mockups, and regenerating them is a build rather than a
+photograph.
+
+### File Browser
+
+<img src="docs/assets/screens/filebrowser.png" alt="File Browser: rows of folders and files on the SD card" width="320">
+
+The card, as rows you can walk. A row is an icon and a name; the **path lives in
+the header**, because a column of names is the one shape that cannot say where
+it is. **A** opens a folder or views a file, **B** goes up, and long **A** offers
+the actions the manifest declares for that row — deleting asks first, and the
+question names the file.
+
+It is the app `fs.*` was built for, and the one that proves a card app and a
+built-in are the same kind of thing. `Reset card` is declared but not yet wired:
+`fs.reset()` answers _not available_ until the format lands ([#46](https://github.com/cmj0121/catnip/issues/46)).
+
+### Clock
+
+<img src="docs/assets/screens/clock-face.png" alt="Clock: the date, the time, the weekday strip and where the time came from" width="320">
+
+The date in the corner, the time as large as the panel allows, the weekday as
+seven letters with today's picked out — and, at the foot, **where that time came
+from**: `NTP` and when it last synced, or nothing if the only thing that has ever
+set this clock is a thumb. A clock that cannot tell you which of those it is
+will eventually be believed when it should not be.
+
+It draws `frame: "bare"` and declares `glance: "time"`, which is why the
+carousel can show its face without opening it. Setting the time by hand is
+behind **A**. An unset clock shows `--:--` and never a plausible lie.
+
+### Scanner
+
+<img src="docs/assets/screens/scanner-grid.png"
+     alt="Scanner: a grid of radios, WiFi and BLE carrying counts, IR and NFC greyed"
+     width="320">
+
+What is nearby, on every radio this board has. A cell per protocol with a
+**count on its corner**, the bright one being whichever radio is listening right
+now — one at a time, because the 2.4 GHz front end is shared and two sweeps at
+once are two slow sweeps. **A** opens that protocol's list, strongest first.
+
+**WiFi and BLE are live. IR and NFC are drawn greyed rather than hidden**: "this
+board cannot hear it" and "nothing is out there" are different answers, and a
+grid showing only what works cannot tell them apart. A count that is _absent_ has
+not been looked for; a count of `0` was looked for and found nothing.
+
+Launching the app for a source it found is the half that is not built yet
+([#57](https://github.com/cmj0121/catnip/issues/57),
+[#50](https://github.com/cmj0121/catnip/issues/50)) — the Scanner reports, it
+does not yet hand over.
+
+### Matrix Rain
+
+<img src="docs/assets/screens/matrix-rain.png" alt="Matrix Rain: a grid of green glyphs falling on a bare screen" width="320">
+
+Glyphs falling down a bare panel, and **nothing to press**. It earns its place by
+being the shape none of the others are: the first app that redraws on its own
+clock instead of waiting for a key, and the first to need `color` — because here
+the colour _is_ the content, not a role the platform picks.
+
+If a frame loop is awkward for an app to write, that is the platform's problem
+to fix, and this is where it shows up first.
 
 ## Making it yours
 
