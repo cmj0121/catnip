@@ -284,6 +284,18 @@ typedef struct {
      * quietly rounded, and a control that silently disagrees with the finger is
      * worse than one that never offered. */
     int steps;
+    /* A count on a grid cell, or -1 for none.
+     *
+     * The one thing a cell may carry besides its picture, and the limit is the
+     * rule rather than an omission: a badge is a *number*, and a number cannot
+     * become a label. A cell that could carry words would have a caption under
+     * it within a week, and then a second line under that - which is why the
+     * name of a focused cell lives in the header and not on the cell.
+     *
+     * It exists for a grid that groups: four radios, each saying how many it
+     * can see, all four readable at once. Asking the header instead would have
+     * shown one number at a time, which is not a group view. */
+    int badge;
     int selected; /* list only: the selected child, as a zero-based index to
                        * match `index` below, or -1 for none. Lua's `selected`
                        * prop is one-based like every other Lua index; the

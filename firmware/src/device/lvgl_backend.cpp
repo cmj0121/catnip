@@ -28,6 +28,7 @@
  * and an add with the old role to remember in between.
  */
 #include <lvgl.h>
+#include <stdio.h>
 
 #include <stdint.h>
 
@@ -77,6 +78,10 @@ struct Entry {
     bool sel_dirty;            /* list only: the highlight has to be re-applied */
     bool laid_out;             /* list only: apply_list_layout has run at least once */
     catnip_text_align align;   /* which edge it asked for, for a canvas to place it by */
+    /* A grid cell's count, and the label that draws it. Built on the first cell
+     * that asks for one, because most never do. */
+    lv_obj_t *badge;
+    int badge_n;
     /* Screen only: how much of the region is currently trimmed off the bottom
      * because a column of lines could not use it. Remembered so the untrimmed
      * region can be worked out without putting the pad back to measure it. */
@@ -290,6 +295,45 @@ void apply_style(Entry *e, catnip_style_role role)
     if (!text) return;
     lv_obj_set_style_text_font(text, role_font(role, canvas, strip), 0);
     lv_obj_set_style_text_color(text, lv_color_hex(role_ink(role)), 0);
+}
+
+/* The count on a grid cell: a small number in the corner of the picture.
+ *
+ * The corner rather than under the icon, and a number rather than a word, and
+ * both are the same rule: a cell carries a picture and may carry a count, and
+ * nothing else. Under the icon is where a label would go, and the moment a cell
+ * can hold a label it holds two lines of one - which is why the name of the
+ * focused cell is in the header instead. */
+void apply_badge(Entry *e, int n)
+{
+    if (n < 0) {
+        if (e->badge) lv_obj_add_flag(e->badge, LV_OBJ_FLAG_HIDDEN);
+        e->badge_n = -1;
+        return;
+    }
+    if (!e->badge) {
+        e->badge = lv_label_create(e->obj);
+        if (!e->badge) return;
+        lv_obj_set_style_text_font(e->badge, &catnip_font_10, 0);
+        lv_obj_set_style_text_color(e->badge, lv_color_hex(catnip_color_bg()), 0);
+        lv_obj_set_style_bg_color(e->badge, lv_color_hex(kColPrimary), 0);
+        lv_obj_set_style_bg_opa(e->badge, LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(e->badge, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_pad_hor(e->badge, 4, 0);
+        lv_obj_set_style_pad_ver(e->badge, 1, 0);
+        lv_obj_remove_flag(e->badge, LV_OBJ_FLAG_CLICKABLE);
+        e->badge_n = -1;
+    }
+    lv_obj_remove_flag(e->badge, LV_OBJ_FLAG_HIDDEN);
+    if (n != e->badge_n) {
+        char buf[8];
+        e->badge_n = n;
+        snprintf(buf, sizeof(buf), "%d", n > 999 ? 999 : n);
+        lv_label_set_text(e->badge, buf);
+    }
+    /* Aligned after the text, because the size it is being aligned by is the
+     * size the text just gave it. */
+    lv_obj_align(e->badge, LV_ALIGN_TOP_RIGHT, 0, 0);
 }
 
 void apply_text(Entry *e, const char *text, catnip_icon icon, const char *image,
@@ -945,6 +989,7 @@ void apply_flags(Entry *e, unsigned flags)
 void apply_desc(Entry *e, const catnip_node_desc *d)
 {
     apply_text(e, d->text, d->icon, d->image, d->align);
+    apply_badge(e, d->badge);
     apply_value(e, d->value, d->value_text, d->steps, d->style == CATNIP_STYLE_PRIMARY);
     /* After the style, because where a node goes on a canvas depends on which
      * role it is in - and only then, because that is the only thing about a
