@@ -215,67 +215,7 @@ def matrixrain_png():
     return im.resize((SIZE, SIZE), Image.LANCZOS)
 
 
-# ---- Air Mouse: the mouse, and the pointer it produces ---------------------
-# Two objects, not one mark: the device on the left and the thing it moves on
-# the right. Either alone would be ambiguous - a mouse body on its own is a
-# mouse, not an *air* mouse, and a bare cursor is every pointing app there has
-# ever been - and together they read as cause and effect.
-#
-# They must not touch. At the size this is looked at, two light shapes ten
-# pixels apart at 128 are two and a half apart, which is the whole of what keeps
-# them from fusing into one blob; the body stops at x=64 and the cursor's tip
-# starts at x=74. The scroll wheel takes the accent, which is the set's habit -
-# a light body with one small accent detail, the way the clock's hands and the
-# Scanner's dot do it.
-#
-# The cursor is one list of seven corners used by both renderers, so the SVG
-# path and the PIL polygon cannot drift apart.
-A_BODY = (14.0, 32.0, 50.0, 84.0)  # x, y, w, h of the mouse shell
-A_BODY_R = 24.0  # nearly half the width: a shell, not a box
-A_WHEEL = (35.5, 44.0, 7.0, 16.0)  # x, y, w, h
-A_WHEEL_R = 3.5
-A_ARROW = ((74, 10), (74, 69), (88, 55), (97, 76), (108, 70), (99, 50), (118, 49))
-
-
-def airmouse_svg():
-    bx, by, bw, bh = A_BODY
-    wx, wy, ww, wh = A_WHEEL
-    d = "M %d %d " % A_ARROW[0]
-    d += " ".join("L %d %d" % p for p in A_ARROW[1:])
-    return _svg(
-        [
-            '  <rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="%.1f" '
-            'fill="%s"/>' % (bx, by, bw, bh, A_BODY_R, BODY),
-            '  <rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="%.1f" '
-            'fill="%s"/>' % (wx, wy, ww, wh, A_WHEEL_R, ACCENT),
-            '  <path fill="%s" d="%s Z"/>' % (BODY, d),
-        ]
-    )
-
-
-def airmouse_png():
-    from PIL import Image, ImageDraw
-
-    im = Image.new("RGBA", (SIZE * SS, SIZE * SS), (0, 0, 0, 0))
-    d = ImageDraw.Draw(im)
-    bx, by, bw, bh = A_BODY
-    d.rounded_rectangle(
-        [bx * SS, by * SS, (bx + bw) * SS, (by + bh) * SS],
-        radius=A_BODY_R * SS,
-        fill=BODY,
-    )
-    wx, wy, ww, wh = A_WHEEL
-    d.rounded_rectangle(
-        [wx * SS, wy * SS, (wx + ww) * SS, (wy + wh) * SS],
-        radius=A_WHEEL_R * SS,
-        fill=ACCENT,
-    )
-    d.polygon([(x * SS, y * SS) for x, y in A_ARROW], fill=BODY)
-    return im.resize((SIZE, SIZE), Image.LANCZOS)
-
-
 ICONS = {
-    "airmouse": (airmouse_svg, airmouse_png),
     "matrixrain": (matrixrain_svg, matrixrain_png),
     "scanner": (scanner_svg, scanner_png),
     "clock": (clock_svg, clock_png),
