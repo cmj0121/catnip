@@ -1,0 +1,13 @@
+{
+  "id": "matrixrain",
+  "name": "Matrix Rain",
+  "version": "0.1.0",
+  "author": "cmj",
+  "catnip_api": "1.0",
+  "entry": "main.lua",
+  "icon": "icon.png",
+  "frame": "bare",
+  "hints": false,
+  "counter": false,
+  "permissions": []
+}
