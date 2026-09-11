@@ -120,24 +120,28 @@ static const uint32_t kDumpGapMs = 100;
  * gyr_bwp = 0b10 (normal bandwidth) and gyr_odr = 0b1000 (100 Hz, twice the
  * report rate above it so no report is built from a sample it has already sent).
  *
- * GYR_RANGE = 0x01 is +-1000 dps, 32.8 LSB per dps. Deliberately generous: a
- * deliberate pointing movement is tens of degrees a second, but the flick that
- * means "lift the mouse" is several hundred, and a range that clipped it would
- * turn the fastest gesture into an ambiguous one. */
+ * GYR_RANGE = 0x02 is +-500 dps, 65.6 LSB per dps. This was +-1000 on the
+ * argument that a flick to reposition is several hundred degrees a second and a
+ * range that clipped it would make the fastest gesture ambiguous. The vendor's
+ * own air mouse for this board picks 500, and its reason is the better one: a
+ * human hand swinging a device stays under 500 dps, so the wider range buys
+ * nothing and throws away half the resolution - and a pointing device lives at
+ * the *slow* end of its range, where resolution is the whole of whether a
+ * cursor can be aimed at something small. */
 static const uint8_t kPwrConfRun = 0x00;
 static const uint8_t kInitCtrlLoad = 0x00;
 static const uint8_t kInitCtrlRun = 0x01;
 static const uint8_t kAccConfValue = 0xA8;
 static const uint8_t kAccRangeValue = 0x01;
 static const uint8_t kGyrConfValue = 0xE8;
-static const uint8_t kGyrRangeValue = 0x01;
+static const uint8_t kGyrRangeValue = 0x02;
 static const uint8_t kPwrCtrlAccGyr = 0x06;
 
 /* Sensitivity for GYR_RANGE above, times ten, so the conversion stays integer:
- * 32.8 LSB per dps. Milli-dps out, because a pointing device cares about single
+ * 65.6 LSB per dps. Milli-dps out, because a pointing device cares about single
  * degrees a second and whole dps would quantise the slow end of the range into
  * steps a user can see. */
-static const int32_t kGyrLsbPerDpsX10 = 328;
+static const int32_t kGyrLsbPerDpsX10 = 656;
 
 /* The wait after clearing adv_power_save, from Bosch's datasheet. The part
  * needs its clock up before it will accept the first byte of the image, and an
@@ -500,7 +504,7 @@ bool catnip_imu_begin(void)
      * served from a sample that was never taken. */
     g_last_poll_ms = millis() - kPollIntervalMs;
     Serial.printf("[catnip] imu: accelerometer up at 100 Hz, range +-%dg at %ld counts "
-                  "per g; gyroscope up at 100 Hz, range +-1000 dps at %ld counts per "
+                  "per g; gyroscope up at 100 Hz, range +-500 dps at %ld counts per "
                   "ten dps\n",
                   2 << (range & kAccRangeMask), (long)g_lsb_per_g,
                   (long)kGyrLsbPerDpsX10);

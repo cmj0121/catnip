@@ -2,22 +2,17 @@
  * Native test for Air Mouse (#59).
  *
  * Almost all of this app is a radio, and a radio is not something a host can
- * check. What a host can check is everything that decides whether the cursor
- * moves and by how much - and that is where this app's bugs actually live,
- * because it is a pile of thresholds and sign choices, every one invisible
- * until somebody waves a device and watches.
+ * check. What a host can check is the arithmetic that turns a rotation into a
+ * cursor step - and that arithmetic has now been got wrong three times, each
+ * time in a way that was invisible in a diff and obvious within a second of
+ * holding the device.
  *
- * Three things are driven directly:
- *
- *   cursor_step  a rate in degrees per second to a step in pixels
- *   lift_next    the "the mouse has been picked up" state machine
- *   the loop     reports only while connected, only while pointing, and the
- *                gyroscope's bias getting zeroed out from under it
- *
- * The bias one matters most. This app turns a rate straight into a movement, so
- * a gyroscope that reads 4 dps while lying on a table is a cursor that crosses
- * the screen on its own - which is the failure the tilt version of this app died
- * of, in a different costume.
+ * The one that matters most is the sub-pixel residual. A deliberate slow
+ * movement is a fraction of a pixel per frame; rounding each frame to an
+ * integer throws every one of those away, and the cursor does not move at all
+ * until the hand moves fast enough that it can no longer be aimed. Fine control
+ * is entirely made of movements that small, so "a tenth of a pixel a frame
+ * eventually moves the cursor" is the single most important line in this file.
  */
 #if defined(__APPLE__)
 #define _DARWIN_C_SOURCE 1
@@ -55,11 +50,8 @@ static catnip_rt *g_rt;
 static catnip_sched *g_sched;
 static unsigned long g_millis;
 
-/* What the board is doing, as far as the app can tell. */
+static float g_ax = 0.0f, g_ay = 0.0f, g_az = 1.0f;
 static float g_gx, g_gy, g_gz;
-/* Gravity on the part's Y axis. Negative is the glass to the user's
- * right, which is the grip the app assumes until told otherwise. */
-static float g_ay = -1.0f;
 static int g_a_down;
 static int g_state; /* 0 off, 1 advertising, 2 connected */
 static int g_moves, g_last_dx, g_last_dy, g_last_buttons;
@@ -78,15 +70,12 @@ static void log_sink(void *ud, const char *msg, size_t len)
     (void)ud;
     printf("  lua: %.*s\n", (int)len, msg);
 }
-
-/* Both halves, the way the real HAL now fills them: the accelerometer says
- * which way is down and the gyroscope says how fast it is turning. */
 static void m_imu(void *ud, float v[6])
 {
     (void)ud;
-    v[0] = 0.0f;
+    v[0] = g_ax;
     v[1] = g_ay;
-    v[2] = 0.0f;
+    v[2] = g_az;
     v[3] = g_gx;
     v[4] = g_gy;
     v[5] = g_gz;
@@ -137,45 +126,22 @@ static void tick(void)
     catnip_render_drain(g_rt);
 }
 
-/* The app's mapping, called directly. */
-static void cursor(double gy, double gz, int flipped, int *dx, int *dy)
+static double num(const char *src, const char *global)
 {
-    char buf[160];
-    snprintf(buf, sizeof(buf), "DX, DY = cursor_step(%.6f, %.6f, %s)", gy, gz,
-             flipped ? "true" : "false");
-    catnip_rt_dostring(g_rt, buf, "=cs");
+    if (src && src[0]) catnip_rt_dostring(g_rt, src, "=q");
     lua_State *L = catnip_rt_lua(g_rt);
-    lua_getglobal(L, "DX");
-    lua_getglobal(L, "DY");
-    *dx = (int)lua_tointeger(L, -2);
-    *dy = (int)lua_tointeger(L, -1);
-    lua_pop(L, 2);
-}
-
-/* The lift state machine, called directly. */
-static const char *lift(const char *from, double mag, int calm_ms)
-{
-    static char out[32];
-    char buf[192];
-    snprintf(buf, sizeof(buf), "LIFT = lift_next('%s', %.1f, %d)", from, mag, calm_ms);
-    catnip_rt_dostring(g_rt, buf, "=lift");
-    lua_State *L = catnip_rt_lua(g_rt);
-    lua_getglobal(L, "LIFT");
-    snprintf(out, sizeof(out), "%s", lua_tostring(L, -1) ? lua_tostring(L, -1) : "");
+    lua_getglobal(L, global);
+    double v = lua_tonumber(L, -1);
     lua_pop(L, 1);
-    return out;
+    return v;
 }
 
-/* The grip decision, called directly. Both arguments as Lua source so the
- * absent-accelerometer case can be passed as a real nil. */
-static const char *grip(const char *ay, const char *was)
+static const char *word(const char *src, const char *global)
 {
     static char out[32];
-    char buf[192];
-    snprintf(buf, sizeof(buf), "GRIP = tostring(grip_flipped(%s, %s))", ay, was);
-    catnip_rt_dostring(g_rt, buf, "=grip");
+    catnip_rt_dostring(g_rt, src, "=q");
     lua_State *L = catnip_rt_lua(g_rt);
-    lua_getglobal(L, "GRIP");
+    lua_getglobal(L, global);
     snprintf(out, sizeof(out), "%s", lua_tostring(L, -1) ? lua_tostring(L, -1) : "");
     lua_pop(L, 1);
     return out;
@@ -226,106 +192,90 @@ int main(void)
     CHECK(catnip_sched_start(g_sched, app, "=airmouse") == 0, "the mouse loads");
     tick();
 
-    printf("a wand that is not being turned does not move the cursor\n");
-    int dx, dy;
-    cursor(0.0, 0.0, 0, &dx, &dy);
-    CHECK(dx == 0 && dy == 0, "a rate of zero is no step at all");
-    cursor(2.0, 2.0, 0, &dx, &dy);
-    CHECK(dx == 0 && dy == 0, "and a rate inside the deadzone is still no step");
+    printf("a fraction of a pixel a frame still moves the cursor\n");
+    /* THE line. The vertical axis here turns a fiftieth of the horizontal's
+     * rotation, so it is a tenth of a pixel per frame - a perfectly ordinary
+     * slow, careful movement. An implementation that rounds each frame emits
+     * zero for ever; this one has to have moved the cursor within thirty
+     * frames, because fine control is made of nothing else. */
+    double slow_y = num("local rx, ry, t = 0, 0, 0\n"
+                        "for i = 1, 30 do\n"
+                        "  local dx, dy\n"
+                        "  dx, dy, rx, ry = pointer_delta(0.002, 0.03, rx, ry)\n"
+                        "  t = t + dy\n"
+                        "end\n"
+                        "SLOWY = t\n",
+                        "SLOWY");
+    CHECK(slow_y >= 2, "a tenth of a pixel a frame accumulates into real pixels");
 
-    printf("the cursor follows the tip: four directions, said four ways\n");
-    /* The whole specification of this app, as four sentences. Held with the
-     * glass to the user's right, a gyroscope is right-handed about each axis,
-     * so swinging the tip right reads positive on gy and raising it reads
-     * positive on gz - and screen y counts downward, which is why "up" is the
-     * negative one. Getting any of these backwards is invisible in a diff and
-     * obvious within one second of holding the device. */
-    cursor(60.0, 0.0, 0, &dx, &dy);
-    CHECK(dx > 0 && dy == 0, "swing it right, the cursor goes right");
-    cursor(-60.0, 0.0, 0, &dx, &dy);
-    CHECK(dx < 0 && dy == 0, "swing it left, the cursor goes left");
-    /* The tip rising reads NEGATIVE on gz on this board. That was derived the
-     * other way round and was wrong on the device - the chain runs through the
-     * part's mounting, imu_map's frame, the panel rotation and the direction
-     * screen y counts, and being right about three of those four still gives a
-     * cursor that goes the wrong way. This is the measurement. */
-    cursor(0.0, -60.0, 0, &dx, &dy);
-    CHECK(dy < 0 && dx == 0, "raise the tip, the cursor goes up");
-    cursor(0.0, 60.0, 0, &dx, &dy);
-    CHECK(dy > 0 && dx == 0, "lower the tip, the cursor goes down");
+    printf("one degree is fifty pixels, and the axes do not cross\n");
+    /* The vendor's gain on this board: 1 degree of rotation is 50 pixels of
+     * cursor. gyro.z is the horizontal and gyro.y the vertical - ours had these
+     * the other way round, which is why left and right felt like a different
+     * gesture from up and down. */
+    double dx1 = num("DX, DY = pointer_delta(0, 1.0, 0, 0)", "DX");
+    double dy1 = num("", "DY");
+    CHECK(dx1 == 50, "a degree on the z axis is fifty pixels across");
+    CHECK(dy1 == 0, "and nothing at all down");
 
-    /* Across must cover more ground than down for the same rate. The wrist has
-     * roughly a third the travel side to side that it has up and down, and a
-     * 16:9 screen is 1.8 times wider than it is tall; a single gain makes the
-     * user pay for both, which is exactly how it felt. */
-    cursor(60.0, 60.0, 0, &dx, &dy);
-    CHECK(dx > 0 && dy > 0, "both axes still move in their own direction");
-    CHECK(dx > dy, "and the same rate covers more ground across than down");
+    double dx2 = num("DX, DY = pointer_delta(1.0, 0, 0, 0)", "DX");
+    double dy2 = num("", "DY");
+    CHECK(dy2 == 50, "a degree on the y axis is fifty pixels down");
+    CHECK(dx2 == 0, "and nothing at all across");
 
-    printf("holding it the other way round mirrors both, and nothing else\n");
-    /* The two grips are exact mirrors. If only one axis flipped, one of the
-     * four sentences above would come out backwards for left-handed holders
-     * and nobody would know which. */
-    int mx, my, fx, fy;
-    cursor(60.0, 40.0, 0, &mx, &my);
-    cursor(60.0, 40.0, 1, &fx, &fy);
-    CHECK(fx == -mx && fy == -my, "the flipped grip is the exact negation");
+    double dxn = num("DX, DY = pointer_delta(0, -1.0, 0, 0)", "DX");
+    CHECK(dxn == -50, "and the opposite rotation is the opposite step");
 
-    printf("the step is bounded and starts small\n");
-    cursor(100000.0, 0.0, 0, &dx, &dy);
-    CHECK(dx > 0 && dx <= 64, "an impossible rate is clamped, not wrapped");
-    int clamped = dx;
-    cursor(500000.0, 0.0, 0, &dx, &dy);
-    CHECK(dx == clamped, "and clamps to the same edge however hard it is pushed");
+    printf("a hand trembling below the deadzone cannot bank a jump\n");
+    /* Under the threshold nothing is emitted AND the residual decays, so a
+     * tremor cannot accumulate quietly and then arrive all at once as soon as
+     * something else crosses the line. */
+    double tremor = num("local rx, ry, t = 0, 0, 0\n"
+                        "for i = 1, 200 do\n"
+                        "  local dx, dy\n"
+                        "  dx, dy, rx, ry = pointer_delta(0.001, 0.001, rx, ry)\n"
+                        "  t = t + math.abs(dx) + math.abs(dy)\n"
+                        "end\n"
+                        "TREMOR, RES = t, math.abs(rx) + math.abs(ry)\n",
+                        "TREMOR");
+    double res = num("", "RES");
+    CHECK(tremor == 0, "two hundred frames under the deadzone move nothing");
+    CHECK(res < 0.001, "and leave no residual banked up to spend later");
 
-    /* Measured from the edge of the deadzone rather than from zero. */
-    cursor(6.0, 0.0, 0, &dx, &dy);
-    CHECK(dx >= 0 && dx <= 2, "the first movement past the deadzone is a small one");
+    double clamped = num("DX, DY = pointer_delta(0, 1000, 0, 0)", "DX");
+    CHECK(clamped == 127, "an impossible rotation is clamped to what a report holds");
 
-    printf("which grip it is comes off gravity, and does not flicker\n");
-    /* The sign of gravity on the part's Y axis is the whole of the difference
-     * between the two grips - and the reading passes through zero every time
-     * the wand is swung through level, so an app that re-decided there would
-     * invert the cursor in the middle of a gesture. */
-    CHECK(strcmp(grip("-1.0", "false"), "false") == 0, "a clear -1g is the glass right");
-    CHECK(strcmp(grip("1.0", "false"), "true") == 0, "and a clear +1g is the glass left");
-    CHECK(strcmp(grip("0.1", "true"), "true") == 0,
-          "swinging through level keeps the last answer");
-    CHECK(strcmp(grip("0.1", "false"), "false") == 0, "whichever answer that was");
-    CHECK(strcmp(grip("nil", "true"), "true") == 0,
-          "and no accelerometer at all changes nothing");
-
-    catnip_rt_dostring(g_rt, "DX, DY = cursor_step(nil, nil)", "=cs");
-    {
-        lua_State *L = catnip_rt_lua(g_rt);
-        lua_getglobal(L, "DX");
-        lua_getglobal(L, "DY");
-        CHECK(lua_tointeger(L, -2) == 0 && lua_tointeger(L, -1) == 0,
-              "an absent gyroscope is no movement, not a drift");
-        lua_pop(L, 2);
-    }
+    printf("the gyroscope's zero is only learned while genuinely still\n");
+    /* Both senses have to agree. A device turning at a constant rate is not
+     * accelerating, and a device shaken in a straight line is not turning - so
+     * either test alone would learn a zero out of a device that is moving, and
+     * bake the movement in as the new definition of still. */
+    CHECK(strcmp(word("S = tostring(is_stationary(1.0, 1.0))", "S"), "true") == 0,
+          "a plain 1g and no rotation is still");
+    CHECK(strcmp(word("S = tostring(is_stationary(1.0, 40.0))", "S"), "false") == 0,
+          "1g while turning steadily is not");
+    CHECK(strcmp(word("S = tostring(is_stationary(1.6, 1.0))", "S"), "false") == 0,
+          "and being shaken in a straight line is not either");
+    CHECK(strcmp(word("S = tostring(is_stationary(nil, 1.0))", "S"), "false") == 0,
+          "no accelerometer means it cannot be claimed");
 
     printf("a flick lifts the mouse, and putting it down takes a moment\n");
-    CHECK(strcmp(lift("pointing", 60.0, 0), "pointing") == 0,
+    CHECK(strcmp(word("L = lift_next('pointing', 60, 0)", "L"), "pointing") == 0,
           "an ordinary aiming speed keeps pointing");
-    CHECK(strcmp(lift("pointing", 400.0, 0), "lifted") == 0, "a flick lifts it at once");
-    /* Hysteresis: the flick's own tail sits between the two thresholds, and a
-     * single-threshold design would drop back to pointing inside one gesture -
-     * which is a cursor that stutters out in bursts during every flick. */
-    CHECK(strcmp(lift("lifted", 200.0, 0), "lifted") == 0,
+    CHECK(strcmp(word("L = lift_next('pointing', 500, 0)", "L"), "lifted") == 0,
+          "a flick lifts it at once");
+    CHECK(strcmp(word("L = lift_next('lifted', 200, 0)", "L"), "lifted") == 0,
           "the tail of the flick does not put it down again");
-    CHECK(strcmp(lift("lifted", 40.0, 0), "lifted") == 0,
-          "and neither does slowing down, on its own");
-    CHECK(strcmp(lift("lifted", 40.0, 500), "pointing") == 0,
-          "it goes back to pointing once the wrist has actually settled");
+    CHECK(strcmp(word("L = lift_next('lifted', 50, 500)", "L"), "pointing") == 0,
+          "it goes back to pointing once the hand has settled");
 
     printf("nothing is reported until a host is connected\n");
     g_state = 1;
-    g_gy = 60.0f;
+    g_gz = 60.0f;
     g_moves = 0;
     for (int i = 0; i < 8; i++)
         tick();
-    CHECK(g_moves == 0, "waving while only advertising sends no reports");
+    CHECK(g_moves == 0, "turning it while only advertising sends no reports");
     {
         const char *t = catnip_ui_title(g_rt);
         CHECK(t && strstr(t, "pairing") != NULL, "and the header says pairing");
@@ -334,51 +284,32 @@ int main(void)
     g_state = 2;
     for (int i = 0; i < 8; i++)
         tick();
-    CHECK(g_moves > 0, "once connected, the wave is reported");
-    CHECK(g_last_dx != 0, "and it carries a step");
+    CHECK(g_moves > 0, "once connected, the movement is reported");
+    CHECK(g_last_dx != 0, "and it carries a step across");
     {
         const char *t = catnip_ui_title(g_rt);
         CHECK(t && strstr(t, "connected") != NULL, "and the header says connected");
     }
 
-    printf("A is the left button, and it survives a lift\n");
+    printf("a press holds the pointer still, so the click lands on the target\n");
+    /* Pressing a button shakes the device, and the shake arrives as a movement
+     * that drags the cursor off whatever was being aimed at. */
     g_a_down = 1;
-    for (int i = 0; i < 4; i++)
-        tick();
-    CHECK(g_last_buttons == 1, "A arrives as the left button");
-
-    /* A flick while the button is held: the movement must stop and the button
-     * must not. A release that happened during a lift and never reached the
-     * host would leave it stuck down. */
-    g_gy = 600.0f;
-    for (int i = 0; i < 4; i++)
-        tick();
+    tick();
     CHECK(g_last_dx == 0 && g_last_buttons == 1,
-          "a lift stops the movement and still reports the held button");
-
-    g_a_down = 0;
+          "the press reports the button and no movement with it");
     for (int i = 0; i < 4; i++)
         tick();
-    CHECK(g_last_buttons == 0, "and the release lands even though it is still lifted");
+    CHECK(g_last_dx == 0, "and stays still for a moment afterwards");
 
-    printf("a gyroscope that reads something while still gets zeroed out\n");
-    /* The failure this guards: a bias of a few degrees a second is above the
-     * deadzone, so without correction it is a cursor sliding across the screen
-     * while the device lies on a table. Held below STILL_RATE so the app is
-     * entitled to call it "still" and learn it. */
-    g_gx = 0.0f;
-    g_gy = 4.0f;
-    g_gz = 0.0f;
+    /* Once the settle has passed, aiming works again. */
+    for (int i = 0; i < 12; i++)
+        tick();
+    CHECK(g_last_dx != 0, "then the pointer comes back");
+
     g_a_down = 0;
-    /* Let the lift settle back to pointing first, then let the bias converge. */
-    for (int i = 0; i < 200; i++)
-        tick();
-    g_moves = 0;
-    for (int i = 0; i < 10; i++)
-        tick();
-    CHECK(g_moves > 0, "it is still reporting, so this is a real measurement");
-    CHECK(g_last_dx == 0,
-          "a steady 4 dps offset stops moving the cursor once it is learned");
+    tick();
+    CHECK(g_last_buttons == 0, "and the release lands");
 
     catnip_sched_free(g_sched);
     catnip_rt_free(g_rt);
