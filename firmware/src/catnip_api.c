@@ -107,6 +107,48 @@ static int l_mouse_move(lua_State *L)
     return 0;
 }
 
+/* ---- device.beacon.* - the device as a BLE beacon (#60) ---- */
+
+static int l_beacon_start(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+    /* One table argument, `{ payload = <bytes>, interval_ms = N }`. The payload
+     * is the raw advertisement the app assembled - iBeacon or Eddystone - and
+     * arrives as a Lua string, which is a length and bytes and so carries the
+     * NULs a beacon's fields are full of without truncating at the first one. */
+    luaL_checktype(L, 1, LUA_TTABLE);
+    lua_getfield(L, 1, "payload");
+    size_t len = 0;
+    const char *payload = luaL_checklstring(L, -1, &len);
+    lua_getfield(L, 1, "interval_ms");
+    int interval = (int)luaL_optinteger(L, -1, 100);
+    /* False on a device with no radio for this, as the mouse answers: an app
+     * has to be able to tell a beacon that never went out from one nobody is
+     * listening to, and only the first is something this side knows. */
+    lua_pushboolean(
+        L, (h && h->ble_adv_begin)
+               ? h->ble_adv_begin(h->ud, (const uint8_t *)payload, (int)len, interval)
+               : 0);
+    return 1;
+}
+
+static int l_beacon_stop(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+    if (h && h->ble_adv_end) h->ble_adv_end(h->ud);
+    return 0;
+}
+
+static int l_beacon_state(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+    int s = (h && h->ble_adv_state) ? h->ble_adv_state(h->ud) : 0;
+    /* A word rather than the HAL's number, and only two of them: a beacon is
+     * never connected to, so there is no third state the mouse has. */
+    lua_pushstring(L, s == 1 ? "advertising" : "off");
+    return 1;
+}
+
 /* ---- sensor.* ---- */
 
 static int l_imu(lua_State *L)
@@ -576,12 +618,19 @@ int catnip_api_open(catnip_rt *rt, const catnip_hal *hal)
     lua_State *L = catnip_rt_lua(rt);
     if (!L) return -1;
 
-    static const luaL_Reg device_funcs[] = {
-        {"vibrate", l_vibrate},       {"led", l_led},
-        {"battery", l_battery},       {"brightness", l_brightness},
-        {"button", l_button},         {"mouse_start", l_mouse_start},
-        {"mouse_stop", l_mouse_stop}, {"mouse_state", l_mouse_state},
-        {"mouse_move", l_mouse_move}, {NULL, NULL}};
+    static const luaL_Reg device_funcs[] = {{"vibrate", l_vibrate},
+                                            {"led", l_led},
+                                            {"battery", l_battery},
+                                            {"brightness", l_brightness},
+                                            {"button", l_button},
+                                            {"mouse_start", l_mouse_start},
+                                            {"mouse_stop", l_mouse_stop},
+                                            {"mouse_state", l_mouse_state},
+                                            {"mouse_move", l_mouse_move},
+                                            {"beacon_start", l_beacon_start},
+                                            {"beacon_stop", l_beacon_stop},
+                                            {"beacon_state", l_beacon_state},
+                                            {NULL, NULL}};
     static const luaL_Reg sensor_funcs[] = {
         {"imu", l_imu}, {"rtc", l_rtc}, {"rtc_set", l_rtc_set}, {NULL, NULL}};
     static const luaL_Reg gpio_funcs[] = {{"mode", l_gpio_mode},
@@ -640,7 +689,11 @@ int catnip_api_open(catnip_rt *rt, const catnip_hal *hal)
         "                 state = device.mouse_state, move = device.mouse_move,\n"
         "                 LEFT = 1, RIGHT = 2, MIDDLE = 4 }\n"
         "device.mouse_start, device.mouse_stop = nil, nil\n"
-        "device.mouse_state, device.mouse_move = nil, nil\n";
+        "device.mouse_state, device.mouse_move = nil, nil\n"
+        "device.beacon = { start = device.beacon_start, stop = device.beacon_stop,\n"
+        "                  state = device.beacon_state }\n"
+        "device.beacon_start, device.beacon_stop = nil, nil\n"
+        "device.beacon_state = nil\n";
     if (luaL_dostring(L, DEVICE_LUA) != LUA_OK) {
         catnip_rt_report_error(rt, L);
         return -1;

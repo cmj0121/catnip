@@ -11,6 +11,7 @@
 #define CATNIP_HAL_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -120,6 +121,18 @@ typedef struct {
     void (*ble_mouse_end)(void *ud);
     int (*ble_mouse_state)(void *ud);
     void (*ble_mouse_move)(void *ud, int dx, int dy, int buttons, int wheel);
+    /* Broadcast the device as a BLE beacon (#60).
+     *
+     * begin takes a raw advertisement - `payload`/`len` are the AD structures
+     * the app assembled, iBeacon or Eddystone, which this layer does not read -
+     * and an interval in milliseconds, and returns non-zero when the beacon is
+     * on the air. Called again while up, it re-arms with the new payload, which
+     * is how an app changes the id or the rate on a running advertisement.
+     * `state` is 0 off / 1 advertising - there is no connected state, because a
+     * beacon is never connected to. */
+    int (*ble_adv_begin)(void *ud, const uint8_t *payload, int len, int interval_ms);
+    void (*ble_adv_end)(void *ud);
+    int (*ble_adv_state)(void *ud);
     /* HTTP GET: write body into buf (cap incl. NUL); return length or -1. */
     int (*http_get)(void *ud, const char *url, char *buf, size_t cap);
 
