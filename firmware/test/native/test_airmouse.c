@@ -57,6 +57,9 @@ static unsigned long g_millis;
 
 /* What the board is doing, as far as the app can tell. */
 static float g_gx, g_gy, g_gz;
+/* Gravity on the part's Y axis. Negative is the glass to the user's
+ * right, which is the grip the app assumes until told otherwise. */
+static float g_ay = -1.0f;
 static int g_a_down;
 static int g_state; /* 0 off, 1 advertising, 2 connected */
 static int g_moves, g_last_dx, g_last_dy, g_last_buttons;
@@ -82,8 +85,8 @@ static void m_imu(void *ud, float v[6])
 {
     (void)ud;
     v[0] = 0.0f;
-    v[1] = 0.0f;
-    v[2] = 1.0f;
+    v[1] = g_ay;
+    v[2] = 0.0f;
     v[3] = g_gx;
     v[4] = g_gy;
     v[5] = g_gz;
@@ -135,10 +138,11 @@ static void tick(void)
 }
 
 /* The app's mapping, called directly. */
-static void cursor(double gy, double gz, int *dx, int *dy)
+static void cursor(double gy, double gz, int flipped, int *dx, int *dy)
 {
     char buf[160];
-    snprintf(buf, sizeof(buf), "DX, DY = cursor_step(%.6f, %.6f)", gy, gz);
+    snprintf(buf, sizeof(buf), "DX, DY = cursor_step(%.6f, %.6f, %s)", gy, gz,
+             flipped ? "true" : "false");
     catnip_rt_dostring(g_rt, buf, "=cs");
     lua_State *L = catnip_rt_lua(g_rt);
     lua_getglobal(L, "DX");
@@ -157,6 +161,21 @@ static const char *lift(const char *from, double mag, int calm_ms)
     catnip_rt_dostring(g_rt, buf, "=lift");
     lua_State *L = catnip_rt_lua(g_rt);
     lua_getglobal(L, "LIFT");
+    snprintf(out, sizeof(out), "%s", lua_tostring(L, -1) ? lua_tostring(L, -1) : "");
+    lua_pop(L, 1);
+    return out;
+}
+
+/* The grip decision, called directly. Both arguments as Lua source so the
+ * absent-accelerometer case can be passed as a real nil. */
+static const char *grip(const char *ay, const char *was)
+{
+    static char out[32];
+    char buf[192];
+    snprintf(buf, sizeof(buf), "GRIP = tostring(grip_flipped(%s, %s))", ay, was);
+    catnip_rt_dostring(g_rt, buf, "=grip");
+    lua_State *L = catnip_rt_lua(g_rt);
+    lua_getglobal(L, "GRIP");
     snprintf(out, sizeof(out), "%s", lua_tostring(L, -1) ? lua_tostring(L, -1) : "");
     lua_pop(L, 1);
     return out;
@@ -209,35 +228,59 @@ int main(void)
 
     printf("a wand that is not being turned does not move the cursor\n");
     int dx, dy;
-    cursor(0.0, 0.0, &dx, &dy);
+    cursor(0.0, 0.0, 0, &dx, &dy);
     CHECK(dx == 0 && dy == 0, "a rate of zero is no step at all");
-    cursor(2.0, 2.0, &dx, &dy);
+    cursor(2.0, 2.0, 0, &dx, &dy);
     CHECK(dx == 0 && dy == 0, "and a rate inside the deadzone is still no step");
 
-    printf("yaw steers across, pitch steers up and down\n");
-    /* gy is rotation about the vertical when the wand points forward, so it is
-     * the axis that moves the cursor left and right; gz is the tip rising and
-     * falling. They must not be the same axis and must not leak into each
-     * other, which is the mistake that is invisible until a device is waved. */
-    cursor(60.0, 0.0, &dx, &dy);
-    CHECK(dx != 0 && dy == 0, "yaw moves the cursor across and not down");
-    int across = dx;
-    cursor(0.0, 60.0, &dx, &dy);
-    CHECK(dy != 0 && dx == 0, "pitch moves it up or down and not across");
+    printf("the cursor follows the tip: four directions, said four ways\n");
+    /* The whole specification of this app, as four sentences. Held with the
+     * glass to the user's right, a gyroscope is right-handed about each axis,
+     * so swinging the tip right reads positive on gy and raising it reads
+     * positive on gz - and screen y counts downward, which is why "up" is the
+     * negative one. Getting any of these backwards is invisible in a diff and
+     * obvious within one second of holding the device. */
+    cursor(60.0, 0.0, 0, &dx, &dy);
+    CHECK(dx > 0 && dy == 0, "swing it right, the cursor goes right");
+    cursor(-60.0, 0.0, 0, &dx, &dy);
+    CHECK(dx < 0 && dy == 0, "swing it left, the cursor goes left");
+    cursor(0.0, 60.0, 0, &dx, &dy);
+    CHECK(dy < 0 && dx == 0, "raise the tip, the cursor goes up");
+    cursor(0.0, -60.0, 0, &dx, &dy);
+    CHECK(dy > 0 && dx == 0, "lower the tip, the cursor goes down");
 
-    cursor(-60.0, 0.0, &dx, &dy);
-    CHECK(dx == -across, "turning back the other way is the opposite step");
+    printf("holding it the other way round mirrors both, and nothing else\n");
+    /* The two grips are exact mirrors. If only one axis flipped, one of the
+     * four sentences above would come out backwards for left-handed holders
+     * and nobody would know which. */
+    int mx, my, fx, fy;
+    cursor(60.0, 40.0, 0, &mx, &my);
+    cursor(60.0, 40.0, 1, &fx, &fy);
+    CHECK(fx == -mx && fy == -my, "the flipped grip is the exact negation");
 
     printf("the step is bounded and starts small\n");
-    cursor(100000.0, 0.0, &dx, &dy);
+    cursor(100000.0, 0.0, 0, &dx, &dy);
     CHECK(dx > 0 && dx <= 64, "an impossible rate is clamped, not wrapped");
     int clamped = dx;
-    cursor(500000.0, 0.0, &dx, &dy);
+    cursor(500000.0, 0.0, 0, &dx, &dy);
     CHECK(dx == clamped, "and clamps to the same edge however hard it is pushed");
 
     /* Measured from the edge of the deadzone rather than from zero. */
-    cursor(6.0, 0.0, &dx, &dy);
+    cursor(6.0, 0.0, 0, &dx, &dy);
     CHECK(dx >= 0 && dx <= 2, "the first movement past the deadzone is a small one");
+
+    printf("which grip it is comes off gravity, and does not flicker\n");
+    /* The sign of gravity on the part's Y axis is the whole of the difference
+     * between the two grips - and the reading passes through zero every time
+     * the wand is swung through level, so an app that re-decided there would
+     * invert the cursor in the middle of a gesture. */
+    CHECK(strcmp(grip("-1.0", "false"), "false") == 0, "a clear -1g is the glass right");
+    CHECK(strcmp(grip("1.0", "false"), "true") == 0, "and a clear +1g is the glass left");
+    CHECK(strcmp(grip("0.1", "true"), "true") == 0,
+          "swinging through level keeps the last answer");
+    CHECK(strcmp(grip("0.1", "false"), "false") == 0, "whichever answer that was");
+    CHECK(strcmp(grip("nil", "true"), "true") == 0,
+          "and no accelerometer at all changes nothing");
 
     catnip_rt_dostring(g_rt, "DX, DY = cursor_step(nil, nil)", "=cs");
     {

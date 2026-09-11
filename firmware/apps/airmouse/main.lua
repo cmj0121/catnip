@@ -32,13 +32,11 @@ local PX_PER_DEG = 10 -- cursor pixels per degree turned
 local RATE_DEADZONE = 3 -- dps. Under this it is noise, not aim.
 local MAX_STEP = 64 -- the most one report may carry (HID allows 127)
 
--- Which way round the two axes go. NOT derived - the part's +Z points out
--- through the glass, and holding the wand with the glass to your left rather
--- than your right mirrors both. One session with the device settles them; the
--- debug line below shows the raw rates so it can be settled by reading rather
--- than by guessing.
-local INVERT_X = false
-local INVERT_Y = false
+-- How sure of the grip the app has to be before it changes its mind about it.
+-- Gravity is a whole g, so half of one is well clear of any posture that is
+-- actually the intended one, and the last answer is kept in between - a wand
+-- being waved through level is not a wand being turned over.
+local GRIP_CERTAIN = 0.5 -- g
 
 -- Lifting the mouse. A real mouse that runs out of desk is picked up, moved
 -- back and put down, and the cursor stays where it was. A wand cannot be picked
@@ -90,20 +88,50 @@ local function step(rate)
   return round(s)
 end
 
--- Held as a wand with the screen's top edge pointing forward, the part's Y axis
--- lies along the vertical and its Z axis along your right - so turning left and
--- right (yaw) shows up on gy, and raising and lowering the tip (pitch) shows up
--- on gz. gx is the wand being rolled, which this app does not steer with.
+-- Which way the glass is facing, from gravity alone.
+--
+-- This is not a setting, and it is not a guess. Held as a wand with the screen's
+-- top edge pointing forward, the part's Y axis lies along the world's vertical -
+-- so gravity is almost entirely on ay, and its *sign* is the whole of the
+-- difference between holding the wand with the glass to your right and holding
+-- it with the glass to your left. Those two grips are exact mirrors of each
+-- other, so one reading settles both steering axes.
+--
+-- The accelerometer's convention (see imu_map.c) is that the axis reading
+-- positive is the one pointing at the ceiling. Glass to the right puts +Y at the
+-- floor and reads about -1g; glass to the left puts it at the ceiling and reads
+-- about +1g.
+--
+-- `was` is returned unchanged in between, which is the point of taking it: a
+-- wand swung through level passes through ay = 0 several times a second, and an
+-- app that re-decided there would invert the cursor mid-gesture.
+function grip_flipped(ay, was)
+  if not ay then return was end
+  if ay > GRIP_CERTAIN then return true end
+  if ay < -GRIP_CERTAIN then return false end
+  return was
+end
+
+-- Held as a wand pointing at the host, turning left and right (yaw) shows up on
+-- the part's Y axis and raising and lowering the tip (pitch) on its Z axis. The
+-- cursor follows the tip: point up and it goes up, swing left and it goes left.
+--
+-- The signs are derived rather than tuned. Gyroscopes are right-handed about
+-- each axis, and imu_map.c records which part axis lies along which screen edge,
+-- so: with the glass to the right, swinging the tip right reads positive on gy,
+-- which is a cursor step to the right; raising the tip reads positive on gz,
+-- which is a step *up* the screen and therefore a negative dy, because screen y
+-- counts downward. Mirror both for the other grip.
 --
 -- Global so the host test can drive it directly; everything else in this file
 -- is a radio or a clock.
-function cursor_step(gy, gz)
+function cursor_step(gy, gz, flipped)
   -- A device with no gyroscope reports no axes at all rather than zeros (see
   -- catnip_hal.h), so this is a real case, not a defensive one.
   if not gy or not gz then return 0, 0 end
-  local dx = step(INVERT_X and -gy or gy)
-  local dy = step(INVERT_Y and -gz or gz)
-  return dx, dy
+  local across = flipped and -gy or gy
+  local down = flipped and gz or -gz
+  return step(across), step(down)
 end
 
 -- The lift, as a state machine over the largest rate on any axis. Global for
@@ -183,11 +211,16 @@ local bias_x, bias_y, bias_z = 0, 0, 0
 local still_ms, calm_ms = 0, 0
 local lift = "pointing"
 local phase = 0
+-- Glass to the right until gravity says otherwise. Either is a real grip; this
+-- one is only the assumption held for the first few milliseconds.
+local flipped = false
 
 while true do
   local m = sensor.imu()
   local gx, gy, gz = m.gx, m.gy, m.gz
   local state = device.mouse.state()
+
+  flipped = grip_flipped(m.ay, flipped)
 
   if gx and gy and gz then
     local cx, cy, cz = gx - bias_x, gy - bias_y, gz - bias_z
@@ -218,14 +251,14 @@ while true do
       -- Lifted means the wand is being repositioned, not aimed: the buttons
       -- still report, because letting go of A during a flick must still reach
       -- the host, but the movement does not.
-      if lift == "pointing" then dx, dy = cursor_step(cy, cz) end
+      if lift == "pointing" then dx, dy = cursor_step(cy, cz, flipped) end
       local buttons = device.button("a") and device.mouse.LEFT or 0
       device.mouse.move(dx, dy, buttons)
     end
 
-    -- DEBUG (#59): raw rates, the bias being subtracted, and the lift state.
-    dbg.text = string.format("gx %.0f gy %.0f gz %.0f | b %.1f %.1f %.1f | %s", gx, gy,
-      gz, bias_x, bias_y, bias_z, lift)
+    -- DEBUG (#59): raw rates, the grip gravity says this is, and the lift state.
+    dbg.text = string.format("gy %.0f gz %.0f ay %.2f | glass %s | %s", gy, gz,
+      m.ay or 0, flipped and "left" or "right", lift)
   else
     dbg.text = "no gyroscope on this device"
   end
