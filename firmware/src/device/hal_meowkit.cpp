@@ -51,6 +51,7 @@
 #include "display.h"
 #include "net_time.h"
 #include "ble.h"
+#include "ble_hid.h"
 #include "wifi.h"
 #include "hal_meowkit.h"
 #include "imu.h"
@@ -125,6 +126,33 @@ void hal_ble_rescan(void *ud)
 {
     (void)ud;
     catnip_ble_rescan();
+}
+
+int hal_ble_mouse_begin(void *ud)
+{
+    (void)ud;
+    return catnip_ble_hid_begin() ? 1 : 0;
+}
+
+void hal_ble_mouse_end(void *ud)
+{
+    (void)ud;
+    catnip_ble_hid_end();
+}
+
+int hal_ble_mouse_state(void *ud)
+{
+    (void)ud;
+    /* Connected is checked first because it implies up: asking the other way
+     * round would answer 1 for a mouse that is actually in use. */
+    if (catnip_ble_hid_connected()) return 2;
+    return catnip_ble_hid_up() ? 1 : 0;
+}
+
+void hal_ble_mouse_move(void *ud, int dx, int dy, int buttons, int wheel)
+{
+    (void)ud;
+    catnip_ble_hid_move(dx, dy, buttons, wheel);
 }
 
 void hal_wifi_rescan(void *ud)
@@ -238,6 +266,10 @@ const catnip_hal *catnip_meowkit_hal_begin(void)
     g_hal.wifi_rescan = hal_wifi_rescan;
     g_hal.ble_scan = hal_ble_scan;
     g_hal.ble_rescan = hal_ble_rescan;
+    g_hal.ble_mouse_begin = hal_ble_mouse_begin;
+    g_hal.ble_mouse_end = hal_ble_mouse_end;
+    g_hal.ble_mouse_state = hal_ble_mouse_state;
+    g_hal.ble_mouse_move = hal_ble_mouse_move;
 
     /* fs.* is the card and nothing else. The root is the mount point itself,
      * because catnip_api.c reaches the card through plain stdio - fopen,

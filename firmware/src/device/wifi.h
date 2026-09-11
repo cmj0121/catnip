@@ -81,6 +81,23 @@ bool catnip_wifi_scanning(void);
  * heard you, and I am looking". */
 void catnip_wifi_rescan(void);
 
+/* Hold the association down, and keep holding it (#59).
+ *
+ * A sweep parks the link and the park expires on its own: the driver notices
+ * that nobody has asked about the air for a while and rejoins. That is the
+ * right shape for scanning, where "is anyone still looking" is the only
+ * question anyone can answer.
+ *
+ * It is the wrong shape for becoming a BLE mouse. There, the link is down for a
+ * reason that has nothing to do with how recently anything was asked - the
+ * other radio has the front end for as long as the app is open - and a timer
+ * that rejoined underneath it would put Wi-Fi back on the air mid-gesture.
+ *
+ * So this is the second reason to hold the same park, not a second park: while
+ * a hold is on, the sweep's grace timer cannot release it. Holding reports OFF
+ * like any other park, because the device really is not on a network. */
+void catnip_wifi_hold(bool on);
+
 #ifdef __cplusplus
 }
 #endif

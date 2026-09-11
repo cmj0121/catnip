@@ -101,6 +101,25 @@ typedef struct {
      * should not have to learn the other. */
     int (*ble_scan)(void *ud, catnip_ble_dev *out, int max);
     void (*ble_rescan)(void *ud);
+    /* Present the device to a host as a BLE mouse (#59).
+     *
+     * begin returns non-zero when the device is now offering itself - which is
+     * not the same as a host having taken it up, because that is the host's
+     * decision and takes as long as it takes. `state` is what an app shows:
+     *
+     *   0  not a mouse at all
+     *   1  advertising, waiting to be picked up
+     *   2  a host is connected
+     *
+     * Those are three different sentences on a screen, which is why this is one
+     * hook returning which rather than a pair of booleans a caller has to
+     * combine. move() sends one relative step - dx, dy and wheel are deltas,
+     * not coordinates, because a peripheral does not know how big the host's
+     * screen is or where its cursor currently sits. */
+    int (*ble_mouse_begin)(void *ud);
+    void (*ble_mouse_end)(void *ud);
+    int (*ble_mouse_state)(void *ud);
+    void (*ble_mouse_move)(void *ud, int dx, int dy, int buttons, int wheel);
     /* HTTP GET: write body into buf (cap incl. NUL); return length or -1. */
     int (*http_get)(void *ud, const char *url, char *buf, size_t cap);
 
