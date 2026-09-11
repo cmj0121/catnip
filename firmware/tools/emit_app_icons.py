@@ -215,7 +215,60 @@ def matrixrain_png():
     return im.resize((SIZE, SIZE), Image.LANCZOS)
 
 
+# ---- Beacon: a source, and waves rising from it ----------------------------
+# The Scanner listens on every side, so its mark is symmetric; a beacon speaks
+# in one direction, out and up, so its waves fan upward from a source low on the
+# mark. That one-sidedness is the whole difference between "I am listening" and
+# "I am saying something", and it is what keeps this off the Scanner's mark even
+# though both are a dot and some arcs.
+B_CX, B_CY = 64.0, 80.0
+B_DOT = 12.0
+B_STROKE = 12.0
+# (radius, degrees either side of straight up). The two arcs nest above the dot.
+B_ARCS = ((30.0, 60.0), (52.0, 52.0))
+# Straight up is -90 degrees in a y-down frame, which is 270 for PIL's arc.
+B_UP = -90.0
+
+
+def _beacon_arc_path(r, spread):
+    """One upward arc from the source, as an SVG path."""
+    a0 = math.radians(B_UP - spread)
+    a1 = math.radians(B_UP + spread)
+    x0, y0 = B_CX + r * math.cos(a0), B_CY + r * math.sin(a0)
+    x1, y1 = B_CX + r * math.cos(a1), B_CY + r * math.sin(a1)
+    return (
+        '  <path fill="none" stroke="%s" stroke-width="%.1f" '
+        'stroke-linecap="round" d="M %.3f %.3f A %.3f %.3f 0 0 1 %.3f %.3f"/>'
+        % (BODY, B_STROKE, x0, y0, r, r, x1, y1)
+    )
+
+
+def beacon_svg():
+    parts = [_beacon_arc_path(r, spread) for r, spread in B_ARCS]
+    parts.append(
+        '  <circle fill="%s" cx="%.1f" cy="%.1f" r="%.1f"/>' % (ACCENT, B_CX, B_CY, B_DOT)
+    )
+    return _svg(parts)
+
+
+def beacon_png():
+    from PIL import Image, ImageDraw
+
+    im = Image.new("RGBA", (SIZE * SS, SIZE * SS), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    for r, spread in B_ARCS:
+        box = [(B_CX - r) * SS, (B_CY - r) * SS, (B_CX + r) * SS, (B_CY + r) * SS]
+        d.arc(box, (B_UP + 360) - spread, (B_UP + 360) + spread, fill=BODY,
+              width=int(B_STROKE * SS))
+    d.ellipse(
+        [(B_CX - B_DOT) * SS, (B_CY - B_DOT) * SS, (B_CX + B_DOT) * SS, (B_CY + B_DOT) * SS],
+        fill=ACCENT,
+    )
+    return im.resize((SIZE, SIZE), Image.LANCZOS)
+
+
 ICONS = {
+    "beacon": (beacon_svg, beacon_png),
     "matrixrain": (matrixrain_svg, matrixrain_png),
     "scanner": (scanner_svg, scanner_png),
     "clock": (clock_svg, clock_png),
