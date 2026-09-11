@@ -523,20 +523,21 @@ to decide.
 
 The manifest carries the knobs; Lua carries the behaviour.
 
-| Knob                                  | Where    | Effect                                                        |
-| ------------------------------------- | -------- | ------------------------------------------------------------- |
-| `name`                                | manifest | default title, and the name on your page                      |
-| `icon`                                | manifest | your identity icon; absent → the mascot                       |
-| `actions[]`                           | manifest | the action catalogue: `id`, `name`, `icon`                    |
-| `frame`                               | manifest | `"standard"` (default) or `"bare"` — screen 1 or 2–5          |
-| `counter`                             | manifest | `false` if you are not a list                                 |
-| `hints`                               | manifest | `false` to draw no control hint over you                      |
-| `ui.title(s)`                         | Lua      | a title that changes at runtime                               |
-| `layout`                              | Lua      | on a list: `"grid"`, `"mixer"`, `"row"`, `"canvas"`, `"text"` |
-| `badge`                               | Lua      | a count on a grid cell; absent is "not counted", not zero     |
-| `style`                               | Lua      | which of the roles below a node is set in                     |
-| `align`                               | Lua      | `"right"` on a line that must clear the hint's corner         |
-| `on_click` / `on_options` / `on_back` | Lua      | claim short A, long A, short B                                |
+| Knob                                  | Where    | Effect                                                         |
+| ------------------------------------- | -------- | -------------------------------------------------------------- |
+| `name`                                | manifest | default title, and the name on your page                       |
+| `icon`                                | manifest | your identity icon; absent → the mascot                        |
+| `actions[]`                           | manifest | the action catalogue: `id`, `name`, `icon`                     |
+| `frame`                               | manifest | `"standard"` (default) or `"bare"` — screen 1 or 2–5           |
+| `counter`                             | manifest | `false` if you are not a list                                  |
+| `hints`                               | manifest | `false` to draw no control hint over you                       |
+| `ui.title(s)`                         | Lua      | a title that changes at runtime                                |
+| `layout`                              | Lua      | on a list: `"grid"`, `"mixer"`, `"row"`, `"canvas"`, `"text"`  |
+| `badge`                               | Lua      | a count on a grid cell; absent is "not counted", not zero      |
+| `style`                               | Lua      | which of the roles below a node is set in                      |
+| `color`                               | Lua      | `"#RRGGBB"` ink for a node whose colour is content, not a role |
+| `align`                               | Lua      | `"right"` on a line that must clear the hint's corner          |
+| `on_click` / `on_options` / `on_back` | Lua      | claim short A, long A, short B                                 |
 
 ### The style roles
 
@@ -551,6 +552,15 @@ size and no colour in your tree, for the same reason there are no coordinates.
 | `primary` | the affirmative one of two                       |
 | `danger`  | the one that cannot be undone                    |
 | `display` | _one number_ large enough to own the screen      |
+
+**`color` is the exception the roles are not.** The six roles are the whole
+colour vocabulary on purpose: an app names an emphasis and the platform paints
+it, so a theme can move and every app moves with it. A node's `color` overrides
+that with a literal `"#RRGGBB"`, and it is for the one thing a role cannot say —
+a node whose colour is not an emphasis but _content_, an app drawing a picture
+out of coloured text rather than writing a sentence in it. Reaching for it is a
+visible thing an app did, not the normal way to colour a word; absent, and the
+role's ink stands. Matrix Rain is what it is for.
 
 The sizes are the platform's and are not yours to set, but they are worth
 writing down because they are the reason a role is enough:
