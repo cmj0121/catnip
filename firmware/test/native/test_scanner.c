@@ -277,15 +277,35 @@ int main(void)
     CHECK_STR(ask_str("ui.get('cellwifi').badge"), "3",
               "and the first count is still there - a group view shows both at once");
 
-    /* And then never again: a grid with counts on it is not waiting, whatever
-     * the radios are doing behind it. */
+    printf("and then it stops - one round, not a radio that never rests\n");
+    /* A scanner that never stops is a front end that never stops, kept busy to
+     * refresh a number nobody is watching change. So the round ends and the
+     * grid holds what it found. */
     g_wifi_rescans = 0;
     g_ble_rescans = 0;
+    g_air_n = -1;
+    g_adv_n = -1;
     tick();
     tick();
     tick();
     CHECK(g_wifi_rescans == 0 && g_ble_rescans == 0,
-          "once every radio has answered once, no round asks for the ring again");
+          "no radio is asked again once every one of them has answered");
+    CHECK_STR(ask_str("ui.get('cellwifi').style"), "body",
+              "and nothing is resting, so the cells go back to full");
+    CHECK_STR(ask_str("ui.get('cellble').style"), "body", "both of them");
+
+    printf("long A looks at all of them again, because an operation is a long press\n");
+    run("ui.fire('protos', 'options')");
+    tick();
+    CHECK(g_wifi_rescans == 1, "the round starts over");
+    CHECK_STR(ask_str("ui.get('cellwifi').badge"), "3",
+              "with the last answer still up - blanking it would say 'not looked yet'");
+    g_air_n = 3;
+    g_adv_n = 2;
+    tick();
+    tick();
+    tick();
+    CHECK(g_ble_rescans == 1, "and reaches the second radio");
 
     printf("a cell opens its own list\n");
     /* Nothing is selected on arrival, so the first direction press is what
@@ -305,6 +325,9 @@ int main(void)
     g_wifi_rescans = 0;
     run("ui.fire('rows', 'click')");
     CHECK(g_wifi_rescans == 1, "A throws the last scan away and asks for another");
+    /* And so does opening the page at all: the grid stopped scanning when its
+     * round finished, so what is behind a cell is as old as the last time
+     * somebody looked, and opening a protocol is asking about it now. */
 
     printf("a wobble of a decibel or two does not reorder the page\n");
     put_ap(1, "near", -64, 6);

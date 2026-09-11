@@ -54,6 +54,22 @@ local counts = {}
 local turn = 1
 local open_key = nil
 
+-- One round, and then it stops.
+--
+-- A scanner that never stops is a radio that never stops: the 2.4 GHz front end
+-- is busy the whole time the app is open and the Wi-Fi link stays parked for
+-- it, to keep a number fresh that nobody is watching change. So the grid scans
+-- each radio once and then holds what it found - a snapshot, which is what a
+-- page of counts is anyway - and looks again when it is asked to.
+--
+-- `left` is how many radios still owe an answer this round; `fresh` is which of
+-- them still owe a *new* one, because a round asked for by hand must throw the
+-- last answers away and the ring only goes up for a rescan.
+local scanning = true
+local left = #ROUND
+local fresh = {}
+for _, k in ipairs(ROUND) do fresh[k] = true end
+
 -- How strong, in words rather than a raw dBm nobody reads at a glance. The
 -- thresholds are the usual ones: -60 and up is a room away, -75 and up is
 -- through a wall, below that is the edge of hearing. Both radios report dBm and
@@ -270,10 +286,12 @@ local function open_list(proto)
     ui.push(list)
   end
   fill_list()
-  -- A fresh look on the way in. It is also what puts the platform's ring up -
-  -- the claim begins at rescan() - so a page that has nothing to show yet says
-  -- so in the one place the device says it.
-  if #(lines[open_key] or {}) == 0 then look_again() end
+  -- A fresh look on the way in, every time and not only when the page is empty.
+  -- The grid stopped scanning when its round finished, so what is behind a cell
+  -- is as old as the last time somebody looked - and opening a protocol is
+  -- asking about it now. It is also what puts the ring up, since the claim
+  -- begins at rescan().
+  look_again()
 end
 
 -- ---- the grid --------------------------------------------------------------
@@ -289,6 +307,11 @@ local cells = {}
 for i, p in ipairs(PROTOS) do
   cells[i] = ui.label{ id = "cell" .. p.key, icon = p.icon }
 end
+
+-- Declared before the grid, because the grid's long press names it and the
+-- round it restarts is defined below - a Lua local that is not in scope yet is
+-- a global that is nil when the handler runs.
+local scan_all
 
 -- A grid that opens with a cell already ringed has made a choice before the
 -- user has looked at it, and on a screen that is mostly pictures the ring is
@@ -317,19 +340,25 @@ grid = ui.list{ id = "protos", layout = "grid",
     -- nothing at all is the one answer a user cannot tell from a crash.
     if i then sel = i; grid.selected = sel
     elseif sel >= 1 then open_list(PROTOS[sel]) end
-  end }
+  end,
+  on_options = function() scan_all() end }
 grid:set_children(cells)
 
 -- Three states of ink, and the platform already has all three: full for the
 -- radio listening right now, quiet for a radio that is resting, and disabled
 -- for one this board cannot hear at all. So "which one is listening" needs no
 -- marker of its own - it is the brightest cell, and the brightness moves.
+--
+-- Resting only means something while a round is running. Once it has finished
+-- nothing is resting - the page is a snapshot and every radio it could use is
+-- equally available - so they all go back to full and only the two this board
+-- cannot hear stay faint.
 local function paint_grid()
-  local now = ROUND[turn]
+  local now = scanning and not open_key and ROUND[turn] or nil
   for i, p in ipairs(PROTOS) do
     local cell = cells[i]
     cell.disabled = not p.live
-    cell.style = (p.live and p.key == now and not open_key) and "body" or "caption"
+    cell.style = (p.live and (not scanning or p.key == now)) and "body" or "caption"
     -- A count, or nothing. Nothing is not zero: a cell with no badge has not
     -- been listened to yet, and one showing 0 has been and heard nobody.
     cell.badge = counts[p.key]
@@ -349,7 +378,28 @@ end
 -- the ring would blink out for half a second between one radio finishing and
 -- the next being asked - which reads as finished, and it is not.
 local function first_look()
-  if counts[ROUND[turn]] == nil then rescan(ROUND[turn]) end
+  local key = ROUND[turn]
+  if fresh[key] then
+    fresh[key] = nil
+    rescan(key)
+  end
+end
+
+-- Long A: look at all of them again.
+--
+-- An operation, and operations live behind a long press - that is the platform
+-- rule, and this is the launcher's shape for it: one action, done rather than
+-- offered, because a menu with a single item is a press spent on nothing.
+--
+-- The counts stay up while the new round runs. Blanking them would replace a
+-- true-a-minute-ago answer with nothing at all, and nothing is the one thing
+-- this page has that means "not looked yet".
+function scan_all()
+  for _, k in ipairs(ROUND) do fresh[k] = true end
+  turn = 1
+  left = #ROUND
+  scanning = true
+  first_look()
 end
 
 ui.screen{ grid }
@@ -368,15 +418,29 @@ first_look()
 while true do
   if open_key then
     -- A list is open: that radio gets every ask, so the page being read is the
-    -- one that refreshes fastest. The turn is left where it is and the round
-    -- resumes from there when the list closes.
+    -- one that refreshes fastest, and it keeps refreshing for as long as you
+    -- are looking at it.
     if poll(open_key) then fill_list() end
-  else
+    sys.sleep(500)
+  elseif scanning then
     if poll(ROUND[turn]) then
-      turn = turn % #ROUND + 1
-      first_look()
+      left = left - 1
+      if left > 0 then
+        -- Hand the ring straight over, in the same breath as the turn moving
+        -- rather than on the next tick: half a second of ring-off between one
+        -- radio finishing and the next being asked reads as finished.
+        turn = turn % #ROUND + 1
+        first_look()
+      else
+        scanning = false
+      end
     end
     paint_grid()
+    sys.sleep(500)
+  else
+    -- The round is over. Nothing is being asked, nothing is changing, and the
+    -- grid holds what it found until long A asks for another look - so this
+    -- sleeps rather than redrawing a page nobody has touched.
+    sys.sleep(1000)
   end
-  sys.sleep(500)
 end
