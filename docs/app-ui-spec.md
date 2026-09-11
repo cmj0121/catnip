@@ -864,7 +864,7 @@ BLE mouse — and that one fact decides the whole page.
 │                                                │  isn't one, on purpose
 │  connected                                     │
 │  Pair with "MeowKit Mouse"                     │
-│  Tilt to move  -  A to click                   │
+│  Point and wave  -  A to click                 │
 │  Wi-Fi is off while the mouse is on            │
 └────────────────────────────────────────────────┘
 ```
@@ -896,6 +896,25 @@ the mouse starts and restored when it goes. An app asked to remember that would
 not fail visibly when it forgot; it would produce a mouse that stutters, which
 is the hardest kind of bug to attribute. The header stops naming a network on
 its own, because while the link is parked the device really is not on one.
+
+**It reads a gyroscope, and that is not a detail.** The wand is held sideways
+with the screen's top edge pointing at the host, so aiming left and right is
+rotation about gravity - and rotation about gravity moves no accelerometer axis
+at all. A tilt version was built first and could not be made to work: yaw is
+invisible to an accelerometer at any speed, and worse, an accelerometer has no
+neutral. It reports where gravity _is_, so "not moving" is a different reading
+in every posture, and any posture but the assumed one pins the cursor against an
+edge. A rate has a true zero. The gyroscope was deliberately off on this board
+until this app asked the one question the accelerometer cannot answer.
+
+**A flick means the mouse was picked up.** A real mouse that runs out of desk is
+lifted, moved back and put down, and the cursor stays where it was; a wand
+cannot be lifted, so the gesture is speed - a deliberate aim is tens of degrees
+a second, a flick to reset your wrist is several hundred. Above the threshold
+the movement stops and **the buttons do not**, because a release that happened
+during a flick and never reached the host would leave it stuck down. Two
+thresholds and a settle rather than one, or a single flick would cross it
+several times and the cursor would stutter out in bursts.
 
 **Fifty reports a second, and a screen touched only when the word changes.** A
 report is a notification on an open connection and costs nearly nothing; a
