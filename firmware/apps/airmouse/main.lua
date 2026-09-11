@@ -79,6 +79,15 @@ local CLICK_SETTLE_MS = 200
 
 local FRAME_MS = 20 -- 50 reports a second, what a mouse is expected to produce
 
+-- How much of each new rate reading to believe.
+--
+-- A light low-pass, and deliberately not a bigger deadzone. Hand tremor is fast
+-- and aiming is slow, so a filter separates them; a deadzone only separates big
+-- from small, and the small movements it throws away are the ones fine aiming
+-- is made of. This is the knob for "the cursor will not sit still" - lower is
+-- steadier and laggier.
+local RATE_SMOOTH = 0.45
+
 -- Lifting the mouse. A real mouse that runs out of desk is picked up, moved
 -- back and put down, and the cursor stays where it was; in the air the gesture
 -- is speed. Well clear of any aiming movement: the vendor has no lift at all,
@@ -212,6 +221,7 @@ if not device.mouse.start() then
 end
 
 local bias_x, bias_y, bias_z = 0, 0, 0
+local s_wy, s_wz = 0, 0
 local res_x, res_y = 0, 0
 local calm_ms = 0
 local lift = "pointing"
@@ -252,12 +262,17 @@ while true do
     local wy = m.gy - bias_y
     local wz = m.gz - bias_z
 
+    -- Smoothed before the integral, not after: a filter on the output would be
+    -- smoothing pixels that have already been quantised and clamped.
+    s_wy = s_wy + (wy - s_wy) * RATE_SMOOTH
+    s_wz = s_wz + (wz - s_wz) * RATE_SMOOTH
+
     local mag = math.max(math.abs(m.gx - bias_x), math.abs(wy), math.abs(wz))
     calm_ms = (mag < LIFT_EXIT) and (calm_ms + FRAME_MS) or 0
     lift = lift_next(lift, mag, calm_ms)
 
     local dx, dy
-    dx, dy, res_x, res_y = pointer_delta(wy * dt, wz * dt, res_x, res_y)
+    dx, dy, res_x, res_y = pointer_delta(s_wy * dt, s_wz * dt, res_x, res_y)
 
     -- A press or a release shakes the device; hold the pointer still across it
     -- so the click lands on what was being aimed at.

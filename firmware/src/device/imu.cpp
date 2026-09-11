@@ -184,23 +184,32 @@ static const int32_t kLsbPerG[4] = {16384, 8192, 4096, 2048};
  * main loop would otherwise ask for an orientation as fast as the CPU can form
  * the question.
  *
- * Two bounds meet in the middle. The part is configured for 100 Hz, so
- * anything under 10 ms returns the same sample again and costs the bus for
- * nothing. At the other end, a device is turned over by hand in something like
- * half a second, and an arrow that lags that visibly would be read as a wrong
- * mapping rather than as a slow poll - which would defeat the page this driver
- * was written for. 50 ms is well inside the second bound (ten samples across a
- * turn, no perceptible lag) while costing the bus a twentieth of what an
- * ungated poll would.
+ * The part is configured for 100 Hz, so anything under 10 ms returns the same
+ * sample again and costs the bus for nothing. That is the floor, and this now
+ * sits on it.
  *
- * The BMI270's 100 Hz moved the lower bound from the 8 ms the QMI8658A's 125 Hz
- * implied to 10 ms, and 50 ms clears it just as comfortably, so the number
- * stands rather than being changed for the sake of having rechecked it.
+ * It used to be 50 ms, and the reasoning was sound for the only caller there
+ * was: the diagnostic page asks which screen edge is up, a device is turned
+ * over by hand in about half a second, and ten samples across that turn is no
+ * perceptible lag at a twentieth of the bus cost.
  *
- * The gate is here rather than in any caller so that it protects the bus from
- * all of them, including the ones not written yet - the same bargain
+ * Air Mouse (#59) is a caller with a different question, and the old answer was
+ * wrong for it in a way that took a while to see. It integrates a rate, and a
+ * hand's movement carries frequencies well above the 10 Hz that a 50 ms gate
+ * can represent - so a quick gesture was not merely lagged, it was aliased: the
+ * peaks and troughs sampled arbitrarily, arriving as bursts. On screen that is
+ * a cursor that is both sluggish and wild, which is exactly how it was
+ * reported. Sampling at the rate the part actually produces removes the
+ * question rather than tuning around it.
+ *
+ * The cost is five times the bus traffic for one twelve-byte burst, which on a
+ * 400 kHz bus is about one percent of it. The orientation page is unaffected by
+ * getting fresher answers.
+ *
+ * The gate stays here rather than in any caller so that it protects the bus
+ * from all of them, including the ones not written yet - the same bargain
  * catnip_touch_poll() makes with its 12 ms. */
-static const uint32_t kPollIntervalMs = 50;
+static const uint32_t kPollIntervalMs = 10;
 
 /* One pass of the dump. A register that does not acknowledge is as informative
  * as one that returns a value - it says the part has no such register - so the
