@@ -243,7 +243,7 @@ const lv_image_dsc_t catnip_icon_img_14[17] = {
         .data_size = 588,
         .data = catnip_icon_rgb565a8_14[16],
         .reserved = NULL,
-    }, /* radar */
+    }, /* signal */
 };
 
 const lv_image_dsc_t catnip_icon_img_64[17] = {
@@ -484,6 +484,6 @@ const lv_image_dsc_t catnip_icon_img_64[17] = {
         .data_size = 12288,
         .data = catnip_icon_rgb565a8_64[16],
         .reserved = NULL,
-    }, /* radar */
+    }, /* signal */
 };
 /* clang-format on */

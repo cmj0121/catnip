@@ -23,7 +23,7 @@ static const char *const kNames[] = {
     "ble",
     "ir",
     "nfc",
-    "radar",
+    "signal",
     /* Not a generated glyph - see catnip_icon. Named here so the launcher can
      * ask for it the way anything else asks for an icon. */
     "mascot",

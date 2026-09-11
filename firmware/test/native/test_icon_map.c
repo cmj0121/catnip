@@ -63,8 +63,8 @@ int main(void)
 
     CHECK(CATNIP_ICON_FOLDER == 1 && CATNIP_ICON_CLOSE == 12,
           "enum order folder=1 close=12");
-    CHECK(CATNIP_ICON_RADAR == 17 && CATNIP_ICON_DRAWN_LAST == CATNIP_ICON_RADAR,
-          "the radios follow close, and radar is the last drawn one");
+    CHECK(CATNIP_ICON_SIGNAL == 17 && CATNIP_ICON_DRAWN_LAST == CATNIP_ICON_SIGNAL,
+          "the radios follow close, and the signal mark is the last drawn one");
     CHECK(CATNIP_ICON_CP_BASE == 0xE000, "codepoint base is U+E000");
     CHECK(utf8_eq(catnip_icon_glyph(CATNIP_ICON_FOLDER), 0xEE, 0x80, 0x80),
           "folder is U+E000 (EE 80 80)");
@@ -79,7 +79,7 @@ int main(void)
     CHECK(catnip_icon_from_name("close") == CATNIP_ICON_CLOSE, "close from name");
     CHECK(catnip_icon_from_name("hologram") == CATNIP_ICON_NONE, "unknown name is NONE");
     CHECK(catnip_icon_from_name("ble") == CATNIP_ICON_BLE, "ble from name");
-    CHECK(strcmp(catnip_icon_name(CATNIP_ICON_RADAR), "radar") == 0, "radar name");
+    CHECK(strcmp(catnip_icon_name(CATNIP_ICON_SIGNAL), "signal") == 0, "signal name");
 
     inked = 1;
     for (n = 0; n < DRAWN; n++)

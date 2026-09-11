@@ -70,18 +70,25 @@ face. They are judged the same way and against each other hardest of all, becaus
 three of the four protocols are "waves" and only one of them may be drawn as
 waves.
 
-| id      | means                                | fill                             |
-| ------- | ------------------------------------ | -------------------------------- |
-| `wifi`  | the 2.4 GHz band                     | `#3D9EFF` fan over a dot         |
-| `ble`   | BLE advertisers                      | `#4D8DF6` the rune, five strokes |
-| `ir`    | infrared, the one you aim            | `#E05A5A` emitter + straight ")" |
-| `nfc`   | a card held against a reader         | `#5AD1A0` card + fan             |
-| `radar` | the Scanner itself, none of the four | `#E5B845` two open rings + blip  |
+| id       | means                                | fill                                 |
+| -------- | ------------------------------------ | ------------------------------------ |
+| `wifi`   | the 2.4 GHz band                     | `#3D9EFF` fan over a dot             |
+| `ble`    | BLE advertisers                      | `#4D8DF6` the rune, five strokes     |
+| `ir`     | infrared, the one you aim            | `#E05A5A` emitter + straight ")"     |
+| `nfc`    | a card held against a reader         | `#5AD1A0` card + fan                 |
+| `signal` | the Scanner itself, none of the four | `#E5B845` a source, waves both sides |
 
 Wi-Fi keeps the fan, because that is the one the whole world already reads. BLE
 has a mark of its own. Infrared is straight chevrons rather than arcs - a
 different shape at 14 px, not a different radius - and NFC keeps its curve but
 is anchored to a card, which is the gesture rather than the field.
+
+`signal` is symmetric, and that is what keeps it off Wi-Fi's one-sided fan: a
+source with waves on both sides is the mark everybody reads as "radio", where
+the fan means one particular radio. It was a radar - two open rings and a sweep
+
+- until somebody looked at it at 14 px, where a radar is a bullseye: a thing you
+  aim at rather than a thing that is listening.
 
 `ok` and `close` are the pair a user answers a question with. They must be
 unmistakable from each other — that pair matters more than any single icon.

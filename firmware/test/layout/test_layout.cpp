@@ -622,6 +622,16 @@ int main(void)
         CHECK(n && lv_obj_get_y(n) + (int32_t)lv_obj_get_height(n) <=
                        CATNIP_SCREEN_H - CATNIP_FRAME_HINT_H,
               "and that row is clear of the hint's strip");
+        /* Top left, not centred. A row that is not full must not float: the
+         * first cell has to be in the same place whether there are four
+         * protocols or six apps, or "the top left one" is not something a user
+         * can learn. */
+        {
+            lv_area_t a, b;
+            lv_obj_get_coords(w, &a);
+            lv_obj_get_coords(n, &b);
+            CHECK(a.x1 == b.x1, "and the short second row starts under the first");
+        }
     }
 
     /* ---- the action bar, and the hint riding on it ---------------------- */

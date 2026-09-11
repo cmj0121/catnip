@@ -118,8 +118,8 @@ typedef enum {
     CATNIP_ICON_CLOSE,
 
     /* The radios, and the act of listening for them (#57). One per protocol
-     * plus a radar, which is none of them: the Scanner's grid draws a cell per
-     * protocol and the app itself wears the radar.
+     * plus a signal mark, which is none of them: the Scanner's grid draws a
+     * cell per protocol and the app itself wears the signal.
      *
      * BLE rather than a Bluetooth: this radio hears advertisers and cannot
      * hear the Classic devices the rune also stands for, and a cell that
@@ -130,7 +130,7 @@ typedef enum {
     CATNIP_ICON_BLE,
     CATNIP_ICON_IR,
     CATNIP_ICON_NFC,
-    CATNIP_ICON_RADAR,
+    CATNIP_ICON_SIGNAL,
 
     /* The mascot, and not one of the twelve drawn glyphs: it is a platform
      * image rather than a category, it is the only thing here that is a
@@ -144,7 +144,7 @@ typedef enum {
  * arrays cover. Said once: every guard that asks "is there a bitmap for this"
  * asked it as `<= CATNIP_ICON_CLOSE` until the set grew, and five icons with
  * bitmaps drew nothing because three guards were not updated together. */
-#define CATNIP_ICON_DRAWN_LAST CATNIP_ICON_RADAR
+#define CATNIP_ICON_DRAWN_LAST CATNIP_ICON_SIGNAL
 
 /* How a list arranges its children. The node is the same either way - the same
  * `selected`, the same events, the same rows underneath - and only the flow

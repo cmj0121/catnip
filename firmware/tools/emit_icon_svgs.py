@@ -32,9 +32,9 @@ IDS = (
     "ble",
     "ir",
     "nfc",
-    # And the Scanner's own face: rings and a sweep, which is a radar rather
-    # than any one of the four.
-    "radar",
+    # And the Scanner's own face: a source with waves either side of it, which
+    # is "there are signals here" rather than any one protocol.
+    "signal",
 )
 
 COLOUR = {
@@ -42,7 +42,7 @@ COLOUR = {
     "ble": "#4D8DF6",
     "ir": "#E05A5A",
     "nfc": "#5AD1A0",
-    "radar": "#E5B845",
+    "signal": "#E5B845",
     "folder": "#3D9EFF",
     "file": "#8FA3B8",
     "app": "#E09A4A",
@@ -462,13 +462,19 @@ def paths():
         arc_band(70, 64, 22, 12, -58, 58),
         arc_band(70, 64, 42, 12, -52, 52),
     ]
-    # The Scanner's own face. Not any one of the four: rings and a sweep, which
-    # is the act rather than the protocol.
-    radar = [
-        arc_band(64, 64, 50, 12, 318, 258),
-        arc_band(64, 64, 26, 12, 318, 258),
-        circle(64, 64, 9),
-        circle(97, 31, 11),
+    # The Scanner's own face. Not any one of the four: a source with waves
+    # either side of it, which is the mark everybody reads as "radio" - and
+    # symmetric, which is what keeps it off the Wi-Fi cell's one-sided fan.
+    #
+    # It was two open rings and a sweep before, which is a radar - and a radar
+    # at 14 px is a bullseye, a thing you aim at rather than a thing that is
+    # listening.
+    signal = [
+        circle(64, 64, 12),
+        arc_band(64, 64, 32, 12, -50, 50),
+        arc_band(64, 64, 32, 12, 130, 230),
+        arc_band(64, 64, 52, 12, -42, 42),
+        arc_band(64, 64, 52, 12, 138, 222),
     ]
     return {
         "folder": folder,
@@ -487,7 +493,7 @@ def paths():
         "ble": ble,
         "ir": ir,
         "nfc": nfc,
-        "radar": radar,
+        "signal": signal,
     }
 
 
@@ -497,7 +503,7 @@ def main():
     Name them, in practice. The twelve original masters in assets/icons were
     refined after this script last emitted them - colours moved, second-colour
     marks were added - and re-emitting all of them would quietly undo that
-    work. So this takes ids: `emit_icon_svgs.py wifi ble ir nfc radar` writes
+    work. So this takes ids: `emit_icon_svgs.py wifi ble ir nfc signal` writes
     the five and leaves the rest of the tree alone."""
     d = paths()
     want = sys.argv[1:] or list(IDS)

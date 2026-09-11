@@ -33,13 +33,13 @@ IDS = (
     "ok",
     "close",
     # The radios and the act of listening for them (#57). Four protocols and
-    # one radar: the Scanner's grid draws one cell per protocol and the app
-    # itself wears the radar, which is none of them.
+    # one signal mark: the Scanner's grid draws one cell per protocol and the
+    # app itself wears the signal, which is none of them.
     "wifi",
     "ble",
     "ir",
     "nfc",
-    "radar",
+    "signal",
 )
 # List rows at 14, long-A actions at 32. Same SVG, different raster.
 # 14 beside a word in a row or an operator button; 64 alone, filling the main

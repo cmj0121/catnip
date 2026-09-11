@@ -1094,12 +1094,18 @@ void apply_list_layout(Entry *e)
     lv_obj_set_flex_flow(e->obj, grid               ? LV_FLEX_FLOW_ROW_WRAP
                                  : (mixer || strip) ? LV_FLEX_FLOW_ROW
                                                     : LV_FLEX_FLOW_COLUMN);
-    /* The last argument stacks wrapped lines, and only a grid has more than one:
-     * its rows pack from the top so the grid opens on its first row rather than
-     * centred with the ends clipped. */
+    /* A grid packs from the top left, on both axes: it is a directory, and a
+     * directory has a first item. Centred, a row that was not full sat in the
+     * middle of the region and the first cell was in a different place for four
+     * apps than for six - so "the top left one" was not a thing a user could
+     * learn. The last argument stacks the wrapped lines, and only a grid has
+     * more than one.
+     *
+     * The other shapes do centre, because none of them wraps: a carousel is one
+     * cell filling the region, a mixer and a strip are a single line whose
+     * items share the width. */
     lv_obj_set_flex_align(
-        e->obj,
-        (carousel || mixer || strip || grid) ? LV_FLEX_ALIGN_CENTER : LV_FLEX_ALIGN_START,
+        e->obj, (carousel || mixer || strip) ? LV_FLEX_ALIGN_CENTER : LV_FLEX_ALIGN_START,
         LV_FLEX_ALIGN_CENTER, grid ? LV_FLEX_ALIGN_START : LV_FLEX_ALIGN_CENTER);
     bool text = e->layout == CATNIP_LAYOUT_TEXT;
     lv_obj_set_style_border_width(
