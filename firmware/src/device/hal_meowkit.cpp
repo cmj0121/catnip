@@ -174,6 +174,20 @@ int hal_ble_adv_state(void *ud)
     return catnip_ble_adv_up() ? 1 : 0;
 }
 
+void hal_ble_adv_set_type(void *ud, int connectable, const uint8_t *scan_rsp,
+                          int scan_rsp_len)
+{
+    (void)ud;
+    catnip_ble_adv_set_type(connectable != 0, scan_rsp,
+                            scan_rsp_len > 0 ? (size_t)scan_rsp_len : 0);
+}
+
+void hal_ble_adv_set_addr(void *ud, const uint8_t *addr)
+{
+    (void)ud;
+    catnip_ble_adv_set_addr(addr);
+}
+
 void hal_wifi_rescan(void *ud)
 {
     (void)ud;
@@ -302,6 +316,8 @@ const catnip_hal *catnip_meowkit_hal_begin(void)
     g_hal.ble_adv_begin = hal_ble_adv_begin;
     g_hal.ble_adv_end = hal_ble_adv_end;
     g_hal.ble_adv_state = hal_ble_adv_state;
+    g_hal.ble_adv_set_type = hal_ble_adv_set_type;
+    g_hal.ble_adv_set_addr = hal_ble_adv_set_addr;
 
     /* fs.* is the card and nothing else. The root is the mount point itself,
      * because catnip_api.c reaches the card through plain stdio - fopen,

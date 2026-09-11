@@ -24,10 +24,22 @@
  * forgot it would produce a beacon that stutters while Wi-Fi rejoins underneath
  * it, which nothing on screen would explain.
  *
- * **Non-connectable, and silent.** The advertisement is ADV_NONCONN_IND: a
- * beacon offers nothing to connect to and answers no scan request, which is
- * both what a beacon is and what keeps the whole 31-byte payload for the app's
- * own bytes rather than spending any of it on a name a scanner would ask for.
+ * **Non-connectable and silent, by default.** Left alone the advertisement is
+ * ADV_NONCONN_IND: a beacon offers nothing to connect to and answers no scan
+ * request, which is both what a beacon is and what keeps the whole 31-byte
+ * payload for the app's own bytes rather than spending any of it on a name a
+ * scanner would ask for. That is the whole of what #60 needs, so it is the
+ * default and #60 never asks for anything else.
+ *
+ * **But the spam surface (#89) needs the other shapes.** Some of the public
+ * Momentum-Apps spoof families are only convincing as a connectable ADV_IND -
+ * a phone will not raise a pairing popup for something it cannot pair with -
+ * and a few carry a name in a scan response. And a catalogue that cycles has to
+ * look like many devices, not one, so it rotates the advertiser address every
+ * re-arm. Those three - the adv type, a scan response, the address - are what
+ * set_type() and set_addr() below add, each applied by the next begin(). They
+ * default to the beacon above, so a caller that never touches them (which is
+ * #60) is advertising exactly as it always was.
  */
 #ifndef CATNIP_BLE_ADV_H
 #define CATNIP_BLE_ADV_H
@@ -64,6 +76,23 @@ void catnip_ble_adv_end(void);
  * there is for the mouse - a beacon is never connected to - so this one boolean
  * is the whole of its state: off, or advertising. */
 bool catnip_ble_adv_up(void);
+
+/* Shape the next begin (#89, the spam surface). Both default - never called -
+ * to the beacon above: non-connectable, no scan response, so #60 is untouched.
+ * `connectable` true sends a connectable ADV_IND, which is what makes a phone
+ * offer to pair; `scan_rsp`/`len` (NULL or 0 for none) is the data answered to
+ * a scan request. The choice persists until changed and is applied on the next
+ * begin, so an app sets it once and every re-arm carries it. */
+void catnip_ble_adv_set_type(bool connectable, const uint8_t *scan_rsp,
+                             size_t scan_rsp_len);
+
+/* Pick the advertiser address the next begin advertises under (#89). `addr` is
+ * six bytes to set one explicitly, or NULL for a fresh random static address -
+ * which is how a cycling catalogue looks like a new device each pass rather
+ * than one device shouting. Applied on the next begin, alongside the reset that
+ * re-arm already does; NimBLE's own-address type is switched to random to match.
+ * Never called, the address is the controller's own and does not change. */
+void catnip_ble_adv_set_addr(const uint8_t *addr);
 
 #ifdef __cplusplus
 }

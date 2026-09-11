@@ -122,6 +122,20 @@ static int l_beacon_start(lua_State *L)
     const char *payload = luaL_checklstring(L, -1, &len);
     lua_getfield(L, 1, "interval_ms");
     int interval = (int)luaL_optinteger(L, -1, 100);
+    /* The spam surface's optional shaping (#89), read here and applied before
+     * begin so a re-arm carries it. `connectable` asks for a connectable
+     * ADV_IND - the packet a phone will offer to pair with - and
+     * `scan_response` is a second payload answered on a scan request. Both are
+     * absent for a plain beacon (#60), and when both are absent set_type is not
+     * called at all, so #60 reaches the HAL exactly as it always did. */
+    lua_getfield(L, 1, "connectable");
+    int has_conn = !lua_isnil(L, -1);
+    int connectable = lua_toboolean(L, -1);
+    lua_getfield(L, 1, "scan_response");
+    size_t sr_len = 0;
+    const char *scan_rsp = lua_isnil(L, -1) ? NULL : luaL_checklstring(L, -1, &sr_len);
+    if ((has_conn || scan_rsp) && h && h->ble_adv_set_type)
+        h->ble_adv_set_type(h->ud, connectable, (const uint8_t *)scan_rsp, (int)sr_len);
     /* False on a device with no radio for this, as the mouse answers: an app
      * has to be able to tell a beacon that never went out from one nobody is
      * listening to, and only the first is something this side knows. */
@@ -130,6 +144,24 @@ static int l_beacon_start(lua_State *L)
                ? h->ble_adv_begin(h->ud, (const uint8_t *)payload, (int)len, interval)
                : 0);
     return 1;
+}
+
+/* device.beacon.address([bytes]) - pick the advertiser address the next start
+ * advertises under (#89). Six raw bytes to set one, or no argument for a fresh
+ * random address - which is how the spam app looks like a new device each
+ * cycle. A no-op on a device without the hook. */
+static int l_beacon_address(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+    const uint8_t *addr = NULL;
+    if (!lua_isnoneornil(L, 1)) {
+        size_t n = 0;
+        const char *s = luaL_checklstring(L, 1, &n);
+        luaL_argcheck(L, n == 6, 1, "address must be exactly 6 bytes");
+        addr = (const uint8_t *)s;
+    }
+    if (h && h->ble_adv_set_addr) h->ble_adv_set_addr(h->ud, addr);
+    return 0;
 }
 
 static int l_beacon_stop(lua_State *L)
@@ -630,6 +662,7 @@ int catnip_api_open(catnip_rt *rt, const catnip_hal *hal)
                                             {"beacon_start", l_beacon_start},
                                             {"beacon_stop", l_beacon_stop},
                                             {"beacon_state", l_beacon_state},
+                                            {"beacon_address", l_beacon_address},
                                             {NULL, NULL}};
     static const luaL_Reg sensor_funcs[] = {
         {"imu", l_imu}, {"rtc", l_rtc}, {"rtc_set", l_rtc_set}, {NULL, NULL}};
@@ -691,9 +724,10 @@ int catnip_api_open(catnip_rt *rt, const catnip_hal *hal)
         "device.mouse_start, device.mouse_stop = nil, nil\n"
         "device.mouse_state, device.mouse_move = nil, nil\n"
         "device.beacon = { start = device.beacon_start, stop = device.beacon_stop,\n"
-        "                  state = device.beacon_state }\n"
+        "                  state = device.beacon_state, address = device.beacon_address "
+        "}\n"
         "device.beacon_start, device.beacon_stop = nil, nil\n"
-        "device.beacon_state = nil\n";
+        "device.beacon_state, device.beacon_address = nil, nil\n";
     if (luaL_dostring(L, DEVICE_LUA) != LUA_OK) {
         catnip_rt_report_error(rt, L);
         return -1;
