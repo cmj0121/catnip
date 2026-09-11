@@ -132,6 +132,12 @@ hold two lines of one within a week. `badge = 3` puts a small disc of the
 primary colour on the corner; the value is a _number_, and a number cannot grow
 into a sentence.
 
+**It packs from the top left.** A grid is a directory, and a directory has a
+first item. Centred, a row that is not full floats in the middle of the region
+and the first cell lands in a different place for four cells than for six — so
+"the top left one" stops being something a user can learn. The other shapes do
+centre, because none of them wraps.
+
 Absent is not zero. A cell with no badge has not been counted yet; a cell
 showing `0` has been counted and came to nothing. The Scanner needs both — it
 lists one radio at a time and the others have to say "not yet" while they wait,
@@ -238,8 +244,23 @@ can see: a scan with nothing to show yet, an app being read off the card.
 
 **"Nothing to show yet", not "something is running."** A caller that keeps
 polling keeps a scan in the air the whole time it is open, and a spinner that
-never stops tells nobody anything. It is up from the first ask until the first
-answer, and it ends on its own — a claim that takes the whole device must be one
+never stops tells nobody anything.
+
+So it is raised by **throwing the last answer away**, not by asking for one. A
+scan's claim begins at `rescan()` and ends at the first answer after it; asking
+begins nothing, because asking is only how an answer is collected and a caller
+polling for one it can already draw is not waiting. An app that opens on a page
+of results asks for a fresh look on the way in, which is what it wanted anyway,
+and gets the ring for it.
+
+It used to begin at the first ask and lapse when the asking stopped. That read
+perfectly with one radio and one page, and fell apart the moment a page polled
+two radios in turn: each one's claim lapsed while the other was sweeping, so
+every round put a full-screen opaque ring back over a grid that had counts on it
+and was perfectly readable. **A page with something to show is not waiting**,
+whatever is running behind it.
+
+It ends on its own either way — a claim that takes the whole device must be one
 that can end without anybody clearing it.
 
 **The status LED says it too**, which is the one place an answer can be read
@@ -762,6 +783,65 @@ spends it on the one operation it has. Long A does the same thing, so a user
 arriving from any other app finds it where they expect. Nothing is drawn either
 way, which is the part of rule 7 that actually binds.
 
+## Example: the Scanner
+
+_Built (#57)._ The File Browser is a list and the Clock is a face; this is the
+third shape — **a grid that an app builds for itself**, which until now only the
+launcher had.
+
+It listens on four protocols and can hear two of them, and every decision on the
+page comes out of that sentence.
+
+```text
+┌────────────────────────────────────────────────┐
+│  [BATTERY]        BLE               1/1        │  the focused cell names itself
+│                                                │
+│   (( ))⁸     ✳³      •))       ▮))             │  wifi  ble   ir    nfc
+│                                                │
+│   ▮))                                          │
+└────────────────────────────────────────────────┘
+```
+
+**Four cells, and two of them greyed.** IR and NFC are drawn rather than left
+out, because "this device does not have it" and "this device has not been told
+to look" are different answers and a grid showing only what works cannot tell
+them apart — a user whose headphones do not appear needs to be able to see
+whether the scanner is broken. Pressing one opens its page, which says the true
+thing. **A press that does nothing at all is the one answer nobody can tell from
+a crash.**
+
+**The count is the badge, and absent is not zero.** A cell with no badge has not
+been listened to yet; a cell showing `0` has been, and heard nobody.
+
+**The word is in the header, as it is in the launcher.** That matters more here
+than there: the mark on the BLE cell is the Bluetooth rune, which stands for
+more than this radio can hear, and the header is where the claim gets narrowed
+to what is true.
+
+**One radio at a time, and the turn waits for an answer.** The 2.4 GHz front end
+is shared, so a Wi-Fi sweep and a BLE window running together are two scans each
+getting a fraction of the radio. Nothing has to be stopped to arrange it: each
+driver starts a scan when asked and rests when it is not, so "one at a time" is
+only the app asking one at a time. The turn moves when a radio answers and not
+before — a round robin that stepped on a "still listening" would leave every
+cell permanently half-asked.
+
+**Which one is listening needs no marker**, because the three levels of ink
+already say it: full for the radio listening now, quiet for one resting, faint
+for one this board cannot hear. The brightest cell moves, and that movement is
+also the page saying it is working.
+
+**One round, and then it holds what it found.** A scanner that never stops is a
+front end that never stops, kept busy to refresh a number nobody is watching
+change. When the round ends nothing is resting either, so every cell this board
+can use goes back to full ink.
+
+**Long A looks again — at all of them.** An operation lives behind a long press
+and is done rather than offered, the way the launcher's pin is. The counts stay
+up while the new round runs: blanking them would replace a true-a-minute-ago
+answer with the one thing this page reserves for "not looked yet". Short A opens
+one protocol and asks that radio, which is the same rule at one cell's scale.
+
 ## Home, and where your app is found
 
 _Designed, not built._
@@ -953,10 +1033,17 @@ owed:
 **Two apps changed, and neither had to.** The clock became three screens
 because it _is_ three screens; the File Browser changed because it was building
 its own options menu and the bar took that over — it lost sixty lines and gained
-a manifest catalogue. The WiFi Prober has not been touched at all: every one of
-1–6 is the platform's side of a seam it already sits behind, which is the
-argument for the seam. An app that had to be edited to get a taller `body` would
-mean the roles never worked.
+a manifest catalogue. The WiFi Prober — now the Scanner's Wi-Fi page — was not
+touched at all: every one of 1–6 is the platform's side of a seam it already
+sits behind, which is the argument for the seam. An app that had to be edited to
+get a taller `body` would mean the roles never worked.
+
+A third round since, from building the Scanner (#57), and it went the same way:
+a cell that carries a count, a grid that packs from the top left, and a waiting
+ring that is raised by throwing an answer away rather than by asking for one.
+All three are the platform's side of the same seam — the app names four
+protocols and a count each, and decides nothing about what any of it looks
+like.
 
 Each of 1–6 is testable at the host layer that already exists — `test/native`
 for what the input pass and the page machine decide, `test/layout` for what LVGL
