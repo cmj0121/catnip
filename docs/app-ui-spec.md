@@ -125,6 +125,18 @@ figure leaves both bottom corners empty whether or not anything is put in one.
 optional here: `2/3` is the only thing on the screen that says a third page
 exists, and a grid without it is a grid that appears to be all there is.
 
+**A cell is a picture, and it may carry a count.** Nothing else — no caption, no
+second line, no word. The focused cell's name is the header's `[TITLE]`, which
+is where a grid says what you are on, and a cell that could hold a label would
+hold two lines of one within a week. `badge = 3` puts a small disc of the
+primary colour on the corner; the value is a _number_, and a number cannot grow
+into a sentence.
+
+Absent is not zero. A cell with no badge has not been counted yet; a cell
+showing `0` has been counted and came to nothing. The Scanner needs both — it
+lists one radio at a time and the others have to say "not yet" while they wait,
+which `0` would say as "nothing there".
+
 **4. List.** One item per line — a row you may pick, or a line you may only
 read — and **paged**, on fixed boundaries: lines one to eight, then nine to
 sixteen. The region is cut to a whole number of them, so a half-line at the
@@ -500,6 +512,7 @@ The manifest carries the knobs; Lua carries the behaviour.
 | `hints`                               | manifest | `false` to draw no control hint over you                      |
 | `ui.title(s)`                         | Lua      | a title that changes at runtime                               |
 | `layout`                              | Lua      | on a list: `"grid"`, `"mixer"`, `"row"`, `"canvas"`, `"text"` |
+| `badge`                               | Lua      | a count on a grid cell; absent is "not counted", not zero     |
 | `style`                               | Lua      | which of the roles below a node is set in                     |
 | `align`                               | Lua      | `"right"` on a line that must clear the hint's corner         |
 | `on_click` / `on_options` / `on_back` | Lua      | claim short A, long A, short B                                |

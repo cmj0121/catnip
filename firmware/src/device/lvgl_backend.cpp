@@ -322,6 +322,10 @@ void apply_badge(Entry *e, int n)
         lv_obj_set_style_pad_hor(e->badge, 4, 0);
         lv_obj_set_style_pad_ver(e->badge, 1, 0);
         lv_obj_remove_flag(e->badge, LV_OBJ_FLAG_CLICKABLE);
+        /* Out of the flex flow, or the cell would lay it out as a third row
+         * under the picture and the alignment below would be ignored. A badge
+         * is a thing stuck on the corner of the cell, not a line of it. */
+        lv_obj_add_flag(e->badge, LV_OBJ_FLAG_IGNORE_LAYOUT);
         e->badge_n = -1;
     }
     lv_obj_remove_flag(e->badge, LV_OBJ_FLAG_HIDDEN);
@@ -597,7 +601,13 @@ void apply_text(Entry *e, const char *text, catnip_icon icon, const char *image,
         lv_anim_delete(img, NULL);
         lv_obj_set_style_translate_y(img, 0, 0);
         lv_image_set_inner_align(img, LV_IMAGE_ALIGN_DEFAULT);
-        lv_image_set_src(img, big ? &catnip_icon_img_64[icon - CATNIP_ICON_FOLDER]
+        /* The 64 px source whenever the box is bigger than 14, which is the
+         * carousel and the grid. It used to be the carousel only, so a glyph in
+         * a grid cell got a 64 px box with a 14 px picture sitting in the corner
+         * of it - which nothing caught, because the only grid the device had
+         * until now fills its cells with app icons and never reaches here. */
+        lv_image_set_src(img, (big || grid_px)
+                                  ? &catnip_icon_img_64[icon - CATNIP_ICON_FOLDER]
                                   : &catnip_icon_img_14[icon - CATNIP_ICON_FOLDER]);
         lv_obj_remove_flag(img, LV_OBJ_FLAG_HIDDEN);
     } else {

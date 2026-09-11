@@ -35,44 +35,60 @@ def _svg(parts):
     )
 
 
-# ---- WiFi Prober: the signal fan ------------------------------------------
-# Three arcs off one origin and a dot at the origin - the mark everyone already
-# reads as "wireless".
-W_CX, W_CY = 64.0, 96.0
-W_RADII = (26.0, 50.0, 74.0)
-W_STROKE = 13.0
-W_SPREAD = 45.0  # degrees either side of straight up
-W_DOT = 10.0
+# ---- Scanner: rings, a gap, and something found ---------------------------
+# Two open rings and a blip sitting in the gap: a radar rather than any one
+# protocol, because this app listens on several and its face must not promise
+# the one everybody recognises. The fan that used to be here went to the
+# platform's `wifi` glyph, where it now means Wi-Fi and only Wi-Fi.
+#
+# The gap is what makes it a sweep instead of a target. A pair of closed rings
+# reads as a bullseye, which is a thing you aim at rather than a thing that is
+# looking.
+S_CX, S_CY = 64.0, 64.0
+S_RADII = (50.0, 26.0)
+S_STROKE = 12.0
+S_FROM, S_TO = 318.0, 318.0 + 300.0  # clockwise, leaving the gap at the blip
+S_DOT = 9.0
+S_BLIP = 11.0
+S_BLIP_XY = (99.4, 28.6)  # on the outer ring, in the gap
 
 
-def wifi_svg():
+def scanner_svg():
     parts = []
-    for r in W_RADII:
-        a0 = math.radians(270.0 - W_SPREAD)
-        a1 = math.radians(270.0 + W_SPREAD)
-        x0, y0 = W_CX + r * math.cos(a0), W_CY + r * math.sin(a0)
-        x1, y1 = W_CX + r * math.cos(a1), W_CY + r * math.sin(a1)
+    for r in S_RADII:
+        a0, a1 = math.radians(S_FROM), math.radians(S_TO)
+        x0, y0 = S_CX + r * math.cos(a0), S_CY + r * math.sin(a0)
+        x1, y1 = S_CX + r * math.cos(a1), S_CY + r * math.sin(a1)
         parts.append(
             '  <path fill="none" stroke="%s" stroke-width="%.1f" '
-            'stroke-linecap="round" d="M %.3f %.3f A %.3f %.3f 0 0 1 %.3f %.3f"/>'
-            % (BODY, W_STROKE, x0, y0, r, r, x1, y1)
+            'stroke-linecap="round" d="M %.3f %.3f A %.3f %.3f 0 1 1 %.3f %.3f"/>'
+            % (BODY, S_STROKE, x0, y0, r, r, x1, y1)
         )
     parts.append(
-        '  <circle fill="%s" cx="%.1f" cy="%.1f" r="%.1f"/>' % (ACCENT, W_CX, W_CY, W_DOT)
+        '  <circle fill="%s" cx="%.1f" cy="%.1f" r="%.1f"/>' % (ACCENT, S_CX, S_CY, S_DOT)
+    )
+    parts.append(
+        '  <circle fill="%s" cx="%.1f" cy="%.1f" r="%.1f"/>'
+        % (ACCENT, S_BLIP_XY[0], S_BLIP_XY[1], S_BLIP)
     )
     return _svg(parts)
 
 
-def wifi_png():
+def scanner_png():
     from PIL import Image, ImageDraw
 
     im = Image.new("RGBA", (SIZE * SS, SIZE * SS), (0, 0, 0, 0))
     d = ImageDraw.Draw(im)
-    for r in W_RADII:
-        box = [(W_CX - r) * SS, (W_CY - r) * SS, (W_CX + r) * SS, (W_CY + r) * SS]
-        d.arc(box, 270.0 - W_SPREAD, 270.0 + W_SPREAD, fill=BODY, width=int(W_STROKE * SS))
+    for r in S_RADII:
+        box = [(S_CX - r) * SS, (S_CY - r) * SS, (S_CX + r) * SS, (S_CY + r) * SS]
+        d.arc(box, S_FROM, S_TO, fill=BODY, width=int(S_STROKE * SS))
     d.ellipse(
-        [(W_CX - W_DOT) * SS, (W_CY - W_DOT) * SS, (W_CX + W_DOT) * SS, (W_CY + W_DOT) * SS],
+        [(S_CX - S_DOT) * SS, (S_CY - S_DOT) * SS, (S_CX + S_DOT) * SS, (S_CY + S_DOT) * SS],
+        fill=ACCENT,
+    )
+    bx, by = S_BLIP_XY
+    d.ellipse(
+        [(bx - S_BLIP) * SS, (by - S_BLIP) * SS, (bx + S_BLIP) * SS, (by + S_BLIP) * SS],
         fill=ACCENT,
     )
     return im.resize((SIZE, SIZE), Image.LANCZOS)
@@ -131,7 +147,7 @@ def clock_png():
 
 
 ICONS = {
-    "wifiprober": (wifi_svg, wifi_png),
+    "scanner": (scanner_svg, scanner_png),
     "clock": (clock_svg, clock_png),
 }
 
