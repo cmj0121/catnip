@@ -37,6 +37,7 @@
 #include "device/hal_meowkit.h"
 #include "device/app_icon.h"
 #include "device/frame.h"
+#include "device/ble.h"
 #include "device/lvgl_backend.h"
 #include "device/lvgl_port.h"
 #include "device/pmu.h"
@@ -738,7 +739,11 @@ void setup()
  * on the way in - see below. */
 static const char *busy_reason(void)
 {
-    if (catnip_wifi_scanning()) return "scanning";
+    /* Either radio, one word. A page that looks at more than one of them is
+     * looking for the same thing on each, and "scanning for Wi-Fi" followed by
+     * "scanning for BLE" would be the device narrating its own implementation
+     * at somebody who asked what is nearby. */
+    if (catnip_wifi_scanning() || catnip_ble_scanning()) return "scanning";
     return NULL;
 }
 
@@ -1030,6 +1035,7 @@ void loop()
      * only stepped from inside the clock sync, so a join was advanced only when
      * an NTP request happened to be in flight too. */
     (void)catnip_wifi_poll();
+    catnip_ble_poll();
     catnip_net_time_poll();
 
     /* The frame, last: the counter it draws is read off the tree the pass above

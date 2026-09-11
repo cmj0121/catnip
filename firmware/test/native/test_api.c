@@ -104,6 +104,34 @@ static int m_wifi_status(void *ud)
     (void)ud;
     return 1;
 }
+/* A radio that is still listening until the script says otherwise, so the test
+ * can drive both halves of the contract: nil, then a list. */
+static int m_ble_rescans;
+static int m_ble_asks;
+static int m_ble_scan(void *ud, catnip_ble_dev *out, int max)
+{
+    (void)ud;
+    /* The first ask starts a listen and has nothing yet; the next one has the
+     * answer. That is the contract, and driving it this way means the test
+     * exercises both halves of it rather than only the half that returns a
+     * list. */
+    if (m_ble_asks++ == 0 || max < 2) return -1;
+    snprintf(out[0].name, sizeof(out[0].name), "%s", "beacon");
+    snprintf(out[0].addr, sizeof(out[0].addr), "%s", "AA:BB:CC:DD:EE:01");
+    out[0].rssi = -40;
+    /* The common case: an advertiser that carries no name at all. The driver
+     * leaves it empty rather than inventing a word no radio ever said. */
+    out[1].name[0] = '\0';
+    snprintf(out[1].addr, sizeof(out[1].addr), "%s", "AA:BB:CC:DD:EE:02");
+    out[1].rssi = -70;
+    return 2;
+}
+static void m_ble_rescan(void *ud)
+{
+    (void)ud;
+    m_ble_rescans++;
+}
+
 static const char *m_wifi_ssid(void *ud)
 {
     (void)ud;
@@ -145,6 +173,17 @@ static const char *SCRIPT =
     "  assert(gpio.read(5) == 1, 'gpio read')\n"
     "  assert(gpio.adc(6) == 512, 'gpio adc')\n"
     "  assert(service.wifi.status() == true, 'wifi status')\n"
+    /* The two radios answer the same way, which is the whole of what an app has
+     * to learn: nil while listening, a table when there is something to show.
+     * A caller that has learned one should not have to learn the other. */
+    "  assert(service.ble.scan() == nil, 'ble scan is nil while listening')\n"
+    "  local d = service.ble.scan()\n"
+    "  assert(#d == 2, 'ble scan count')\n"
+    "  assert(d[1].addr == 'AA:BB:CC:DD:EE:01', 'ble address')\n"
+    "  assert(d[1].name == 'beacon', 'ble name when it gives one')\n"
+    "  assert(d[2].name == '', 'and empty when it does not, not invented')\n"
+    "  assert(d[2].rssi == -70, 'ble rssi')\n"
+    "  assert(service.ble.rescan() == true, 'ble rescan reaches the radio')\n"
     "  assert(service.wifi.ssid() == 'catnet', 'wifi ssid')\n"
     "  assert(service.http.get('http://x/ping') == 'pong', 'http ok')\n"
     "  assert(service.http.get('http://x/none') == nil, 'http fail is nil')\n"
@@ -185,6 +224,8 @@ int main(void)
     hal.gpio_adc = m_gpio_adc;
     hal.wifi_status = m_wifi_status;
     hal.wifi_ssid = m_wifi_ssid;
+    hal.ble_scan = m_ble_scan;
+    hal.ble_rescan = m_ble_rescan;
     hal.http_get = m_http_get;
     hal.fs_base = base;
 

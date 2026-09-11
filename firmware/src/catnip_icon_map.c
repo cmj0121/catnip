@@ -19,6 +19,11 @@ static const char *const kNames[] = {
     "warning",
     "ok",
     "close",
+    "wifi",
+    "ble",
+    "ir",
+    "nfc",
+    "signal",
     /* Not a generated glyph - see catnip_icon. Named here so the launcher can
      * ask for it the way anything else asks for an icon. */
     "mascot",
@@ -49,13 +54,14 @@ catnip_icon catnip_icon_from_name(const char *name)
 
 const char *catnip_icon_glyph(catnip_icon icon)
 {
-    /* U+E000..U+E00B as 3-byte UTF-8: EE 80 80 .. EE 80 8B. */
+    /* U+E000..U+E010 as 3-byte UTF-8: EE 80 80 .. EE 80 90. */
     static const char kGlyphs[][4] = {
-        "\xEE\x80\x80", "\xEE\x80\x81", "\xEE\x80\x82", "\xEE\x80\x83",
-        "\xEE\x80\x84", "\xEE\x80\x85", "\xEE\x80\x86", "\xEE\x80\x87",
-        "\xEE\x80\x88", "\xEE\x80\x89", "\xEE\x80\x8A", "\xEE\x80\x8B",
+        "\xEE\x80\x80", "\xEE\x80\x81", "\xEE\x80\x82", "\xEE\x80\x83", "\xEE\x80\x84",
+        "\xEE\x80\x85", "\xEE\x80\x86", "\xEE\x80\x87", "\xEE\x80\x88", "\xEE\x80\x89",
+        "\xEE\x80\x8A", "\xEE\x80\x8B", "\xEE\x80\x8C", "\xEE\x80\x8D", "\xEE\x80\x8E",
+        "\xEE\x80\x8F", "\xEE\x80\x90",
     };
 
-    if (icon < CATNIP_ICON_FOLDER || icon > CATNIP_ICON_CLOSE) return NULL;
+    if (icon < CATNIP_ICON_FOLDER || icon > CATNIP_ICON_DRAWN_LAST) return NULL;
     return kGlyphs[icon - CATNIP_ICON_FOLDER];
 }

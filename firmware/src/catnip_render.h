@@ -117,6 +117,21 @@ typedef enum {
     CATNIP_ICON_OK,
     CATNIP_ICON_CLOSE,
 
+    /* The radios, and the act of listening for them (#57). One per protocol
+     * plus a signal mark, which is none of them: the Scanner's grid draws a
+     * cell per protocol and the app itself wears the signal.
+     *
+     * BLE rather than a Bluetooth: this radio hears advertisers and cannot
+     * hear the Classic devices the rune also stands for, and a cell that
+     * promised headphones would be read as broken rather than as honest. The
+     * mark is still the rune, because there is no other picture of it - the
+     * word underneath is what narrows the claim. */
+    CATNIP_ICON_WIFI,
+    CATNIP_ICON_BLE,
+    CATNIP_ICON_IR,
+    CATNIP_ICON_NFC,
+    CATNIP_ICON_SIGNAL,
+
     /* The mascot, and not one of the twelve drawn glyphs: it is a platform
      * image rather than a category, it is the only thing here that is a
      * picture of something, and it is drawn at whatever size the shape on
@@ -124,6 +139,12 @@ typedef enum {
      * the twelve keep their codepoints. */
     CATNIP_ICON_MASCOT,
 } catnip_icon;
+
+/* The last id tools/gen_icons.py draws, which is the range the two image
+ * arrays cover. Said once: every guard that asks "is there a bitmap for this"
+ * asked it as `<= CATNIP_ICON_CLOSE` until the set grew, and five icons with
+ * bitmaps drew nothing because three guards were not updated together. */
+#define CATNIP_ICON_DRAWN_LAST CATNIP_ICON_SIGNAL
 
 /* How a list arranges its children. The node is the same either way - the same
  * `selected`, the same events, the same rows underneath - and only the flow
@@ -284,6 +305,18 @@ typedef struct {
      * quietly rounded, and a control that silently disagrees with the finger is
      * worse than one that never offered. */
     int steps;
+    /* A count on a grid cell, or -1 for none.
+     *
+     * The one thing a cell may carry besides its picture, and the limit is the
+     * rule rather than an omission: a badge is a *number*, and a number cannot
+     * become a label. A cell that could carry words would have a caption under
+     * it within a week, and then a second line under that - which is why the
+     * name of a focused cell lives in the header and not on the cell.
+     *
+     * It exists for a grid that groups: four radios, each saying how many it
+     * can see, all four readable at once. Asking the header instead would have
+     * shown one number at a time, which is not a group view. */
+    int badge;
     int selected; /* list only: the selected child, as a zero-based index to
                        * match `index` below, or -1 for none. Lua's `selected`
                        * prop is one-based like every other Lua index; the

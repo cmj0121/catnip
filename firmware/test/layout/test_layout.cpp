@@ -588,6 +588,52 @@ int main(void)
         catnip_app_grid_free(g);
     }
 
+    /* ---- the scanner's group view: a grid whose cells carry counts ----- */
+    /* The one shape the badge exists for. Four cells, two of them counting,
+     * one bright because it is the radio listening right now, and two greyed
+     * because this board cannot hear them at all. Every state the grid has to
+     * say is said in one picture, which is the whole argument for the shape. */
+    {
+        lv_obj_t *w;
+        lv_obj_t *n;
+        run("local names = {'WiFi','BLE','IR','NFC'}\n"
+            "local ic = {'wifi','ble','ir','nfc'}\n"
+            "local badge = {8, 3}\n"
+            "local cells = {}\n"
+            "for i = 1, 4 do\n"
+            "  cells[i] = ui.label{ id = 'sc' .. i, text = names[i], icon = ic[i],\n"
+            "                       badge = badge[i], disabled = i > 2,\n"
+            "                       style = i == 2 and 'body' or 'caption' }\n"
+            "end\n"
+            "local g = ui.list{ id = 'sc_grid', layout = 'grid' }\n"
+            "g:set_children(cells)\n"
+            "g.selected = 2\n"
+            "ui.screen{ g }\n");
+        pass();
+        pass();
+        shot("scanner-grid");
+        w = obj("sc1");
+        n = obj("sc4");
+        CHECK(w && n, "the scanner's cells are drawn");
+        /* Four across three columns is a second row, and both rows have to be
+         * whole - a grid pages, so half a cell is not a thing it can show. */
+        CHECK(w && n && lv_obj_get_y(n) > lv_obj_get_y(w),
+              "the fourth wraps onto a second row");
+        CHECK(n && lv_obj_get_y(n) + (int32_t)lv_obj_get_height(n) <=
+                       CATNIP_SCREEN_H - CATNIP_FRAME_HINT_H,
+              "and that row is clear of the hint's strip");
+        /* Top left, not centred. A row that is not full must not float: the
+         * first cell has to be in the same place whether there are four
+         * protocols or six apps, or "the top left one" is not something a user
+         * can learn. */
+        {
+            lv_area_t a, b;
+            lv_obj_get_coords(w, &a);
+            lv_obj_get_coords(n, &b);
+            CHECK(a.x1 == b.x1, "and the short second row starts under the first");
+        }
+    }
+
     /* ---- the action bar, and the hint riding on it ---------------------- */
     /* What long A produces. Two things are checked and both are geometry the
      * rules turn on: it sits at the foot of the panel with the content still

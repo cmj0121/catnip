@@ -18,9 +18,11 @@ one of those — a bet worth re-examining when the list grows.
 
 ## What is here
 
-| app           | why it is built in                                     |
-| ------------- | ------------------------------------------------------ |
-| `filebrowser` | reading the card cannot depend on the card being there |
+| app           | why it is built in                                                  |
+| ------------- | ------------------------------------------------------------------- |
+| `filebrowser` | reading the card cannot depend on the card being there              |
+| `clock`       | a device with a real-time clock has to be able to set it            |
+| `scanner`     | the radios are the platform's; nothing else can show what they hear |
 
 ## Writing one
 

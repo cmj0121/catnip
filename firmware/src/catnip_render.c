@@ -72,6 +72,7 @@ typedef struct {
     size_t image_cap;
     int value;
     int steps;
+    int badge;
     char *value_text; /* owned copy, like `text`, and compared the same way */
     size_t value_text_cap;
     int selected;
@@ -427,6 +428,7 @@ static void desc_build(ctx *c, int node, catnip_node_desc *d)
     memset(d, 0, sizeof(*d));
     d->selected = -1;
     d->value = -1; /* "this is not a quantity", which is nearly every node */
+    d->badge = -1; /* and nearly every node has nothing to count */
     d->id = "";
     d->text = "";
     d->image = "";
@@ -474,6 +476,14 @@ static void desc_build(ctx *c, int node, catnip_node_desc *d)
 
         const char *vt = push_raw_str(L, props, "value_text"); /* stays for the call */
         if (vt) d->value_text = vt;
+
+        lua_pushstring(L, "badge");
+        lua_rawget(L, props);
+        if (lua_isnumber(L, -1)) {
+            int v = (int)lua_tointeger(L, -1);
+            d->badge = v >= 0 ? v : -1;
+        }
+        lua_pop(L, 1);
 
         lua_pushstring(L, "steps");
         lua_rawget(L, props);
@@ -558,8 +568,9 @@ static int desc_same(const slot *s, const catnip_node_desc *d)
     return s->kind == d->kind && s->style == d->style && s->icon == d->icon &&
            s->layout == d->layout && s->selected == d->selected && s->flags == d->flags &&
            s->events == d->events && s->align == d->align && s->value == d->value &&
-           s->steps == d->steps && s->text != NULL && strcmp(s->text, d->text) == 0 &&
-           s->image != NULL && strcmp(s->image, d->image) == 0 && s->value_text != NULL &&
+           s->steps == d->steps && s->badge == d->badge && s->text != NULL &&
+           strcmp(s->text, d->text) == 0 && s->image != NULL &&
+           strcmp(s->image, d->image) == 0 && s->value_text != NULL &&
            strcmp(s->value_text, d->value_text) == 0;
 }
 
@@ -575,6 +586,7 @@ static void desc_store(lua_State *L, slot *s, const catnip_node_desc *d)
     s->align = d->align;
     s->value = d->value;
     s->steps = d->steps;
+    s->badge = d->badge;
     text_store(L, s, d->text);
     image_store(L, s, d->image);
     value_text_store(L, s, d->value_text);

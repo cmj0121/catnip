@@ -178,6 +178,56 @@ static int l_ntp_last(lua_State *L)
     return 1;
 }
 
+/* service.ble.scan() -> { {name=, addr=, rssi=}, ... } or nil while running.
+ *
+ * The same contract service.wifi.scan() answers by, deliberately: nil means
+ * "still listening", a table means "this is what was heard". An app that has
+ * learned one radio should not have to learn the other, and the Scanner is
+ * going to poll both.
+ *
+ * `name` is empty far more often than an ssid is - most advertisers do not
+ * carry one - so the address is the identity here and the name is the nicety,
+ * which is the other way round from Wi-Fi. */
+static int l_ble_scan(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+    catnip_ble_dev devs[24];
+    int n;
+
+    if (!h || !h->ble_scan) {
+        lua_pushnil(L);
+        return 1;
+    }
+    n = h->ble_scan(h->ud, devs, (int)(sizeof(devs) / sizeof(devs[0])));
+    if (n < 0) {
+        lua_pushnil(L); /* still listening */
+        return 1;
+    }
+    lua_createtable(L, n, 0);
+    for (int i = 0; i < n; i++) {
+        lua_createtable(L, 0, 3);
+        lua_pushstring(L, devs[i].name);
+        lua_setfield(L, -2, "name");
+        lua_pushstring(L, devs[i].addr);
+        lua_setfield(L, -2, "addr");
+        lua_pushinteger(L, devs[i].rssi);
+        lua_setfield(L, -2, "rssi");
+        lua_rawseti(L, -2, i + 1);
+    }
+    return 1;
+}
+
+/* service.ble.rescan() -> ok. Throws the last listen away and starts another,
+ * which is what a press of A means on a page already showing a list. */
+static int l_ble_rescan(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+
+    if (h && h->ble_rescan) h->ble_rescan(h->ud);
+    lua_pushboolean(L, h && h->ble_rescan ? 1 : 0);
+    return 1;
+}
+
 /* service.wifi.rescan() -> ok. Throws the last scan away and starts another.
  *
  * The driver rescans on its own behind anything that keeps polling, so this is
@@ -496,6 +546,8 @@ int catnip_api_open(catnip_rt *rt, const catnip_hal *hal)
                                              {"wifi_ssid", l_wifi_ssid},
                                              {"wifi_scan", l_wifi_scan},
                                              {"wifi_rescan", l_wifi_rescan},
+                                             {"ble_scan", l_ble_scan},
+                                             {"ble_rescan", l_ble_rescan},
                                              {"ntp_last", l_ntp_last},
                                              {"http_get", l_http_get},
                                              {NULL, NULL}};
@@ -514,10 +566,12 @@ int catnip_api_open(catnip_rt *rt, const catnip_hal *hal)
     static const char SERVICE_LUA[] =
         "service.wifi = { status = service.wifi_status, ssid = service.wifi_ssid,\n"
         "                 scan = service.wifi_scan, rescan = service.wifi_rescan }\n"
+        "service.ble = { scan = service.ble_scan, rescan = service.ble_rescan }\n"
         "service.ntp = { last = service.ntp_last }\n"
         "service.http = { get = service.http_get }\n"
         "service.wifi_status, service.wifi_ssid, service.wifi_scan = nil, nil, nil\n"
         "service.wifi_rescan = nil\n"
+        "service.ble_scan, service.ble_rescan = nil, nil\n"
         "service.ntp_last, service.http_get = nil, nil\n";
     if (luaL_dostring(L, SERVICE_LUA) != LUA_OK) {
         catnip_rt_report_error(rt, L);

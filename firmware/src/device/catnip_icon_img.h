@@ -8,8 +8,8 @@
 extern "C" {
 #endif
 
-extern const lv_image_dsc_t catnip_icon_img_14[12];
-extern const lv_image_dsc_t catnip_icon_img_64[12];
+extern const lv_image_dsc_t catnip_icon_img_14[17];
+extern const lv_image_dsc_t catnip_icon_img_64[17];
 
 #ifdef __cplusplus
 }

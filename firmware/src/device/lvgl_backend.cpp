@@ -28,6 +28,7 @@
  * and an add with the old role to remember in between.
  */
 #include <lvgl.h>
+#include <stdio.h>
 
 #include <stdint.h>
 
@@ -77,6 +78,10 @@ struct Entry {
     bool sel_dirty;            /* list only: the highlight has to be re-applied */
     bool laid_out;             /* list only: apply_list_layout has run at least once */
     catnip_text_align align;   /* which edge it asked for, for a canvas to place it by */
+    /* A grid cell's count, and the label that draws it. Built on the first cell
+     * that asks for one, because most never do. */
+    lv_obj_t *badge;
+    int badge_n;
     /* Screen only: how much of the region is currently trimmed off the bottom
      * because a column of lines could not use it. Remembered so the untrimmed
      * region can be worked out without putting the pad back to measure it. */
@@ -292,6 +297,49 @@ void apply_style(Entry *e, catnip_style_role role)
     lv_obj_set_style_text_color(text, lv_color_hex(role_ink(role)), 0);
 }
 
+/* The count on a grid cell: a small number in the corner of the picture.
+ *
+ * The corner rather than under the icon, and a number rather than a word, and
+ * both are the same rule: a cell carries a picture and may carry a count, and
+ * nothing else. Under the icon is where a label would go, and the moment a cell
+ * can hold a label it holds two lines of one - which is why the name of the
+ * focused cell is in the header instead. */
+void apply_badge(Entry *e, int n)
+{
+    if (n < 0) {
+        if (e->badge) lv_obj_add_flag(e->badge, LV_OBJ_FLAG_HIDDEN);
+        e->badge_n = -1;
+        return;
+    }
+    if (!e->badge) {
+        e->badge = lv_label_create(e->obj);
+        if (!e->badge) return;
+        lv_obj_set_style_text_font(e->badge, &catnip_font_10, 0);
+        lv_obj_set_style_text_color(e->badge, lv_color_hex(catnip_color_bg()), 0);
+        lv_obj_set_style_bg_color(e->badge, lv_color_hex(kColPrimary), 0);
+        lv_obj_set_style_bg_opa(e->badge, LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(e->badge, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_pad_hor(e->badge, 4, 0);
+        lv_obj_set_style_pad_ver(e->badge, 1, 0);
+        lv_obj_remove_flag(e->badge, LV_OBJ_FLAG_CLICKABLE);
+        /* Out of the flex flow, or the cell would lay it out as a third row
+         * under the picture and the alignment below would be ignored. A badge
+         * is a thing stuck on the corner of the cell, not a line of it. */
+        lv_obj_add_flag(e->badge, LV_OBJ_FLAG_IGNORE_LAYOUT);
+        e->badge_n = -1;
+    }
+    lv_obj_remove_flag(e->badge, LV_OBJ_FLAG_HIDDEN);
+    if (n != e->badge_n) {
+        char buf[8];
+        e->badge_n = n;
+        snprintf(buf, sizeof(buf), "%d", n > 999 ? 999 : n);
+        lv_label_set_text(e->badge, buf);
+    }
+    /* Aligned after the text, because the size it is being aligned by is the
+     * size the text just gave it. */
+    lv_obj_align(e->badge, LV_ALIGN_TOP_RIGHT, 0, 0);
+}
+
 void apply_text(Entry *e, const char *text, catnip_icon icon, const char *image,
                 catnip_text_align align)
 {
@@ -459,7 +507,7 @@ void apply_text(Entry *e, const char *text, catnip_icon icon, const char *image,
         lv_obj_set_style_pad_row(e->obj, 4, 0);
         lv_obj_set_flex_grow(e->obj, in_strip ? 1 : 0);
         lv_obj_set_width(e->obj, in_strip ? LV_SIZE_CONTENT : LV_PCT(100));
-        if (icon >= CATNIP_ICON_FOLDER && icon <= CATNIP_ICON_CLOSE) {
+        if (icon >= CATNIP_ICON_FOLDER && icon <= CATNIP_ICON_DRAWN_LAST) {
             /* A quarter of the carousel's size. A cell is the whole panel and
              * its icon is the only thing on it; a tile is one of a pair at the
              * foot of a page of facts, and every pixel it takes is a fact the
@@ -540,7 +588,7 @@ void apply_text(Entry *e, const char *text, catnip_icon icon, const char *image,
          * and there is no pivot to get wrong. */
         lv_image_set_inner_align(img, LV_IMAGE_ALIGN_STRETCH);
         lv_obj_remove_flag(img, LV_OBJ_FLAG_HIDDEN);
-    } else if (icon >= CATNIP_ICON_FOLDER && icon <= CATNIP_ICON_CLOSE) {
+    } else if (icon >= CATNIP_ICON_FOLDER && icon <= CATNIP_ICON_DRAWN_LAST) {
         /* The same twelve shapes at whichever size the shape on screen calls
          * for: beside a word in a row, alone in the middle of a carousel, or a
          * grid tile between the two. */
@@ -553,7 +601,13 @@ void apply_text(Entry *e, const char *text, catnip_icon icon, const char *image,
         lv_anim_delete(img, NULL);
         lv_obj_set_style_translate_y(img, 0, 0);
         lv_image_set_inner_align(img, LV_IMAGE_ALIGN_DEFAULT);
-        lv_image_set_src(img, big ? &catnip_icon_img_64[icon - CATNIP_ICON_FOLDER]
+        /* The 64 px source whenever the box is bigger than 14, which is the
+         * carousel and the grid. It used to be the carousel only, so a glyph in
+         * a grid cell got a 64 px box with a 14 px picture sitting in the corner
+         * of it - which nothing caught, because the only grid the device had
+         * until now fills its cells with app icons and never reaches here. */
+        lv_image_set_src(img, (big || grid_px)
+                                  ? &catnip_icon_img_64[icon - CATNIP_ICON_FOLDER]
                                   : &catnip_icon_img_14[icon - CATNIP_ICON_FOLDER]);
         lv_obj_remove_flag(img, LV_OBJ_FLAG_HIDDEN);
     } else {
@@ -945,6 +999,7 @@ void apply_flags(Entry *e, unsigned flags)
 void apply_desc(Entry *e, const catnip_node_desc *d)
 {
     apply_text(e, d->text, d->icon, d->image, d->align);
+    apply_badge(e, d->badge);
     apply_value(e, d->value, d->value_text, d->steps, d->style == CATNIP_STYLE_PRIMARY);
     /* After the style, because where a node goes on a canvas depends on which
      * role it is in - and only then, because that is the only thing about a
@@ -1039,12 +1094,18 @@ void apply_list_layout(Entry *e)
     lv_obj_set_flex_flow(e->obj, grid               ? LV_FLEX_FLOW_ROW_WRAP
                                  : (mixer || strip) ? LV_FLEX_FLOW_ROW
                                                     : LV_FLEX_FLOW_COLUMN);
-    /* The last argument stacks wrapped lines, and only a grid has more than one:
-     * its rows pack from the top so the grid opens on its first row rather than
-     * centred with the ends clipped. */
+    /* A grid packs from the top left, on both axes: it is a directory, and a
+     * directory has a first item. Centred, a row that was not full sat in the
+     * middle of the region and the first cell was in a different place for four
+     * apps than for six - so "the top left one" was not a thing a user could
+     * learn. The last argument stacks the wrapped lines, and only a grid has
+     * more than one.
+     *
+     * The other shapes do centre, because none of them wraps: a carousel is one
+     * cell filling the region, a mixer and a strip are a single line whose
+     * items share the width. */
     lv_obj_set_flex_align(
-        e->obj,
-        (carousel || mixer || strip || grid) ? LV_FLEX_ALIGN_CENTER : LV_FLEX_ALIGN_START,
+        e->obj, (carousel || mixer || strip) ? LV_FLEX_ALIGN_CENTER : LV_FLEX_ALIGN_START,
         LV_FLEX_ALIGN_CENTER, grid ? LV_FLEX_ALIGN_START : LV_FLEX_ALIGN_CENTER);
     bool text = e->layout == CATNIP_LAYOUT_TEXT;
     lv_obj_set_style_border_width(

@@ -5,7 +5,7 @@
 #include "catnip_icon_img.h"
 
 /* clang-format off */
-const lv_image_dsc_t catnip_icon_img_14[12] = {
+const lv_image_dsc_t catnip_icon_img_14[17] = {
     {
         .header = {
             .magic = LV_IMAGE_HEADER_MAGIC,
@@ -174,9 +174,79 @@ const lv_image_dsc_t catnip_icon_img_14[12] = {
         .data = catnip_icon_rgb565a8_14[11],
         .reserved = NULL,
     }, /* close */
+    {
+        .header = {
+            .magic = LV_IMAGE_HEADER_MAGIC,
+            .cf = LV_COLOR_FORMAT_RGB565A8,
+            .flags = 0,
+            .w = 14,
+            .h = 14,
+            .stride = 28,
+            .reserved_2 = 0,
+        },
+        .data_size = 588,
+        .data = catnip_icon_rgb565a8_14[12],
+        .reserved = NULL,
+    }, /* wifi */
+    {
+        .header = {
+            .magic = LV_IMAGE_HEADER_MAGIC,
+            .cf = LV_COLOR_FORMAT_RGB565A8,
+            .flags = 0,
+            .w = 14,
+            .h = 14,
+            .stride = 28,
+            .reserved_2 = 0,
+        },
+        .data_size = 588,
+        .data = catnip_icon_rgb565a8_14[13],
+        .reserved = NULL,
+    }, /* ble */
+    {
+        .header = {
+            .magic = LV_IMAGE_HEADER_MAGIC,
+            .cf = LV_COLOR_FORMAT_RGB565A8,
+            .flags = 0,
+            .w = 14,
+            .h = 14,
+            .stride = 28,
+            .reserved_2 = 0,
+        },
+        .data_size = 588,
+        .data = catnip_icon_rgb565a8_14[14],
+        .reserved = NULL,
+    }, /* ir */
+    {
+        .header = {
+            .magic = LV_IMAGE_HEADER_MAGIC,
+            .cf = LV_COLOR_FORMAT_RGB565A8,
+            .flags = 0,
+            .w = 14,
+            .h = 14,
+            .stride = 28,
+            .reserved_2 = 0,
+        },
+        .data_size = 588,
+        .data = catnip_icon_rgb565a8_14[15],
+        .reserved = NULL,
+    }, /* nfc */
+    {
+        .header = {
+            .magic = LV_IMAGE_HEADER_MAGIC,
+            .cf = LV_COLOR_FORMAT_RGB565A8,
+            .flags = 0,
+            .w = 14,
+            .h = 14,
+            .stride = 28,
+            .reserved_2 = 0,
+        },
+        .data_size = 588,
+        .data = catnip_icon_rgb565a8_14[16],
+        .reserved = NULL,
+    }, /* signal */
 };
 
-const lv_image_dsc_t catnip_icon_img_64[12] = {
+const lv_image_dsc_t catnip_icon_img_64[17] = {
     {
         .header = {
             .magic = LV_IMAGE_HEADER_MAGIC,
@@ -345,5 +415,75 @@ const lv_image_dsc_t catnip_icon_img_64[12] = {
         .data = catnip_icon_rgb565a8_64[11],
         .reserved = NULL,
     }, /* close */
+    {
+        .header = {
+            .magic = LV_IMAGE_HEADER_MAGIC,
+            .cf = LV_COLOR_FORMAT_RGB565A8,
+            .flags = 0,
+            .w = 64,
+            .h = 64,
+            .stride = 128,
+            .reserved_2 = 0,
+        },
+        .data_size = 12288,
+        .data = catnip_icon_rgb565a8_64[12],
+        .reserved = NULL,
+    }, /* wifi */
+    {
+        .header = {
+            .magic = LV_IMAGE_HEADER_MAGIC,
+            .cf = LV_COLOR_FORMAT_RGB565A8,
+            .flags = 0,
+            .w = 64,
+            .h = 64,
+            .stride = 128,
+            .reserved_2 = 0,
+        },
+        .data_size = 12288,
+        .data = catnip_icon_rgb565a8_64[13],
+        .reserved = NULL,
+    }, /* ble */
+    {
+        .header = {
+            .magic = LV_IMAGE_HEADER_MAGIC,
+            .cf = LV_COLOR_FORMAT_RGB565A8,
+            .flags = 0,
+            .w = 64,
+            .h = 64,
+            .stride = 128,
+            .reserved_2 = 0,
+        },
+        .data_size = 12288,
+        .data = catnip_icon_rgb565a8_64[14],
+        .reserved = NULL,
+    }, /* ir */
+    {
+        .header = {
+            .magic = LV_IMAGE_HEADER_MAGIC,
+            .cf = LV_COLOR_FORMAT_RGB565A8,
+            .flags = 0,
+            .w = 64,
+            .h = 64,
+            .stride = 128,
+            .reserved_2 = 0,
+        },
+        .data_size = 12288,
+        .data = catnip_icon_rgb565a8_64[15],
+        .reserved = NULL,
+    }, /* nfc */
+    {
+        .header = {
+            .magic = LV_IMAGE_HEADER_MAGIC,
+            .cf = LV_COLOR_FORMAT_RGB565A8,
+            .flags = 0,
+            .w = 64,
+            .h = 64,
+            .stride = 128,
+            .reserved_2 = 0,
+        },
+        .data_size = 12288,
+        .data = catnip_icon_rgb565a8_64[16],
+        .reserved = NULL,
+    }, /* signal */
 };
 /* clang-format on */
