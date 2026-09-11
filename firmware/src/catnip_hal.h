@@ -24,6 +24,23 @@ typedef struct {
     int channel;
 } catnip_wifi_ap;
 
+/* One BLE advertiser a scan heard (#53): what it calls itself if it says,
+ * where it is from, and how strong.
+ *
+ * `name` is empty far more often than an ssid is. Most advertisers do not carry
+ * one - a pair of headphones announces a service and a manufacturer blob and
+ * nothing a person would recognise - so the address is the identity here and
+ * the name is the nicety, which is the other way round from Wi-Fi.
+ *
+ * The address as text rather than six bytes: it is shown far more often than it
+ * is compared, and every comparison this device does is against another string
+ * it was given. */
+typedef struct {
+    char name[33];
+    char addr[18]; /* "AA:BB:CC:DD:EE:FF" */
+    int rssi;
+} catnip_ble_dev;
+
 typedef struct {
     void *ud; /* passed back to every callback */
 
@@ -79,6 +96,11 @@ typedef struct {
     /* Throw the last scan away and look again. Optional: a device with no radio
      * has nothing to look with, and an app that asks gets `false`. */
     void (*wifi_rescan)(void *ud);
+    /* The BLE advertisers heard, or -1 while a scan is still running - the same
+     * contract wifi_scan answers by, because a caller that has learned one
+     * should not have to learn the other. */
+    int (*ble_scan)(void *ud, catnip_ble_dev *out, int max);
+    void (*ble_rescan)(void *ud);
     /* HTTP GET: write body into buf (cap incl. NUL); return length or -1. */
     int (*http_get)(void *ud, const char *url, char *buf, size_t cap);
 
