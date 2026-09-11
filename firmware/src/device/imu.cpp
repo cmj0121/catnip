@@ -20,9 +20,16 @@
 static const uint8_t kAddr = 0x68;
 static const uint8_t kRegChipId = 0x00;
 static const uint8_t kRegAccXL = 0x0C;
+/* The gyroscope's six bytes sit immediately after the accelerometer's, which is
+ * why there is no separate read for them: 0x0C..0x11 is acc X/Y/Z and
+ * 0x12..0x17 is gyr X/Y/Z, so one twelve-byte burst is one atomic sample of
+ * both. Two transactions could pair an acceleration from before a movement with
+ * a rate from during it, and Air Mouse compares the two. */
 static const uint8_t kRegInternalStatus = 0x21;
 static const uint8_t kRegAccConf = 0x40;
 static const uint8_t kRegAccRange = 0x41;
+static const uint8_t kRegGyrConf = 0x42;
+static const uint8_t kRegGyrRange = 0x43;
 static const uint8_t kRegInitCtrl = 0x59;
 static const uint8_t kRegInitAddr0 = 0x5B;
 static const uint8_t kRegInitData = 0x5E;
@@ -95,16 +102,42 @@ static const uint32_t kDumpGapMs = 100;
  * axis would read as the wrong attitude, at exactly the moment the attitude is
  * changing.
  *
- * PWR_CTRL = 0x04 is acc_en on its own - bit 3 temp_en, bit 2 acc_en, bit 1
- * gyr_en, bit 0 aux_en. The gyroscope stays off deliberately: it cannot answer
- * which way is down, and it draws several times the accelerometer's current to
- * not answer it. */
+ * PWR_CTRL = 0x06 is acc_en and gyr_en together - bit 3 temp_en, bit 2 acc_en,
+ * bit 1 gyr_en, bit 0 aux_en.
+ *
+ * The gyroscope used to be left off, and the reason was sound while it stood:
+ * it cannot answer which way is down, and it draws several times the
+ * accelerometer's current to not answer it. Air Mouse (#59) asks the other
+ * question - not "which way is down" but "how fast is this being turned" - and
+ * that is the one thing an accelerometer cannot answer at all. It cannot see
+ * rotation about gravity (yaw) at any speed, so a pointing device built on it
+ * can only ever be a tilt-to-scroll. So the part now runs both, and the current
+ * is the price of the second question.
+ *
+ * GYR_CONF = 0xE8 is gyr_filter_perf = 1 (bit 7, the filter's output rather
+ * than an average), gyr_noise_perf = 1 (bit 6, low-noise mode - this is a
+ * pointing device, and the noise floor is a cursor that will not sit still),
+ * gyr_bwp = 0b10 (normal bandwidth) and gyr_odr = 0b1000 (100 Hz, twice the
+ * report rate above it so no report is built from a sample it has already sent).
+ *
+ * GYR_RANGE = 0x01 is +-1000 dps, 32.8 LSB per dps. Deliberately generous: a
+ * deliberate pointing movement is tens of degrees a second, but the flick that
+ * means "lift the mouse" is several hundred, and a range that clipped it would
+ * turn the fastest gesture into an ambiguous one. */
 static const uint8_t kPwrConfRun = 0x00;
 static const uint8_t kInitCtrlLoad = 0x00;
 static const uint8_t kInitCtrlRun = 0x01;
 static const uint8_t kAccConfValue = 0xA8;
 static const uint8_t kAccRangeValue = 0x01;
-static const uint8_t kPwrCtrlAccOnly = 0x04;
+static const uint8_t kGyrConfValue = 0xE8;
+static const uint8_t kGyrRangeValue = 0x01;
+static const uint8_t kPwrCtrlAccGyr = 0x06;
+
+/* Sensitivity for GYR_RANGE above, times ten, so the conversion stays integer:
+ * 32.8 LSB per dps. Milli-dps out, because a pointing device cares about single
+ * degrees a second and whole dps would quantise the slow end of the range into
+ * steps a user can see. */
+static const int32_t kGyrLsbPerDpsX10 = 328;
 
 /* The wait after clearing adv_power_save, from Bosch's datasheet. The part
  * needs its clock up before it will accept the first byte of the image, and an
@@ -206,6 +239,12 @@ static bool g_have_status;
 static uint8_t g_status;
 static bool g_have_accel;
 static int32_t g_mg[3];
+/* The rate, in milli-degrees per second, and whether one has ever been read.
+ * Separate flag from the accelerometer's: the two come out of one burst, so in
+ * practice they arrive together, but a caller asking for a rate must not be
+ * told "yes" on the strength of an acceleration. */
+static bool g_have_gyro;
+static int32_t g_mdps[3];
 static const catnip_imu_up *g_up;
 static int32_t g_lsb_per_g;
 static uint32_t g_last_poll_ms;
@@ -319,6 +358,7 @@ bool catnip_imu_begin(void)
     g_have_who = false;
     g_have_status = false;
     g_have_accel = false;
+    g_have_gyro = false;
     g_up = NULL;
 
     if (!catnip_i2c_read_reg(kAddr, kRegChipId, &g_who)) {
@@ -440,9 +480,11 @@ bool catnip_imu_begin(void)
      * the branch above skips. */
     if (!catnip_i2c_write_reg(kAddr, kRegAccConf, kAccConfValue) ||
         !catnip_i2c_write_reg(kAddr, kRegAccRange, kAccRangeValue) ||
-        !catnip_i2c_write_reg(kAddr, kRegPwrCtrl, kPwrCtrlAccOnly)) {
+        !catnip_i2c_write_reg(kAddr, kRegGyrConf, kGyrConfValue) ||
+        !catnip_i2c_write_reg(kAddr, kRegGyrRange, kGyrRangeValue) ||
+        !catnip_i2c_write_reg(kAddr, kRegPwrCtrl, kPwrCtrlAccGyr)) {
         Serial.println("[catnip] imu: the part initialised and then refused its "
-                       "accelerometer configuration");
+                       "sensor configuration");
         return false;
     }
 
@@ -458,8 +500,10 @@ bool catnip_imu_begin(void)
      * served from a sample that was never taken. */
     g_last_poll_ms = millis() - kPollIntervalMs;
     Serial.printf("[catnip] imu: accelerometer up at 100 Hz, range +-%dg at %ld counts "
-                  "per g, gyroscope left off\n",
-                  2 << (range & kAccRangeMask), (long)g_lsb_per_g);
+                  "per g; gyroscope up at 100 Hz, range +-1000 dps at %ld counts per "
+                  "ten dps\n",
+                  2 << (range & kAccRangeMask), (long)g_lsb_per_g,
+                  (long)kGyrLsbPerDpsX10);
     return true;
 }
 
@@ -481,7 +525,7 @@ bool catnip_imu_internal_status(uint8_t *out)
 
 void catnip_imu_poll(void)
 {
-    uint8_t r[6];
+    uint8_t r[12];
     uint32_t now;
     int32_t mg[3];
 
@@ -510,6 +554,19 @@ void catnip_imu_poll(void)
     }
     g_have_accel = true;
     g_up = catnip_imu_up_edge(mg);
+
+    /* The second half of the same burst: the rate, from bytes six to eleven.
+     * Scaled by ten thousand over the tenths-of-an-LSB constant, which is the
+     * whole conversion in integers - raw / 32.8 dps, expressed as milli-dps
+     * without ever leaving int32. The widest raw value is 32767, so the
+     * numerator peaks around 3.3e8 and stays well inside the type. */
+    for (uint8_t i = 0; i < 3; i++) {
+        int16_t raw =
+            (int16_t)((uint16_t)r[6 + i * 2] | ((uint16_t)r[6 + i * 2 + 1] << 8));
+
+        g_mdps[i] = ((int32_t)raw * 10000) / kGyrLsbPerDpsX10;
+    }
+    g_have_gyro = true;
 }
 
 bool catnip_imu_acceleration(int32_t mg[3])
@@ -518,6 +575,15 @@ bool catnip_imu_acceleration(int32_t mg[3])
 
     for (uint8_t i = 0; i < 3; i++)
         mg[i] = g_mg[i];
+    return true;
+}
+
+bool catnip_imu_rotation(int32_t mdps[3])
+{
+    if (!g_have_gyro) return false;
+
+    for (uint8_t i = 0; i < 3; i++)
+        mdps[i] = g_mdps[i];
     return true;
 }
 

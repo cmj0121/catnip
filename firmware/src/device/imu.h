@@ -29,11 +29,15 @@
  * and not a proof: a chip that accepts Bosch's image and reports init_ok has
  * demonstrated it is a BMI270 rather than merely resembled one.
  *
- * Only the accelerometer is brought up. The gyroscope is left off because the
- * question this driver exists to answer is which way is down, and a gyroscope
- * cannot answer it; turning it on would cost current and bus time in support
- * of no caller. The feature engine the image also carries - step counting,
- * wrist gestures, tap detection - is left alone for exactly the same reason.
+ * Both the accelerometer and the gyroscope are brought up, and they answer two
+ * different questions. The accelerometer answers which way is down, which is
+ * what the diagnostic page and every orientation decision want. The gyroscope
+ * answers how fast the part is being turned, which the accelerometer cannot
+ * answer at all - rotation about gravity moves no axis, so yaw is invisible to
+ * it at any speed. Air Mouse (#59) needs exactly that, and it is the caller the
+ * gyroscope was turned on for; it costs current, and that is the price of the
+ * second question. The feature engine the image also carries - step counting,
+ * wrist gestures, tap detection - is still left alone, because nothing asks.
  *
  * The axis-to-edge mapping is NOT here. It lives in imu_map.h, where a host
  * test drives it and where any correction is made in one place - the same
@@ -172,6 +176,26 @@ void catnip_imu_poll(void);
  * orientation should ask for one rather than reading a sign out of here.
  */
 bool catnip_imu_acceleration(int32_t mg[3]);
+
+/* The three rotation axes in milli-degrees per second, as of the last
+ * successful poll. Returns false, and writes nothing, when no reading has ever
+ * been taken.
+ *
+ * Milli-dps for the same reason the line above is milli-g, and because the
+ * interesting end of this range is the slow one: a deliberate pointing movement
+ * is tens of degrees a second, and whole dps would quantise it into steps a
+ * user can see the cursor take.
+ *
+ * A rate, never an angle. Integrating this into an attitude is a caller's
+ * decision and a caller's error budget - every gyroscope has a bias, and an
+ * integral of a bias is a number that walks away on its own. The one caller
+ * here does not integrate: it turns a rate directly into a cursor step, so a
+ * bias costs it a slow drift rather than a growing lie.
+ *
+ * The axes are the part's own, in its own frame - the same frame as the
+ * accelerometer's, so imu_map.h's record of which axis lies along which screen
+ * edge describes both. */
+bool catnip_imu_rotation(int32_t mdps[3]);
 
 /* The screen edge pointing at the ceiling, as of the last successful poll, or
  * NULL when there is none to name - the part is absent, nothing has been read

@@ -212,26 +212,36 @@ void hal_imu(void *ud, float out[6])
 {
     (void)ud;
     int32_t mg[3];
+    int32_t mdps[3];
 
-    /* The three gyroscope axes are left exactly as they arrived, which is NaN,
-     * and reach Lua as missing fields rather than as numbers. This is the whole
-     * point of the contract in catnip_hal.h: the BMI270 on this board has its
-     * gyroscope deliberately switched off (imu.h explains why - nothing here
-     * needs a rate, and running it would cost current and bus time for no
-     * caller), so there is no rate to report. Writing 0.0 into them would be
-     * indistinguishable from a device lying perfectly still, and an app reading
-     * m.gz to decide whether it is being turned would believe it.
+    /* Each half is written only if it was actually read, and an axis nothing
+     * read stays the NaN it arrived as - reaching Lua as a missing field rather
+     * than as a number. That is the whole point of the contract in
+     * catnip_hal.h: writing 0.0 into an unread axis would be indistinguishable
+     * from a device lying perfectly still, and an app reading m.gz to decide
+     * whether it is being turned would believe it. A device is not at rest at
+     * the origin because the bus was busy.
      *
-     * The accelerometer's axes are left NaN too when nothing has been read yet
-     * or the part is absent, for the same reason: a device is not at rest at
-     * the origin because the bus was busy. */
-    if (!catnip_imu_acceleration(mg)) return;
+     * The two halves are asked for separately even though one burst read
+     * produces both (see imu.cpp), because "has an acceleration ever been read"
+     * and "has a rate ever been read" are different claims and a caller of one
+     * must not be answered on the strength of the other. */
+    if (catnip_imu_acceleration(mg)) {
+        /* Milli-g to g. The driver keeps integers because the one place it
+         * prints them cannot rely on this build's printf having float support
+         * (see imu.h); Lua numbers are doubles, so the conversion is here. */
+        for (int i = 0; i < 3; i++)
+            out[i] = (float)mg[i] / 1000.0f;
+    }
 
-    /* Milli-g to g. The driver keeps integers because the one place it prints
-     * them cannot rely on this build's printf having float support (see
-     * imu.h); Lua numbers are doubles, so the conversion happens here. */
-    for (int i = 0; i < 3; i++)
-        out[i] = (float)mg[i] / 1000.0f;
+    /* Milli-degrees per second to degrees per second, which is the unit
+     * catnip_hal.h has always declared for these three - they were simply never
+     * filled in, because the gyroscope was off until Air Mouse (#59) needed the
+     * one question an accelerometer cannot answer. */
+    if (catnip_imu_rotation(mdps)) {
+        for (int i = 0; i < 3; i++)
+            out[3 + i] = (float)mdps[i] / 1000.0f;
+    }
 }
 
 } /* namespace */
