@@ -38,6 +38,7 @@
 #include "device/app_icon.h"
 #include "device/frame.h"
 #include "device/ble.h"
+#include "device/ble_hid.h"
 #include "device/lvgl_backend.h"
 #include "device/lvgl_port.h"
 #include "device/pmu.h"
@@ -1036,6 +1037,24 @@ void loop()
      * an NTP request happened to be in flight too. */
     (void)catnip_wifi_poll();
     catnip_ble_poll();
+
+    /* Nothing is running, so nothing is a mouse (#59).
+     *
+     * catnip_ble_hid_begin() takes the stack and parks the Wi-Fi link, and the
+     * app that called it is the only thing that knows to give them back - which
+     * means an app that leaves any way other than the one it planned for
+     * (short B, long B, a Lua error, a chunk that simply ends) would leave the
+     * device advertising as a mouse for ever, never rejoining a network, with
+     * nothing on screen to say why.
+     *
+     * An invariant rather than a hook on the exit path: there are four ways out
+     * of a running app and this covers all of them, including the ones added
+     * later. catnip_ble_hid_end() is a no-op when nothing is up, so this costs
+     * a comparison per pass. */
+    if (catnip_ble_hid_up() &&
+        (!g_shell || catnip_shell_state(g_shell) != CATNIP_SHELL_RUNNING))
+        catnip_ble_hid_end();
+
     catnip_net_time_poll();
 
     /* The frame, last: the counter it draws is read off the tree the pass above

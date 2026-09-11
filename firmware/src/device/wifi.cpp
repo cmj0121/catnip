@@ -123,6 +123,10 @@ static uint32_t g_scan_started;
  * lie this file exists to avoid. */
 static bool g_parked;
 
+/* The other reason the link stays down (#59): somebody is holding it there
+ * rather than sweeping. See catnip_wifi_hold(). */
+static bool g_held;
+
 static void park_link(void)
 {
     if (g_state != CATNIP_WIFI_CONNECTED && g_state != CATNIP_WIFI_JOINING) return;
@@ -161,7 +165,7 @@ catnip_wifi_state catnip_wifi_poll(void)
     /* Nobody has asked about the air for a while, so whoever was looking has
      * gone. Take the link back. Here rather than in scan(), because the whole
      * point is that scan() is no longer being called. */
-    if (g_parked && (uint32_t)(millis() - g_scan_last_ask) > SCAN_ASK_GRACE_MS)
+    if (g_parked && !g_held && (uint32_t)(millis() - g_scan_last_ask) > SCAN_ASK_GRACE_MS)
         unpark_link();
 
     if (g_state != CATNIP_WIFI_JOINING) return g_state;
@@ -237,6 +241,24 @@ void catnip_wifi_rescan(void)
     g_scan_answered = false;
     g_scan_started = millis();
     start_scan();
+}
+
+void catnip_wifi_hold(bool on)
+{
+    if (on == g_held) return;
+    g_held = on;
+    if (on) {
+        Serial.println(
+            "[catnip] wifi: the link is held down, the other radio has the air");
+        park_link();
+        return;
+    }
+    /* Letting go does not rejoin here. The hold is off, so the grace timer in
+     * catnip_wifi_poll() is free to release the park on its next pass - which
+     * is the one place that decides to rejoin, and the one place that knows
+     * whether a sweep is also still holding it down. Rejoining from here would
+     * be this call racing that one. */
+    Serial.println("[catnip] wifi: the link is released");
 }
 
 int catnip_wifi_scan(catnip_wifi_ap *out, int max)

@@ -18,7 +18,41 @@
 typedef struct {
     int vibrate_ms, r, g, b, brightness, gpio_pin, gpio_val;
     char gpio_mode[8];
+    /* device.mouse.* (#59) */
+    int mouse_began, mouse_ended, moves;
+    int mdx, mdy, mbuttons, mwheel;
 } mock;
+
+/* What the mock mouse reports being: 0 off, 1 advertising, 2 connected. Held
+ * outside the mock struct so a test can put the mouse in a state no call of
+ * its own would produce - a host connecting is not something this side does. */
+static int m_mouse_state_v;
+
+static int m_mouse_begin(void *ud)
+{
+    ((mock *)ud)->mouse_began++;
+    m_mouse_state_v = 1; /* advertising, not connected: nobody has picked it up */
+    return 1;
+}
+static void m_mouse_end(void *ud)
+{
+    ((mock *)ud)->mouse_ended++;
+    m_mouse_state_v = 0;
+}
+static int m_mouse_state(void *ud)
+{
+    (void)ud;
+    return m_mouse_state_v;
+}
+static void m_mouse_move(void *ud, int dx, int dy, int buttons, int wheel)
+{
+    mock *m = ud;
+    m->mdx = dx;
+    m->mdy = dy;
+    m->mbuttons = buttons;
+    m->mwheel = wheel;
+    m->moves++;
+}
 
 static void m_vibrate(void *ud, int ms)
 {
@@ -227,6 +261,10 @@ int main(void)
     hal.ble_scan = m_ble_scan;
     hal.ble_rescan = m_ble_rescan;
     hal.http_get = m_http_get;
+    hal.ble_mouse_begin = m_mouse_begin;
+    hal.ble_mouse_end = m_mouse_end;
+    hal.ble_mouse_state = m_mouse_state;
+    hal.ble_mouse_move = m_mouse_move;
     hal.fs_base = base;
 
     catnip_rt *rt = catnip_rt_new_tracked();
@@ -263,6 +301,59 @@ int main(void)
     CHECK(mk.gpio_pin == 4 && mk.gpio_val == 1, "gpio write reached the HAL");
     CHECK(strcmp(mk.gpio_mode, "out") == 0, "gpio mode reached the HAL");
 
+    /* device.mouse.* (#59). The names are start/stop rather than begin/end
+     * because `end` is a Lua keyword - `device.mouse.end()` would not parse,
+     * so this checks the shape an app can actually type. */
+    m_mouse_state_v = 0;
+    CHECK(catnip_rt_dostring(rt, "__s = device.mouse.state()", "=m") == 0 &&
+              (lua_getglobal(L, "__s"), strcmp(lua_tostring(L, -1), "off") == 0),
+          "a mouse nobody started is 'off'");
+    lua_pop(L, 1);
+
+    CHECK(catnip_rt_dostring(rt, "__b = device.mouse.start()", "=m") == 0 &&
+              (lua_getglobal(L, "__b"), lua_toboolean(L, -1)) && mk.mouse_began == 1,
+          "device.mouse.start() reached the HAL and answered true");
+    lua_pop(L, 1);
+
+    /* Advertising is not connected, and the difference is the whole of whether
+     * moving the device does anything - so they must not read the same. */
+    CHECK(catnip_rt_dostring(rt, "__s = device.mouse.state()", "=m") == 0 &&
+              (lua_getglobal(L, "__s"), strcmp(lua_tostring(L, -1), "advertising") == 0),
+          "started but unclaimed is 'advertising', not 'connected'");
+    lua_pop(L, 1);
+
+    m_mouse_state_v = 2;
+    CHECK(catnip_rt_dostring(rt, "__s = device.mouse.state()", "=m") == 0 &&
+              (lua_getglobal(L, "__s"), strcmp(lua_tostring(L, -1), "connected") == 0),
+          "and 'connected' once a host takes it");
+    lua_pop(L, 1);
+
+    CHECK(catnip_rt_dostring(rt, "device.mouse.move(5, -3, device.mouse.LEFT, 1)\n",
+                             "=m") == 0 &&
+              mk.moves == 1 && mk.mdx == 5 && mk.mdy == -3 && mk.mbuttons == 1 &&
+              mk.mwheel == 1,
+          "move carries dx, dy, the button mask and the wheel to the HAL");
+
+    /* The masks are named so an app does not write a bare 1 and leave the next
+     * reader to work out which button that was. */
+    CHECK(catnip_rt_dostring(
+              rt,
+              "__m = (device.mouse.LEFT == 1) and (device.mouse.RIGHT == 2)\n"
+              "  and (device.mouse.MIDDLE == 4)\n",
+              "=m") == 0 &&
+              (lua_getglobal(L, "__m"), lua_toboolean(L, -1)),
+          "the button masks are named and are what the report carries");
+    lua_pop(L, 1);
+
+    /* A move with nothing given is a legitimate call: it is how a held button
+     * is repeated while the device is being held still. */
+    CHECK(catnip_rt_dostring(rt, "device.mouse.move()", "=m") == 0 && mk.moves == 2 &&
+              mk.mdx == 0 && mk.mdy == 0 && mk.mbuttons == 0 && mk.mwheel == 0,
+          "move with no arguments is a zero step, not an error");
+
+    CHECK(catnip_rt_dostring(rt, "device.mouse.stop()", "=m") == 0 && mk.mouse_ended == 1,
+          "device.mouse.stop() reached the HAL");
+
     catnip_rt_free(rt);
 
     /* A HAL that measures three of the six axes. The other three must arrive in
@@ -284,6 +375,22 @@ int main(void)
     lua_getglobal(L2, "PARTIAL");
     CHECK(rc2 == 0 && lua_toboolean(L2, -1),
           "an unmeasured IMU axis is nil, a measured zero is 0");
+    lua_pop(L2, 1);
+
+    /* The same HAL has no mouse hooks at all, which is a device that cannot be
+     * one. An app has to be able to find that out: a start() that silently did
+     * nothing and a state() that said "advertising" would be indistinguishable
+     * from a mouse no host has got round to connecting to, and the app would
+     * sit there telling the user to pair with something that is not there. */
+    int rc3 = catnip_rt_dostring(rt2,
+                                 "NOMOUSE = (device.mouse.start() == false)\n"
+                                 "  and (device.mouse.state() == 'off')\n"
+                                 "device.mouse.move(1, 1)\n"
+                                 "device.mouse.stop()\n",
+                                 "=nomouse");
+    lua_getglobal(L2, "NOMOUSE");
+    CHECK(rc3 == 0 && lua_toboolean(L2, -1),
+          "a device with no mouse hooks says so, and move/stop are safe no-ops");
     lua_pop(L2, 1);
     catnip_rt_free(rt2);
 

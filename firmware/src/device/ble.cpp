@@ -1,6 +1,8 @@
 /* ble.cpp - see ble.h. */
 #include "ble.h"
 
+#include "ble_stack.h"
+
 #include <Arduino.h>
 #include <NimBLEDevice.h>
 
@@ -88,9 +90,14 @@ void collect(NimBLEScanResults results)
 bool catnip_ble_begin(void)
 {
     if (g_up) return true;
-    NimBLEDevice::init("");
+    /* The stack is shared and counted now (see ble_stack.h): this asks for it
+     * rather than starting it, because the mouse may already be holding it. */
+    if (!catnip_ble_stack_acquire()) return false;
     g_scan = NimBLEDevice::getScan();
-    if (!g_scan) return false;
+    if (!g_scan) {
+        catnip_ble_stack_release();
+        return false;
+    }
     g_scan->setActiveScan(kActive);
     /* Listen for all of every interval rather than a slice of each: there is no
      * connection to keep alive here, so there is nothing to leave room for. */
@@ -108,13 +115,19 @@ bool catnip_ble_begin(void)
 void catnip_ble_end(void)
 {
     if (!g_up) return;
+    /* Put the scan away by hand. It used to be enough to deinit the stack and
+     * let everything go with it, but the stack is no longer this driver's to
+     * take down - releasing it may leave it up for the mouse, and a scan left
+     * running inside it would be this driver still listening after it said it
+     * had stopped. */
     g_scan->stop();
-    NimBLEDevice::deinit(true);
+    g_scan->clearResults();
     g_up = false;
     g_scan = nullptr;
     g_running = false;
     g_n = 0;
-    Serial.println("[catnip] ble: down");
+    catnip_ble_stack_release();
+    Serial.println("[catnip] ble: scan down");
 }
 
 bool catnip_ble_scanning(void)

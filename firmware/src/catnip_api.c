@@ -63,6 +63,50 @@ static int l_button(lua_State *L)
     return 1;
 }
 
+/* ---- device.mouse.* - the device as a BLE mouse (#59) ---- */
+
+static int l_mouse_start(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+    /* False on a device with no radio for this, which an app has to be able to
+     * find out: a mouse that silently never appears is indistinguishable from
+     * one the host has not got round to connecting to. */
+    lua_pushboolean(L, (h && h->ble_mouse_begin) ? h->ble_mouse_begin(h->ud) : 0);
+    return 1;
+}
+
+static int l_mouse_stop(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+    if (h && h->ble_mouse_end) h->ble_mouse_end(h->ud);
+    return 0;
+}
+
+static int l_mouse_state(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+    int s = (h && h->ble_mouse_state) ? h->ble_mouse_state(h->ud) : 0;
+    /* A word rather than the HAL's number. An app comparing against "connected"
+     * says what it means at the place it is read; one comparing against 2 makes
+     * every reader go and look up what 2 was. */
+    lua_pushstring(L, s == 2 ? "connected" : (s == 1 ? "advertising" : "off"));
+    return 1;
+}
+
+static int l_mouse_move(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+    /* All four optional and defaulting to zero: the common call is a movement
+     * with no buttons and no wheel, and a step of nothing is a legitimate thing
+     * to send - it is how a held button is repeated while the device is still. */
+    int dx = (int)luaL_optinteger(L, 1, 0);
+    int dy = (int)luaL_optinteger(L, 2, 0);
+    int buttons = (int)luaL_optinteger(L, 3, 0);
+    int wheel = (int)luaL_optinteger(L, 4, 0);
+    if (h && h->ble_mouse_move) h->ble_mouse_move(h->ud, dx, dy, buttons, wheel);
+    return 0;
+}
+
 /* ---- sensor.* ---- */
 
 static int l_imu(lua_State *L)
@@ -533,8 +577,11 @@ int catnip_api_open(catnip_rt *rt, const catnip_hal *hal)
     if (!L) return -1;
 
     static const luaL_Reg device_funcs[] = {
-        {"vibrate", l_vibrate},       {"led", l_led},       {"battery", l_battery},
-        {"brightness", l_brightness}, {"button", l_button}, {NULL, NULL}};
+        {"vibrate", l_vibrate},       {"led", l_led},
+        {"battery", l_battery},       {"brightness", l_brightness},
+        {"button", l_button},         {"mouse_start", l_mouse_start},
+        {"mouse_stop", l_mouse_stop}, {"mouse_state", l_mouse_state},
+        {"mouse_move", l_mouse_move}, {NULL, NULL}};
     static const luaL_Reg sensor_funcs[] = {
         {"imu", l_imu}, {"rtc", l_rtc}, {"rtc_set", l_rtc_set}, {NULL, NULL}};
     static const luaL_Reg gpio_funcs[] = {{"mode", l_gpio_mode},
@@ -574,6 +621,27 @@ int catnip_api_open(catnip_rt *rt, const catnip_hal *hal)
         "service.ble_scan, service.ble_rescan = nil, nil\n"
         "service.ntp_last, service.http_get = nil, nil\n";
     if (luaL_dostring(L, SERVICE_LUA) != LUA_OK) {
+        catnip_rt_report_error(rt, L);
+        return -1;
+    }
+
+    /* Reshape the mouse into device.mouse, over the same C funcs (#59).
+     *
+     * `start`/`stop` rather than `begin`/`end`: `end` is a Lua keyword, so
+     * `device.mouse.end()` would not be a call that fails at runtime - it would
+     * be a file that does not parse, which is a worse thing to hand somebody
+     * writing an app.
+     *
+     * The button masks live here as plain numbers because that is what the
+     * report carries; naming them is what stops an app writing a bare 1 and
+     * leaving the next reader to work out which button that was. */
+    static const char DEVICE_LUA[] =
+        "device.mouse = { start = device.mouse_start, stop = device.mouse_stop,\n"
+        "                 state = device.mouse_state, move = device.mouse_move,\n"
+        "                 LEFT = 1, RIGHT = 2, MIDDLE = 4 }\n"
+        "device.mouse_start, device.mouse_stop = nil, nil\n"
+        "device.mouse_state, device.mouse_move = nil, nil\n";
+    if (luaL_dostring(L, DEVICE_LUA) != LUA_OK) {
         catnip_rt_report_error(rt, L);
         return -1;
     }
