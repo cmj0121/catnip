@@ -588,6 +588,52 @@ int main(void)
         catnip_app_grid_free(g);
     }
 
+    /* ---- the File Browser: a card's contents, as rows you walk ---------- */
+    /* The app the fs.* surface was built for, and the one shape that needs the
+     * bar to be honest: a row is an icon and a name, and *where those names
+     * are* is the one thing a column of them cannot say for itself. So the
+     * path goes in the header and the rows stay bare.
+     *
+     * Built here rather than driven from the app's own main.lua, for the same
+     * reason the rain is: this has to draw the same card on every machine that
+     * runs it, and the app's rows come from whatever is in the slot. */
+    {
+        lv_obj_t *list;
+        lv_obj_t *r1;
+
+        catnip_frame_show(true);
+        catnip_frame_set_title("SD:/catnip");
+        catnip_frame_set_battery(82);
+        run("local names = { 'apps', 'assets', 'config.json', 'boot.rgb565' }\n"
+            "local dir = { true, true, false, false }\n"
+            "local rows = {}\n"
+            "for i = 1, #names do\n"
+            "  rows[i] = ui.label{ id = 'fb' .. i, text = names[i],\n"
+            "                      icon = dir[i] and 'folder' or 'file' }\n"
+            "end\n"
+            "local list = ui.list{ id = 'fb_rows', on_prev = function() end }\n"
+            "ui.screen{ list }\n"
+            "list:set_children(rows)\n");
+        pass();
+        pass();
+        shot("filebrowser");
+        list = obj("fb_rows");
+        r1 = obj("fb1");
+        CHECK(list && r1, "the browser's rows are drawn");
+        /* The bar is drawn over the page, so the rows have to start under it:
+         * a first row hidden behind the path is the one row a user needs to
+         * see, because it is the one the ring opens on. */
+        if (list && r1) {
+            lv_obj_t *scr = lv_obj_get_parent(list);
+            CHECK(scr && lv_obj_get_style_pad_top(scr, 0) == CATNIP_FRAME_BAR_H + 4,
+                  "and they begin below the bar carrying the path");
+        }
+        catnip_frame_set_battery(-1);
+        catnip_frame_set_title(nullptr);
+        catnip_frame_show(false);
+        pass();
+    }
+
     /* ---- the scanner's group view: a grid whose cells carry counts ----- */
     /* The one shape the badge exists for. Four cells, two of them counting,
      * one bright because it is the radio listening right now, and two greyed
