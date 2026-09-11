@@ -240,6 +240,11 @@ int main(void)
     printf("a count is absent until the radio has answered, because 0 is a claim\n");
     CHECK_STR(ask_str("ui.get('cellwifi').badge"), "nil",
               "nothing heard yet is not nothing there");
+    /* And the device says it is working, in the one place it says that: the
+     * first round is the round there is nothing to show during, so the ring is
+     * asked for by the rescan that starts it. */
+    CHECK(g_wifi_rescans >= 1,
+          "a radio that has never answered is asked for a fresh look");
 
     printf("one radio at a time, and the turn waits for an answer\n");
     /* Wi-Fi is asked first and is still listening, so the turn must not move -
@@ -260,6 +265,10 @@ int main(void)
     CHECK_STR(ask_str("ui.get('cellble').style"), "body",
               "and the turn moves to the other radio");
 
+    /* The turn hands the ring straight over: the radio whose turn it now is has
+     * never answered, so it is rescanned in the same breath rather than on the
+     * next tick - a ring that blinked out in between would read as finished. */
+    CHECK(g_ble_rescans == 1, "and so is the next one, the moment the turn moves");
     put_dev(0, "tracker", "AA:BB:CC:DD:EE:01", -55);
     put_dev(1, "", "AA:BB:CC:DD:EE:02", -75);
     g_adv_n = 2;
@@ -267,6 +276,16 @@ int main(void)
     CHECK_STR(ask_str("ui.get('cellble').badge"), "2", "which fills in its own count");
     CHECK_STR(ask_str("ui.get('cellwifi').badge"), "3",
               "and the first count is still there - a group view shows both at once");
+
+    /* And then never again: a grid with counts on it is not waiting, whatever
+     * the radios are doing behind it. */
+    g_wifi_rescans = 0;
+    g_ble_rescans = 0;
+    tick();
+    tick();
+    tick();
+    CHECK(g_wifi_rescans == 0 && g_ble_rescans == 0,
+          "once every radio has answered once, no round asks for the ring again");
 
     printf("a cell opens its own list\n");
     /* Nothing is selected on arrival, so the first direction press is what

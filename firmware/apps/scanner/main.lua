@@ -223,9 +223,19 @@ local function fill_list()
   end
 end
 
+-- Throw a radio's last answer away and ask for another.
+--
+-- This is also the only thing that raises the platform's waiting ring: the
+-- claim begins at rescan() and ends at the first answer after it. So every
+-- place this app wants the device to say "working on it" says it by asking for
+-- the look it wanted anyway, and there is no second way to put a ring up.
+local function rescan(key)
+  if key == "wifi" then service.wifi.rescan()
+  elseif key == "ble" then service.ble.rescan() end
+end
+
 local function look_again()
-  if open_key == "wifi" then service.wifi.rescan()
-  elseif open_key == "ble" then service.ble.rescan() end
+  rescan(open_key)
 end
 
 local function open_list(proto)
@@ -326,7 +336,24 @@ local function paint_grid()
   end
 end
 
+-- The first round is the one the device has nothing to show during, so it is
+-- the one round that gets the ring.
+--
+-- A radio that has never answered is asked for a fresh look the moment its turn
+-- comes up, and asking for one is what raises the ring - so the ring is up from
+-- the app opening until every radio has said something once, and then never
+-- again however many rounds run behind the grid. A grid with counts on it is
+-- not waiting.
+--
+-- Done in the same breath as the turn moving, rather than on the next tick, or
+-- the ring would blink out for half a second between one radio finishing and
+-- the next being asked - which reads as finished, and it is not.
+local function first_look()
+  if counts[ROUND[turn]] == nil then rescan(ROUND[turn]) end
+end
+
 ui.screen{ grid }
+first_look()
 
 -- The app is its own loop: build the screen, then poll forever. A main chunk
 -- that never returns stays live and is stepped between its sleeps, which is how
@@ -345,7 +372,10 @@ while true do
     -- resumes from there when the list closes.
     if poll(open_key) then fill_list() end
   else
-    if poll(ROUND[turn]) then turn = turn % #ROUND + 1 end
+    if poll(ROUND[turn]) then
+      turn = turn % #ROUND + 1
+      first_look()
+    end
     paint_grid()
   end
   sys.sleep(500)
