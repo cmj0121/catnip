@@ -280,6 +280,20 @@ typedef struct {
      *
      * Borrowed for the length of the call, like `text` and `id`. */
     const char *image;
+    /* The ink this node's text is painted in, as "#RRGGBB", or "" for the ink
+     * its style role already gives it - which is nearly every node.
+     *
+     * The platform's colour vocabulary is the six roles, deliberately: an app
+     * names an emphasis and the platform decides what that looks like, so a
+     * theme can move and every app moves with it. This is the one exception,
+     * and it is for the one thing a role cannot express - an app that is *not*
+     * choosing an emphasis but drawing a picture out of coloured glyphs, where
+     * the colour is the content. A role is a name; this is a value, and the
+     * two are kept apart so that reaching for the value is a visible thing an
+     * app did rather than the normal way to colour text.
+     *
+     * Borrowed for the length of the call, like `text` and `image`. */
+    const char *color;
     catnip_node_layout layout; /* list only: how its children are arranged */
 
     /* A quantity this node stands for, 0-100, or -1 when it does not stand for

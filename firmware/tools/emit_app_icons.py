@@ -143,7 +143,80 @@ def clock_png():
     return im.resize((SIZE, SIZE), Image.LANCZOS)
 
 
+# ---- Matrix Rain: a crop of the screen the app draws -----------------------
+# Not an abstract mark - a small piece of the actual screen. Columns of glyph
+# cells fall down a grid; each drop is brightest at its head and fades up its
+# trail, and the columns sit at different heights the way one frame of the rain
+# catches them. Cells are squares, not letters: a letter is unreadable at this
+# size, and the app's own gaps and drops read fine as lit and dark blocks. The
+# green is the app's identity, so this icon keeps green where the rest of the
+# set is light + yellow - a grey matrix would say nothing.
+M_MARGIN = 8.0
+M_NCOLS = 6
+M_NROWS = 7
+# Green from the head down the trail: bright head, then the app's green, then
+# ever dimmer. Index is distance from the head; past the end stays the dimmest.
+M_FADE = ("#C8FFCE", "#5BF06A", "#34C63F", "#1E9128", "#135C18", "#0C3E10")
+# One drop per column: (head_row, trail_len). A head past the last row is a drop
+# whose bright end has already fallen off the bottom - only its trail shows,
+# which is what makes the columns look caught mid-fall rather than lined up.
+M_DROPS = ((5, 4), (8, 6), (3, 5), (7, 4), (2, 6), (6, 3))
+
+
+def _m_cells():
+    """Yield (col, row, colour) for every lit cell, head brightest."""
+    for col, (head, trail) in enumerate(M_DROPS):
+        for dist in range(trail):
+            row = head - dist
+            if 0 <= row < M_NROWS:
+                yield col, row, M_FADE[dist if dist < len(M_FADE) else -1]
+
+
+def _m_geom():
+    area = SIZE - 2.0 * M_MARGIN
+    px, py = area / M_NCOLS, area / M_NROWS
+    cell = min(px, py) * 0.62
+    return px, py, cell
+
+
+def matrixrain_svg():
+    px, py, cell = _m_geom()
+    parts = []
+    for col, row, colour in _m_cells():
+        cx = M_MARGIN + (col + 0.5) * px
+        cy = M_MARGIN + (row + 0.5) * py
+        parts.append(
+            '  <rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="%.1f" '
+            'fill="%s"/>'
+            % (cx - cell / 2, cy - cell / 2, cell, cell, cell * 0.28, colour)
+        )
+    return _svg(parts)
+
+
+def matrixrain_png():
+    from PIL import Image, ImageDraw
+
+    px, py, cell = _m_geom()
+    im = Image.new("RGBA", (SIZE * SS, SIZE * SS), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    for col, row, colour in _m_cells():
+        cx = M_MARGIN + (col + 0.5) * px
+        cy = M_MARGIN + (row + 0.5) * py
+        d.rounded_rectangle(
+            [
+                (cx - cell / 2) * SS,
+                (cy - cell / 2) * SS,
+                (cx + cell / 2) * SS,
+                (cy + cell / 2) * SS,
+            ],
+            radius=cell * 0.28 * SS,
+            fill=colour,
+        )
+    return im.resize((SIZE, SIZE), Image.LANCZOS)
+
+
 ICONS = {
+    "matrixrain": (matrixrain_svg, matrixrain_png),
     "scanner": (scanner_svg, scanner_png),
     "clock": (clock_svg, clock_png),
 }

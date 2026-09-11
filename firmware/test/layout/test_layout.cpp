@@ -634,6 +634,44 @@ int main(void)
         }
     }
 
+    /* ---- matrix rain: a bare screen of one coloured glyph grid (#88) ----- */
+    /* The `color` prop and the full-panel single-label shape. Not a golden
+     * image - a screenshot to look at - but the geometry is checked: the grid
+     * fills the panel and its ink is the app's green, not the role's. A clean
+     * multiline block is built here rather than driving the app's random loop,
+     * so the picture is stable frame to frame. */
+    catnip_lvgl_backend_set_bare(true);
+    {
+        lv_obj_t *g;
+        run("local ROWS, COLS = 11, 34\n"
+            "local G = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'\n"
+            "local lines = {}\n"
+            "for y = 1, ROWS do\n"
+            "  local row = {}\n"
+            "  for x = 1, COLS do\n"
+            "    local lit = ((x * 7 + y * 3) % 5) < 2 and (y <= (x % ROWS) + 2)\n"
+            "    row[x] = lit and G:sub(((x + y) % 36) + 1, ((x + y) % 36) + 1) or ' '\n"
+            "  end\n"
+            "  lines[y] = table.concat(row)\n"
+            "end\n"
+            "ui.screen{ ui.label{ id = 'grid', text = table.concat(lines, '\\n'),\n"
+            "                     color = '#3BE24A' } }\n");
+        pass();
+        pass();
+        shot("matrix-rain");
+        g = obj("grid");
+        CHECK(g, "the rain's grid is drawn");
+        {
+            lv_area_t ga;
+            if (g) {
+                lv_obj_get_coords(g, &ga);
+                CHECK(g && lv_area_get_width(&ga) >= CATNIP_SCREEN_W - 16,
+                      "and it spans the panel width");
+            }
+        }
+    }
+    catnip_lvgl_backend_set_bare(false);
+
     /* ---- the action bar, and the hint riding on it ---------------------- */
     /* What long A produces. Two things are checked and both are geometry the
      * rules turn on: it sits at the foot of the panel with the content still

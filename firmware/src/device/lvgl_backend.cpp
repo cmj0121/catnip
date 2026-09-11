@@ -29,6 +29,7 @@
  */
 #include <lvgl.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include <stdint.h>
 
@@ -996,6 +997,37 @@ void apply_flags(Entry *e, unsigned flags)
  * re-deriving that here would be the same comparison done twice - once against
  * a cache that is right and once against LVGL's state, which is not the same
  * thing and would eventually disagree. */
+/* Paint this node's text in an app-named colour, or leave the role's ink alone.
+ *
+ * Called after apply_style, which has just set the ink to the role's - so an
+ * empty colour needs no undo: the role ink it would restore is already there.
+ * That is the whole of the clear-back. A node that had a colour and lost it
+ * comes through here with `col` empty and keeps the role ink apply_style set.
+ *
+ * "#RRGGBB" only, and anything else is ignored rather than an error: a malformed
+ * value falls back to the role, the same way an unknown icon or style name
+ * degrades. A picture drawn out of coloured glyphs is worth a prop; a parse that
+ * can crash the renderer is not. */
+void apply_color(Entry *e, const char *col)
+{
+    if (!col || col[0] != '#') return;
+    /* Six hex digits after the hash, and no more: strtol on a longer string
+     * would read a colour the app did not write. */
+    for (int i = 1; i <= 6; i++) {
+        char c = col[i];
+        bool hex =
+            (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+        if (!hex) return;
+    }
+    if (col[7] != '\0') return;
+
+    uint32_t rgb = (uint32_t)strtoul(col + 1, NULL, 16);
+    lv_obj_t *text = e->kind == CATNIP_NODE_BUTTON ? button_label(e->obj)
+                     : e->row                      ? e->name
+                                                   : e->obj;
+    if (text) lv_obj_set_style_text_color(text, lv_color_hex(rgb), 0);
+}
+
 void apply_desc(Entry *e, const catnip_node_desc *d)
 {
     apply_text(e, d->text, d->icon, d->image, d->align);
@@ -1007,6 +1039,7 @@ void apply_desc(Entry *e, const catnip_node_desc *d)
      * to look up a parent and discover it was not a canvas. */
     bool role_moved = e->role != d->style || e->align != d->align;
     apply_style(e, d->style);
+    apply_color(e, d->color);
     e->role = d->style;
     e->align = d->align;
     if (role_moved) relayout_canvas(map_find(e->parent));

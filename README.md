@@ -109,6 +109,51 @@ while it waits:
    catnip.on_close()  ──►  free VM + widgets  ──►  return to shell
 ```
 
+## Home, and how your app shows up
+
+Home is the **cat** — the mascot, the one screen every gesture can reach and
+where a long press of **B** always lands. It is not a menu; the menu is a
+direction away from it. The four directions each mean a different thing:
+
+```text
+                          ▲  all apps — a 3×2 grid, paged
+                          │
+    pinned  ◄─────────  (=^·^=)  ─────────►  pinned
+                          │
+                          ▼  this device — version, clock, battery, card
+```
+
+- **Up** is _yours_: every app you have, as a paged 3×2 grid of icons.
+- **Down** is _the device's_: a page of facts, its operations tucked behind **A**.
+- **Left / right** step the **carousel** — the apps you pin, one big at a time.
+  The clock is just an app pinned here; anything you write can take its place.
+
+A tile shows little, on purpose: an app is **a picture and, at most, a number** —
+never a caption, never a second line.
+
+```text
+  ┌──────── Apps ─────── 1/2 ──┐
+  │   ▦        ▦        ▦ ³     │   a cell is an icon; the only
+  │  Files    Clock    Scan     │   number it carries is a badge
+  │                             │   (Scan's ³). the focused cell's
+  │   ▦        ▦                 │   name is the header title; empty
+  │  Rain     Notes             │   cells just aren't there yet
+  └─────────────────────────────┘
+```
+
+| Where                | An app may show                                     | Set by                          |
+| -------------------- | --------------------------------------------------- | ------------------------------- |
+| Carousel (pinned)    | its `icon`, big, with its name in the header        | `manifest.icon`                 |
+| Grid cell (all apps) | its `icon`, plus a corner **badge** — one count     | `manifest.icon` · `badge` (Lua) |
+| While open           | a **counter** in the header (`2/3`), if it's a list | `manifest.counter`              |
+
+A **badge** is a number and a number cannot grow into a sentence: `badge = 3` is
+a small disc on the cell's corner. **Absent is not zero** — a cell with no badge
+has not been counted yet, while a cell showing `0` was counted and came to
+nothing. A missing `icon` falls back to the mascot, and the grid **packs from the
+top left**, so the first app is always the top-left cell whether the page holds
+four or six.
+
 ## Making it yours
 
 The boot experience is set by a file on the SD card, not by rebuilding the

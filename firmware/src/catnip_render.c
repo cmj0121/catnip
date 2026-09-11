@@ -70,6 +70,8 @@ typedef struct {
     int page;
     char *image; /* owned copy of the last image name sent, or NULL */
     size_t image_cap;
+    char *color; /* owned copy of the last colour sent ("#RRGGBB"), or NULL */
+    size_t color_cap;
     int value;
     int steps;
     int badge;
@@ -206,6 +208,11 @@ static void text_free(lua_State *L, slot *s)
         s->image = NULL;
         s->image_cap = 0;
     }
+    if (s->color) {
+        f(ud, s->color, s->color_cap, 0);
+        s->color = NULL;
+        s->color_cap = 0;
+    }
     if (s->value_text) {
         f(ud, s->value_text, s->value_text_cap, 0);
         s->value_text = NULL;
@@ -237,6 +244,11 @@ static void text_store(lua_State *L, slot *s, const char *t)
 static void image_store(lua_State *L, slot *s, const char *t)
 {
     str_store(L, &s->image, &s->image_cap, t);
+}
+
+static void color_store(lua_State *L, slot *s, const char *t)
+{
+    str_store(L, &s->color, &s->color_cap, t);
 }
 
 static void value_text_store(lua_State *L, slot *s, const char *t)
@@ -432,6 +444,7 @@ static void desc_build(ctx *c, int node, catnip_node_desc *d)
     d->id = "";
     d->text = "";
     d->image = "";
+    d->color = "";
     d->value_text = "";
 
     lua_pushstring(L, "kind");
@@ -462,6 +475,9 @@ static void desc_build(ctx *c, int node, catnip_node_desc *d)
 
         const char *image = push_raw_str(L, props, "image"); /* stays for the call */
         if (image) d->image = image;
+
+        const char *color = push_raw_str(L, props, "color"); /* stays for the call */
+        if (color) d->color = color;
 
         /* Out of range is clamped rather than refused: an app that computed 105
          * from a division meant "full", and a bar drawn past its own top is a
@@ -570,7 +586,8 @@ static int desc_same(const slot *s, const catnip_node_desc *d)
            s->events == d->events && s->align == d->align && s->value == d->value &&
            s->steps == d->steps && s->badge == d->badge && s->text != NULL &&
            strcmp(s->text, d->text) == 0 && s->image != NULL &&
-           strcmp(s->image, d->image) == 0 && s->value_text != NULL &&
+           strcmp(s->image, d->image) == 0 && s->color != NULL &&
+           strcmp(s->color, d->color) == 0 && s->value_text != NULL &&
            strcmp(s->value_text, d->value_text) == 0;
 }
 
@@ -589,6 +606,7 @@ static void desc_store(lua_State *L, slot *s, const catnip_node_desc *d)
     s->badge = d->badge;
     text_store(L, s, d->text);
     image_store(L, s, d->image);
+    color_store(L, s, d->color);
     value_text_store(L, s, d->value_text);
 }
 
