@@ -267,8 +267,50 @@ def beacon_png():
     return im.resize((SIZE, SIZE), Image.LANCZOS)
 
 
+# ---- BLE Spam: a source, and full rings all the way round ------------------
+# The beacon says one thing, upward, from a source low on the mark. Spam is the
+# same source shouting in every direction at once, so its rings are closed
+# circles centred on the dot rather than arcs fanning one way - the difference
+# between one advertiser and a room made to look full of them. Same dot, same
+# palette, so it reads as the beacon's louder cousin in the launcher grid.
+BS_CX, BS_CY = 64.0, 64.0
+BS_DOT = 12.0
+BS_STROKE = 10.0
+BS_RINGS = (26.0, 46.0)
+
+
+def blespam_svg():
+    parts = []
+    for r in BS_RINGS:
+        parts.append(
+            '  <circle fill="none" stroke="%s" stroke-width="%.1f" '
+            'cx="%.1f" cy="%.1f" r="%.1f"/>' % (BODY, BS_STROKE, BS_CX, BS_CY, r)
+        )
+    parts.append(
+        '  <circle fill="%s" cx="%.1f" cy="%.1f" r="%.1f"/>' % (ACCENT, BS_CX, BS_CY, BS_DOT)
+    )
+    return _svg(parts)
+
+
+def blespam_png():
+    from PIL import Image, ImageDraw
+
+    im = Image.new("RGBA", (SIZE * SS, SIZE * SS), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    for r in BS_RINGS:
+        box = [(BS_CX - r) * SS, (BS_CY - r) * SS, (BS_CX + r) * SS, (BS_CY + r) * SS]
+        d.ellipse(box, outline=BODY, width=int(BS_STROKE * SS))
+    d.ellipse(
+        [(BS_CX - BS_DOT) * SS, (BS_CY - BS_DOT) * SS,
+         (BS_CX + BS_DOT) * SS, (BS_CY + BS_DOT) * SS],
+        fill=ACCENT,
+    )
+    return im.resize((SIZE, SIZE), Image.LANCZOS)
+
+
 ICONS = {
     "beacon": (beacon_svg, beacon_png),
+    "blespam": (blespam_svg, blespam_png),
     "matrixrain": (matrixrain_svg, matrixrain_png),
     "scanner": (scanner_svg, scanner_png),
     "clock": (clock_svg, clock_png),
