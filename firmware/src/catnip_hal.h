@@ -11,6 +11,7 @@
 #define CATNIP_HAL_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -120,6 +121,29 @@ typedef struct {
     void (*ble_mouse_end)(void *ud);
     int (*ble_mouse_state)(void *ud);
     void (*ble_mouse_move)(void *ud, int dx, int dy, int buttons, int wheel);
+    /* Broadcast the device as a BLE beacon (#60).
+     *
+     * begin takes a raw advertisement - `payload`/`len` are the AD structures
+     * the app assembled, iBeacon or Eddystone, which this layer does not read -
+     * and an interval in milliseconds, and returns non-zero when the beacon is
+     * on the air. Called again while up, it re-arms with the new payload, which
+     * is how an app changes the id or the rate on a running advertisement.
+     * `state` is 0 off / 1 advertising - there is no connected state, because a
+     * beacon is never connected to. */
+    int (*ble_adv_begin)(void *ud, const uint8_t *payload, int len, int interval_ms);
+    void (*ble_adv_end)(void *ud);
+    int (*ble_adv_state)(void *ud);
+    /* Shape the next begin, for the BLE Spam surface (#89). Both default - never
+     * called, which is the whole of #60 - to the non-connectable, silent beacon
+     * above. set_type asks for a connectable ADV_IND (`connectable` non-zero,
+     * which is what makes a phone offer to pair) and/or a scan response
+     * (`scan_rsp`/`scan_rsp_len`, NULL/0 for none). set_addr picks the
+     * advertiser address the next begin advertises under - six bytes, or
+     * `addr` NULL for a fresh random one, which is how a cycling catalogue looks
+     * like many devices rather than one. */
+    void (*ble_adv_set_type)(void *ud, int connectable, const uint8_t *scan_rsp,
+                             int scan_rsp_len);
+    void (*ble_adv_set_addr)(void *ud, const uint8_t *addr);
     /* HTTP GET: write body into buf (cap incl. NUL); return length or -1. */
     int (*http_get)(void *ud, const char *url, char *buf, size_t cap);
 

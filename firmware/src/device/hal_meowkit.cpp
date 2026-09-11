@@ -52,6 +52,7 @@
 #include "net_time.h"
 #include "ble.h"
 #include "ble_hid.h"
+#include "ble_adv.h"
 #include "wifi.h"
 #include "hal_meowkit.h"
 #include "imu.h"
@@ -153,6 +154,38 @@ void hal_ble_mouse_move(void *ud, int dx, int dy, int buttons, int wheel)
 {
     (void)ud;
     catnip_ble_hid_move(dx, dy, buttons, wheel);
+}
+
+int hal_ble_adv_begin(void *ud, const uint8_t *payload, int len, int interval_ms)
+{
+    (void)ud;
+    return catnip_ble_adv_begin(payload, (size_t)len, (uint32_t)interval_ms) ? 1 : 0;
+}
+
+void hal_ble_adv_end(void *ud)
+{
+    (void)ud;
+    catnip_ble_adv_end();
+}
+
+int hal_ble_adv_state(void *ud)
+{
+    (void)ud;
+    return catnip_ble_adv_up() ? 1 : 0;
+}
+
+void hal_ble_adv_set_type(void *ud, int connectable, const uint8_t *scan_rsp,
+                          int scan_rsp_len)
+{
+    (void)ud;
+    catnip_ble_adv_set_type(connectable != 0, scan_rsp,
+                            scan_rsp_len > 0 ? (size_t)scan_rsp_len : 0);
+}
+
+void hal_ble_adv_set_addr(void *ud, const uint8_t *addr)
+{
+    (void)ud;
+    catnip_ble_adv_set_addr(addr);
 }
 
 void hal_wifi_rescan(void *ud)
@@ -280,6 +313,11 @@ const catnip_hal *catnip_meowkit_hal_begin(void)
     g_hal.ble_mouse_end = hal_ble_mouse_end;
     g_hal.ble_mouse_state = hal_ble_mouse_state;
     g_hal.ble_mouse_move = hal_ble_mouse_move;
+    g_hal.ble_adv_begin = hal_ble_adv_begin;
+    g_hal.ble_adv_end = hal_ble_adv_end;
+    g_hal.ble_adv_state = hal_ble_adv_state;
+    g_hal.ble_adv_set_type = hal_ble_adv_set_type;
+    g_hal.ble_adv_set_addr = hal_ble_adv_set_addr;
 
     /* fs.* is the card and nothing else. The root is the mount point itself,
      * because catnip_api.c reaches the card through plain stdio - fopen,
