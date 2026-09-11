@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Write the twelve 128x128 solid colour SVG masters. Hand-run."""
+"""Write the 128x128 solid colour SVG masters. Hand-run."""
 import math
 import os
+import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(os.path.dirname(HERE), "assets", "icons")
@@ -20,9 +21,28 @@ IDS = (
     "warning",
     "ok",
     "close",
+    # The radios, for the Scanner (#57). Four pictures that have to be told
+    # apart at 64 px and, harder, told apart from each other: three of the four
+    # protocols are "waves", so only one of them is allowed to be drawn as
+    # waves. Wi-Fi keeps the fan because that is the one the whole world already
+    # reads; Bluetooth has a rune of its own; infrared is a remote and a beam,
+    # which is what a person actually points; NFC is a card, because its
+    # "nearby" is four centimetres and a card is the thing you touch.
+    "wifi",
+    "ble",
+    "ir",
+    "nfc",
+    # And the Scanner's own face: rings and a sweep, which is a radar rather
+    # than any one of the four.
+    "radar",
 )
 
 COLOUR = {
+    "wifi": "#3D9EFF",
+    "ble": "#4D8DF6",
+    "ir": "#E05A5A",
+    "nfc": "#5AD1A0",
+    "radar": "#E5B845",
     "folder": "#3D9EFF",
     "file": "#8FA3B8",
     "app": "#E09A4A",
@@ -51,6 +71,10 @@ def svg(ds, colour):
                 d, c = item
         else:
             d, c = item, colour
+        # A shape may name its own colour or leave it None to take the icon's,
+        # which is what a hole punched with evenodd wants: it is still the body.
+        if c is None:
+            c = colour
         parts.append(
             '  <path fill="%s" fill-rule="%s" d="%s"/>' % (c, rule, d)
         )
@@ -260,6 +284,44 @@ def rounded_tri_pts(ax, ay, b, c, r):
     return " ".join(parts)
 
 
+def arc_band(cx, cy, r, width, deg0, deg1):
+    """A slice of an annulus with round ends - one wave of a fan.
+
+    Angles are degrees clockwise from east, which on a screen (y down) is the
+    direction they visibly turn. The ends are capped with half-circles so a
+    wave that stops mid-air stops the way the capsules elsewhere do, rather
+    than on a blunt radial edge that reads as a cut."""
+    hw = width / 2.0
+    ro, ri = r + hw, r - hw
+    # Always the clockwise way round, so a band may be given its ends in the
+    # order they are read - 318 to 258 is the long way, not a sixty degree
+    # stub - and a ring with a gap in it can be said as one call.
+    sweep = (deg1 - deg0) % 360.0 or 360.0
+    a0, a1 = math.radians(deg0), math.radians(deg0 + sweep)
+    large = 1 if sweep > 180.0 else 0
+
+    def at(rad, a):
+        return (cx + rad * math.cos(a), cy + rad * math.sin(a))
+
+    o0, o1 = at(ro, a0), at(ro, a1)
+    i0, i1 = at(ri, a0), at(ri, a1)
+    return (
+        "M%.3f %.3f A%.3f %.3f 0 %d 1 %.3f %.3f A%.3f %.3f 0 0 1 %.3f %.3f "
+        "A%.3f %.3f 0 %d 0 %.3f %.3f A%.3f %.3f 0 0 1 %.3f %.3f Z"
+        % (
+            o0[0], o0[1], ro, ro, large, o1[0], o1[1],
+            hw, hw, i1[0], i1[1],
+            ri, ri, large, i0[0], i0[1],
+            hw, hw, o0[0], o0[1],
+        )
+    )
+
+
+def annulus(cx, cy, r_out, r_in):
+    """A ring: the outer circle with the inner one punched out (evenodd)."""
+    return (circle(cx, cy, r_out) + " " + circle(cx, cy, r_in), None, "evenodd")
+
+
 def paths():
     folder = (
         "M28 22 H56 A10 10 0 0 1 66 32 V36 A6 6 0 0 0 72 42 H90 "
@@ -355,6 +417,59 @@ def paths():
         (capsule(38, 38, 90, 90, 18), "#9B1C1C"),
         (capsule(90, 38, 38, 90, 18), "#9B1C1C"),
     ]
+    # The radios. Each is built from the primitives above rather than drawn by
+    # hand, for the reason the repo keeps every other master here: art that a
+    # script emits can be re-emitted, and art that was nudged in an editor
+    # cannot.
+    #
+    # A fan of waves over a dot. Everyone already reads this one, which is why
+    # it is the only icon in the group allowed to be waves and nothing else -
+    # the other three have to be told apart from it as well as from each other.
+    wifi = [
+        arc_band(64, 100, 30, 14, 213, 327),
+        arc_band(64, 100, 54, 14, 213, 327),
+        arc_band(64, 100, 78, 14, 218, 322),
+        circle(64, 98, 11),
+    ]
+    # The rune, as five strokes of one width: the stem, and the two flags that
+    # cross it. Not a fan, not a wave - the one protocol here with a mark of
+    # its own, and the cell under it says BLE rather than Bluetooth because
+    # this radio cannot hear the Classic devices that mark also stands for.
+    ble = [
+        capsule(64, 16, 64, 112, 13),
+        capsule(36, 40, 92, 88, 13),
+        capsule(92, 40, 36, 88, 13),
+        capsule(64, 16, 92, 40, 13),
+        capsule(64, 112, 92, 88, 13),
+    ]
+    # An emitter and a beam of straight chevrons. Infrared is the one protocol
+    # here a person aims, and the one whose picture must not be an arc: three
+    # of these four are "waves", so only Wi-Fi and NFC are allowed to curve.
+    # These bars are straight and angled, which at 14 px is a different shape
+    # rather than a different radius.
+    ir = [
+        rrect(14, 46, 28, 36, 13),
+        capsule(54, 44, 72, 64, 12),
+        capsule(72, 64, 54, 84, 12),
+        capsule(84, 44, 102, 64, 12),
+        capsule(102, 64, 84, 84, 12),
+    ]
+    # A card and a fan leaving its edge. NFC's "nearby" is four centimetres, so
+    # the picture is the gesture - a thing held against a reader - and the card
+    # is what keeps it from being Wi-Fi turned on its side.
+    nfc = [
+        rrect(12, 34, 58, 62, 10),
+        arc_band(70, 64, 22, 12, -58, 58),
+        arc_band(70, 64, 42, 12, -52, 52),
+    ]
+    # The Scanner's own face. Not any one of the four: rings and a sweep, which
+    # is the act rather than the protocol.
+    radar = [
+        arc_band(64, 64, 50, 12, 318, 258),
+        arc_band(64, 64, 26, 12, 318, 258),
+        circle(64, 64, 9),
+        circle(97, 31, 11),
+    ]
     return {
         "folder": folder,
         "file": file_,
@@ -368,12 +483,28 @@ def paths():
         "warning": warning,
         "ok": ok,
         "close": close,
+        "wifi": wifi,
+        "ble": ble,
+        "ir": ir,
+        "nfc": nfc,
+        "radar": radar,
     }
 
 
 def main():
+    """Write the masters named on the command line, or all of them.
+
+    Name them, in practice. The twelve original masters in assets/icons were
+    refined after this script last emitted them - colours moved, second-colour
+    marks were added - and re-emitting all of them would quietly undo that
+    work. So this takes ids: `emit_icon_svgs.py wifi ble ir nfc radar` writes
+    the five and leaves the rest of the tree alone."""
     d = paths()
-    for name in IDS:
+    want = sys.argv[1:] or list(IDS)
+    for name in want:
+        if name not in d:
+            raise SystemExit("no such icon: %s" % name)
+    for name in want:
         path = os.path.join(OUT, name + ".svg")
         with open(path, "w") as f:
             f.write(svg(d[name], COLOUR[name]))

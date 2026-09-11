@@ -43,7 +43,7 @@ and `fill-rule` `nonzero` (default) or `evenodd`.
 ## The concept
 
 Solid, rounded, high-tech. `folder` is the locked sample: `#5AABFF`, stepped
-tab, large body radius. The cat is not one of these twelve: the mascot is a
+tab, large body radius. The cat is not one of these seventeen: the mascot is a
 platform image with an id of its own, drawn whole where it is given the room.
 
 ## The icons
@@ -62,6 +62,26 @@ platform image with an id of its own, drawn whole where it is given the room.
 | `warning`     | this cannot be undone                           | `#F9E154` + `#C9A428` + honey `!`                 |
 | `ok`          | confirmed, done, yes                            | `#22C55E` + `#FFF3EE` checkbox + warm-white check |
 | `close`       | dismissed, cancelled, no                        | `#C6CDD6` bold x                                  |
+
+## The radios
+
+Five more, for the Scanner (#57): one picture per protocol, plus the app's own
+face. They are judged the same way and against each other hardest of all, because
+three of the four protocols are "waves" and only one of them may be drawn as
+waves.
+
+| id      | means                                | fill                             |
+| ------- | ------------------------------------ | -------------------------------- |
+| `wifi`  | the 2.4 GHz band                     | `#3D9EFF` fan over a dot         |
+| `ble`   | BLE advertisers                      | `#4D8DF6` the rune, five strokes |
+| `ir`    | infrared, the one you aim            | `#E05A5A` emitter + straight ")" |
+| `nfc`   | a card held against a reader         | `#5AD1A0` card + fan             |
+| `radar` | the Scanner itself, none of the four | `#E5B845` two open rings + blip  |
+
+Wi-Fi keeps the fan, because that is the one the whole world already reads. BLE
+has a mark of its own. Infrared is straight chevrons rather than arcs - a
+different shape at 14 px, not a different radius - and NFC keeps its curve but
+is anchored to a card, which is the gesture rather than the field.
 
 `ok` and `close` are the pair a user answers a question with. They must be
 unmistakable from each other — that pair matters more than any single icon.

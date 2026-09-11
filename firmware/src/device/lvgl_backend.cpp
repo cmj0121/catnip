@@ -503,7 +503,7 @@ void apply_text(Entry *e, const char *text, catnip_icon icon, const char *image,
         lv_obj_set_style_pad_row(e->obj, 4, 0);
         lv_obj_set_flex_grow(e->obj, in_strip ? 1 : 0);
         lv_obj_set_width(e->obj, in_strip ? LV_SIZE_CONTENT : LV_PCT(100));
-        if (icon >= CATNIP_ICON_FOLDER && icon <= CATNIP_ICON_CLOSE) {
+        if (icon >= CATNIP_ICON_FOLDER && icon <= CATNIP_ICON_DRAWN_LAST) {
             /* A quarter of the carousel's size. A cell is the whole panel and
              * its icon is the only thing on it; a tile is one of a pair at the
              * foot of a page of facts, and every pixel it takes is a fact the
@@ -584,7 +584,7 @@ void apply_text(Entry *e, const char *text, catnip_icon icon, const char *image,
          * and there is no pivot to get wrong. */
         lv_image_set_inner_align(img, LV_IMAGE_ALIGN_STRETCH);
         lv_obj_remove_flag(img, LV_OBJ_FLAG_HIDDEN);
-    } else if (icon >= CATNIP_ICON_FOLDER && icon <= CATNIP_ICON_CLOSE) {
+    } else if (icon >= CATNIP_ICON_FOLDER && icon <= CATNIP_ICON_DRAWN_LAST) {
         /* The same twelve shapes at whichever size the shape on screen calls
          * for: beside a word in a row, alone in the middle of a carousel, or a
          * grid tile between the two. */
