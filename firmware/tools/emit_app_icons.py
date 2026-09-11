@@ -215,51 +215,42 @@ def matrixrain_png():
     return im.resize((SIZE, SIZE), Image.LANCZOS)
 
 
-# ---- Air Mouse: a pointer, and the air it works through --------------------
-# A cursor is the fastest way to say "this moves a pointer", and the fan beside
-# it is the same mark the Scanner uses for a radio. Together they read as a
-# pointer that works from across the room, which is what the app is.
+# ---- Air Mouse: the mouse, and the pointer it produces ---------------------
+# Two objects, not one mark: the device on the left and the thing it moves on
+# the right. Either alone would be ambiguous - a mouse body on its own is a
+# mouse, not an *air* mouse, and a bare cursor is every pointing app there has
+# ever been - and together they read as cause and effect.
 #
-# The cursor keeps the set's light body and the fan takes the accent, so the two
-# halves separate at a glance instead of merging into one grey shape at the size
-# this is actually looked at. They do not overlap: the cursor's right wing stops
-# at x=86 and the fan's widest arc starts past x=105.
+# They must not touch. At the size this is looked at, two light shapes ten
+# pixels apart at 128 are two and a half apart, which is the whole of what keeps
+# them from fusing into one blob; the body stops at x=64 and the cursor's tip
+# starts at x=74. The scroll wheel takes the accent, which is the set's habit -
+# a light body with one small accent detail, the way the clock's hands and the
+# Scanner's dot do it.
 #
-# One list of points, used by both renderers - the SVG path and the PIL polygon
-# are the same seven corners, so the two cannot drift apart.
-A_ARROW = ((30, 24), (30, 100), (48, 82), (60, 108), (74, 101), (62, 75), (86, 74))
-A_CX, A_CY = 96.0, 38.0  # where the fan comes from
-A_DOT = 5.0
-A_STROKE = 8.0
-A_ARCS = (18.0, 30.0)  # radii, nested rather than parallel
-A_SPREAD = 55.0  # degrees either side of straight out
-
-
-def _a_arc_ends(r):
-    a0, a1 = math.radians(-A_SPREAD), math.radians(A_SPREAD)
-    return (
-        A_CX + r * math.cos(a0),
-        A_CY + r * math.sin(a0),
-        A_CX + r * math.cos(a1),
-        A_CY + r * math.sin(a1),
-    )
+# The cursor is one list of seven corners used by both renderers, so the SVG
+# path and the PIL polygon cannot drift apart.
+A_BODY = (14.0, 32.0, 50.0, 84.0)  # x, y, w, h of the mouse shell
+A_BODY_R = 24.0  # nearly half the width: a shell, not a box
+A_WHEEL = (35.5, 44.0, 7.0, 16.0)  # x, y, w, h
+A_WHEEL_R = 3.5
+A_ARROW = ((74, 10), (74, 69), (88, 55), (97, 76), (108, 70), (99, 50), (118, 49))
 
 
 def airmouse_svg():
+    bx, by, bw, bh = A_BODY
+    wx, wy, ww, wh = A_WHEEL
     d = "M %d %d " % A_ARROW[0]
     d += " ".join("L %d %d" % p for p in A_ARROW[1:])
-    parts = ['  <path fill="%s" d="%s Z"/>' % (BODY, d)]
-    for r in A_ARCS:
-        x0, y0, x1, y1 = _a_arc_ends(r)
-        parts.append(
-            '  <path fill="none" stroke="%s" stroke-width="%.1f" '
-            'stroke-linecap="round" d="M %.3f %.3f A %.3f %.3f 0 0 1 %.3f %.3f"/>'
-            % (ACCENT, A_STROKE, x0, y0, r, r, x1, y1)
-        )
-    parts.append(
-        '  <circle fill="%s" cx="%.1f" cy="%.1f" r="%.1f"/>' % (ACCENT, A_CX, A_CY, A_DOT)
+    return _svg(
+        [
+            '  <rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="%.1f" '
+            'fill="%s"/>' % (bx, by, bw, bh, A_BODY_R, BODY),
+            '  <rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="%.1f" '
+            'fill="%s"/>' % (wx, wy, ww, wh, A_WHEEL_R, ACCENT),
+            '  <path fill="%s" d="%s Z"/>' % (BODY, d),
+        ]
     )
-    return _svg(parts)
 
 
 def airmouse_png():
@@ -267,19 +258,19 @@ def airmouse_png():
 
     im = Image.new("RGBA", (SIZE * SS, SIZE * SS), (0, 0, 0, 0))
     d = ImageDraw.Draw(im)
-    d.polygon([(x * SS, y * SS) for x, y in A_ARROW], fill=BODY)
-    for r in A_ARCS:
-        box = [(A_CX - r) * SS, (A_CY - r) * SS, (A_CX + r) * SS, (A_CY + r) * SS]
-        d.arc(box, -A_SPREAD, A_SPREAD, fill=ACCENT, width=int(A_STROKE * SS))
-    d.ellipse(
-        [
-            (A_CX - A_DOT) * SS,
-            (A_CY - A_DOT) * SS,
-            (A_CX + A_DOT) * SS,
-            (A_CY + A_DOT) * SS,
-        ],
+    bx, by, bw, bh = A_BODY
+    d.rounded_rectangle(
+        [bx * SS, by * SS, (bx + bw) * SS, (by + bh) * SS],
+        radius=A_BODY_R * SS,
+        fill=BODY,
+    )
+    wx, wy, ww, wh = A_WHEEL
+    d.rounded_rectangle(
+        [wx * SS, wy * SS, (wx + ww) * SS, (wy + wh) * SS],
+        radius=A_WHEEL_R * SS,
         fill=ACCENT,
     )
+    d.polygon([(x * SS, y * SS) for x, y in A_ARROW], fill=BODY)
     return im.resize((SIZE, SIZE), Image.LANCZOS)
 
 
