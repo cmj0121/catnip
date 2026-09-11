@@ -199,6 +199,14 @@ ui.screen{ rows, status, on_click = function() look_again() end }
 -- a half, and the driver paces the sweeps itself - but because asking is how
 -- the answer is collected, and an answer that has arrived should be drawn
 -- rather than waited out. The driver returns nil until it has one.
+-- A fresh look on the way in, rather than whatever the last page left behind.
+--
+-- It is also what puts the platform's ring up: the claim begins at rescan()
+-- and ends at the first answer after it, so a page that wants to be told
+-- "working on it" asks for the look it wanted anyway. Asking alone does not
+-- raise it - see catnip_wifi_scanning() for why it must not.
+look_again()
+
 while true do
   refresh()
   sys.sleep(1000)

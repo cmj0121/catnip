@@ -55,6 +55,12 @@ int catnip_ble_scan(catnip_ble_dev *out, int max);
  * that is already showing a list. */
 void catnip_ble_rescan(void);
 
+/* Called from the main loop. Takes the radio down once nobody has asked about
+ * it for a while: an initialised controller shares the front end with Wi-Fi
+ * whether or not it is listening, so it does not get to outlive the page that
+ * wanted it. Nothing is lost by it - the next ask brings it back up. */
+void catnip_ble_poll(void);
+
 /* Whether there is nothing to show yet, which is what raises the busy ring. The
  * same meaning catnip_wifi_scanning() carries, and for the same reason: a
  * caller that keeps polling keeps a scan in the air, so "the radio is busy" is

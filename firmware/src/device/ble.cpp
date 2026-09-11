@@ -48,9 +48,20 @@ uint32_t g_done_at;
 
 /* The same two ends the Wi-Fi claim has, and for the same reason: the busy ring
  * this drives takes the whole panel, and a claim that takes the whole device
- * must be one that can end without anybody clearing it. */
+ * must be one that can end without anybody clearing it. The claim itself begins
+ * at rescan() and nowhere else - see catnip_wifi_scanning() for why asking must
+ * not begin one. */
 const uint32_t kAskGraceMs = 3000;
 const uint32_t kPatienceMs = 12000;
+
+/* How long the radio stays up with nobody asking before it is taken down.
+ *
+ * A controller that is initialised is a controller sharing the 2.4 GHz front
+ * end with Wi-Fi whether or not it is listening, so it does not get to outlive
+ * the page that wanted it. Longer than the grace above, because a page that
+ * alternates between two radios stops asking this one for a whole Wi-Fi sweep
+ * and has not gone anywhere. */
+const uint32_t kIdleDownMs = 20000;
 
 void collect(NimBLEScanResults results)
 {
@@ -123,10 +134,6 @@ int catnip_ble_scan(catnip_ble_dev *out, int max)
 
     if (!catnip_ble_begin()) return -1;
 
-    if (!g_started || (uint32_t)(now - g_last_ask) > kAskGraceMs) {
-        g_started = now ? now : 1;
-        g_answered = false;
-    }
     g_last_ask = now;
 
     if (g_running) {
@@ -153,6 +160,22 @@ int catnip_ble_scan(catnip_ble_dev *out, int max)
     return n;
 }
 
+void catnip_ble_poll(void)
+{
+    /* Nobody is listening any more. Give the front end back.
+     *
+     * Here rather than at the end of a scan because the question is not "has
+     * the window closed" but "has the page gone", and the only evidence of that
+     * is the asking stopping. g_last_ask of zero is a radio nobody has ever
+     * asked about, which is not idle - it is not up. */
+    if (!g_up || !g_last_ask) return;
+    if ((uint32_t)(millis() - g_last_ask) <= kIdleDownMs) return;
+    catnip_ble_end();
+    g_last_ask = 0;
+    g_started = 0;
+    g_answered = false;
+}
+
 void catnip_ble_rescan(void)
 {
     if (!catnip_ble_begin()) return;
@@ -163,6 +186,6 @@ void catnip_ble_rescan(void)
     }
     g_n = 0;
     g_done_at = 0;
-    g_started = millis();
+    g_started = millis() ? millis() : 1;
     g_answered = false;
 }
