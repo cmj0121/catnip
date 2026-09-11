@@ -1,43 +1,26 @@
--- Air Mouse (#59) - the device as a BLE mouse. Move it, and the cursor moves.
+-- Air Mouse (#59) - the device as a BLE mouse. Wave to move, A to click.
 --
 -- The first app that is an output device. Everything else catnip runs draws the
 -- thing it is for; this one's product happens on somebody else's screen, which
 -- makes the screen here a status page about a thing you cannot see from it.
 --
--- **It is a mouse in the air, not a wand.** Move the device left and the cursor
--- goes left. That is the model this app went through two others to arrive at,
--- and the two it discarded are worth recording because each failed for a
--- structural reason rather than a tuning one:
---
---   *Tilt.* An accelerometer reports where gravity IS, so "not moving" is a
---   different reading in every posture - held upright rather than flat, one
---   axis sits at a full g and the cursor is pinned against an edge before the
---   user has moved at all. And the axis that matters most is invisible to it:
---   aiming across is rotation about gravity, which moves no accelerometer axis
---   at any speed.
---
---   *Rotation.* A gyroscope fixes both of those - a rate has a true zero, and
---   yaw is exactly what it measures. It is what every commercial air mouse
---   does. But it means the cursor only moves when the device TURNS, so sliding
---   the device sideways while keeping it aimed does nothing, and that is the
---   gesture people actually make.
---
--- So: linear acceleration, with gravity subtracted, integrated once into a
--- velocity. Integrating a velocity is a displacement, which is why moving the
--- device twenty centimetres to the right leaves the cursor moved and keeps it
--- there rather than springing back.
---
--- **The honest cost.** An integral accumulates its own error, so a velocity
--- derived this way walks away on its own. Two things hold it: a mild decay, and
--- a zero-velocity update - when the device is genuinely still, the velocity is
--- not damped toward zero, it is *set* to zero. Without the second one this app
--- would be a cursor that slides off the screen while the device sits on a desk.
+-- **It is held like a wand**, sideways, with the top edge of the screen pointing
+-- at the host's display. That posture is the reason this reads a gyroscope and
+-- not the accelerometer: pointing left and right is rotation about gravity, and
+-- rotation about gravity moves no accelerometer axis at all. A tilt version was
+-- built first and could not be made to work, for that reason and one other - it
+-- had no neutral. An accelerometer reports where gravity is, so "not moving" is
+-- a different reading in every posture, and any posture but the assumed one
+-- pins the cursor against an edge. A rate has a true zero: not turning is zero
+-- however the device is held.
 --
 -- **Wi-Fi is off for the duration**, and the driver does that rather than this
--- app - see device.mouse.start().
+-- app - see device.mouse.start(). The two radios share one 2.4 GHz front end,
+-- and a mouse is held for as long as the app is open.
 --
 -- Leaving is the platform's: B, long B, or a fault all end the app, and the
--- main loop's invariant takes the mouse down with it.
+-- main loop's invariant takes the mouse down with it. There is deliberately no
+-- teardown here to forget to run.
 
 -- ---------------------------------------------------------------------------
 -- The numbers. All of them here, because every one is a feel decision that can
@@ -45,63 +28,63 @@
 -- ---------------------------------------------------------------------------
 
 local FRAME_MS = 20 -- 50 reports a second, what a mouse is expected to produce
-local FRAME_S = FRAME_MS / 1000
-
--- How fast the gravity estimate follows the accelerometer. Slow on purpose: it
--- has to track the device being turned over, which takes a second, while NOT
--- following a hand movement, which takes a tenth of one. At 50 Hz this is a
--- time constant of about a second, so anything faster than that is left behind
--- as linear acceleration - which is exactly the signal wanted.
-local GRAV_FOLLOW = 0.02
-
--- Under this, an acceleration is the part's noise floor rather than a hand.
--- Applied before the integral, because noise that reaches the integral never
--- leaves it.
-local ACC_DEADZONE = 0.02 -- g
-
--- What a velocity bleeds off per frame. Mild: every bit of decay is also the
--- cursor under-travelling the gesture, because the displacement it draws is the
--- integral of this. The zero-velocity update below is what actually controls
--- the drift; this only stops a long slow one building while the device is being
--- carried around.
-local VEL_DECAY = 0.96
-
--- Cursor pixels per unit of velocity, and the two are NOT the same number: a
--- 16:9 screen is about 1.8 times as many pixels across as down, so the same
--- hand movement has to be worth more pixels horizontally to cover the same
--- *fraction of the screen* - which is what "as sensitive" means to a hand.
-local PX_PER_V_X = 600
-local PX_PER_V_Y = 340
-
+local RATE_DEADZONE = 3 -- dps. Under this it is noise, not aim.
 local MAX_STEP = 64 -- the most one report may carry (HID allows 127)
 
--- The zero-velocity update. When the device is still by both senses - not
--- accelerating and not turning - the velocity is set to zero rather than
--- decayed toward it. Both senses, because either one alone has a blind spot: a
--- device being rotated steadily has little linear acceleration, and a device
--- being moved at a constant speed has none at all.
-local STILL_ACC = 0.03 -- g
-local STILL_RATE = 12 -- dps
-local ZUPT_MS = 100
-
--- Lifting the mouse. A real mouse that runs out of desk is picked up, moved
--- back and put down, and the cursor stays where it was; in the air the gesture
--- is speed - a deliberate move is gentle, a flick to reset your reach is not.
--- Measured on acceleration now rather than rotation, because in this model a
--- reposition need not turn the device at all.
+-- Cursor pixels per degree turned, and the two are NOT the same number.
 --
--- Two thresholds and a settle, not one: a single threshold is crossed several
--- times during one flick and the cursor would stutter out in bursts.
-local LIFT_ENTER = 0.60 -- g
-local LIFT_EXIT = 0.25 -- g
-local LIFT_SETTLE_MS = 120
+-- A single gain was the first version and it felt wrong in a specific way:
+-- left and right were sluggish next to up and down. That is not a tuning
+-- accident, it is two things multiplying:
+--
+--   The wrist is not symmetric. Flexion and extension - the up-and-down one -
+--   has something like 150 degrees of comfortable travel; radial and ulnar
+--   deviation, the side-to-side one, has about 50. The same wholehearted
+--   gesture produces roughly a third of the angle across as it does up.
+--
+--   And the screen is wide. A 16:9 display is about 1.8 times as many pixels
+--   across as down, so a given angle covers proportionally less of it.
+--
+-- The two compound, and a single gain makes the user pay for both. Pixels per
+-- degree is therefore per axis, and the horizontal one is larger so that the
+-- same effort covers the same *fraction of the screen* either way - which is
+-- what "as sensitive" actually means to a hand.
+local PX_PER_DEG_X = 20
+local PX_PER_DEG_Y = 10
 
 -- How sure of the grip the app has to be before it changes its mind about it.
+-- Gravity is a whole g, so half of one is well clear of any posture that is
+-- actually the intended one, and the last answer is kept in between - a wand
+-- being waved through level is not a wand being turned over.
 local GRIP_CERTAIN = 0.5 -- g
 
+-- Lifting the mouse. A real mouse that runs out of desk is picked up, moved
+-- back and put down, and the cursor stays where it was. A wand cannot be picked
+-- up, so the gesture is speed: a deliberate aim is tens of degrees a second, and
+-- a flick to reset your wrist is several hundred.
+--
+-- Two thresholds and a settle, not one threshold - a single one would be
+-- crossed several times during one flick and the cursor would stutter out in
+-- bursts. Entering is immediate because the flick has already started; leaving
+-- waits for the wrist to actually stop, or the tail of the flick back would be
+-- read as the next aim.
+local LIFT_ENTER = 250 -- dps, any axis
+local LIFT_EXIT = 120 -- dps, all axes
+local LIFT_SETTLE_MS = 120
+
+-- Zeroing the gyroscope. Every gyroscope reads something other than zero when
+-- it is still, and this app turns a rate straight into a movement - so the bias
+-- is not an abstraction, it is the cursor sliding across the screen on its own
+-- while the device lies on a table. Corrected continuously rather than once at
+-- startup, because the bias moves with temperature and the part has just been
+-- switched on.
+local STILL_RATE = 5 -- dps, all axes, to count as "not being moved"
+local STILL_MS = 300 -- how long that has to hold before the zero is believed
+local BIAS_FOLLOW = 0.05 -- how fast the estimate walks toward the reading
+
 -- ---------------------------------------------------------------------------
--- The pure part. Everything that decides where the cursor goes lives here,
--- because it is the only part of this app a host can check.
+-- The mapping. Pure, because it is the only part of this app a host can check,
+-- and because sign-and-threshold decisions are exactly where the bugs are.
 -- ---------------------------------------------------------------------------
 
 -- Round away from zero rather than down, so -2.6 is -3 and not -2. math.floor
@@ -112,74 +95,68 @@ local function round(v)
   return -math.floor(-v + 0.5)
 end
 
--- Below the deadzone is nothing; above it, measured from the edge rather than
--- from zero, so the first real movement is small instead of a jump.
-local function dead(a)
-  if a > -ACC_DEADZONE and a < ACC_DEADZONE then return 0 end
-  return a > 0 and (a - ACC_DEADZONE) or (a + ACC_DEADZONE)
+-- One axis: a rate in degrees per second to a step in pixels. Measured from the
+-- edge of the deadzone rather than from zero, so the first movement past it is
+-- one pixel and not thirty - the difference between a cursor you can aim and
+-- one that jumps the moment you are not perfectly still.
+local function step(rate, px_per_deg)
+  if rate > -RATE_DEADZONE and rate < RATE_DEADZONE then return 0 end
+  local past = rate > 0 and (rate - RATE_DEADZONE) or (rate + RATE_DEADZONE)
+  local s = past * (FRAME_MS / 1000) * px_per_deg
+  if s > MAX_STEP then s = MAX_STEP end
+  if s < -MAX_STEP then s = -MAX_STEP end
+  return round(s)
 end
 
 -- Which way the glass is facing, from gravity alone.
 --
--- Held as a mouse-in-the-air with the screen's top edge forward, the part's Y
--- axis lies along the world's vertical - so gravity is almost entirely on it,
--- and its *sign* is the whole of the difference between holding the device with
--- the glass to your right and with the glass to your left. Those two grips are
--- exact mirrors, so one reading settles both axes.
+-- This is not a setting, and it is not a guess. Held as a wand with the screen's
+-- top edge pointing forward, the part's Y axis lies along the world's vertical -
+-- so gravity is almost entirely on ay, and its *sign* is the whole of the
+-- difference between holding the wand with the glass to your right and holding
+-- it with the glass to your left. Those two grips are exact mirrors of each
+-- other, so one reading settles both steering axes.
 --
 -- The accelerometer's convention (see imu_map.c) is that the axis reading
--- positive is the one pointing at the ceiling.
+-- positive is the one pointing at the ceiling. Glass to the right puts +Y at the
+-- floor and reads about -1g; glass to the left puts it at the ceiling and reads
+-- about +1g.
 --
 -- `was` is returned unchanged in between, which is the point of taking it: a
--- device being waved passes through the middle several times a second, and an
+-- wand swung through level passes through ay = 0 several times a second, and an
 -- app that re-decided there would invert the cursor mid-gesture.
-function grip_flipped(gravity_y, was)
-  if not gravity_y then return was end
-  if gravity_y > GRIP_CERTAIN then return true end
-  if gravity_y < -GRIP_CERTAIN then return false end
+function grip_flipped(ay, was)
+  if not ay then return was end
+  if ay > GRIP_CERTAIN then return true end
+  if ay < -GRIP_CERTAIN then return false end
   return was
 end
 
--- One frame of the integral: a velocity, a linear acceleration, and the next
--- velocity. Separate from the loop so the drift behaviour can be driven
--- directly - a hundred frames of a constant small offset is a test, and is also
--- exactly the failure this app has to not have.
-function velocity_step(v, acc)
-  return v * VEL_DECAY + dead(acc) * FRAME_S
-end
-
--- Velocity to a cursor step. The two gains differ; see above.
-function cursor_step(vx, vy)
-  if not vx or not vy then return 0, 0 end
-  local function px(v, gain)
-    local s = v * gain
-    if s > MAX_STEP then s = MAX_STEP end
-    if s < -MAX_STEP then s = -MAX_STEP end
-    return round(s)
-  end
-  return px(vx, PX_PER_V_X), px(vy, PX_PER_V_Y)
-end
-
--- Which linear axes the screen's across and down actually are.
+-- Held as a wand pointing at the host, turning left and right (yaw) shows up on
+-- the part's Y axis and raising and lowering the tip (pitch) on its Z axis. The
+-- cursor follows the tip: point up and it goes up, swing left and it goes left.
 --
--- Held with the screen's top edge forward, the part's Z axis lies along your
--- right and its Y along the vertical - so moving the device right shows up on
--- az, and moving it up on ay. Screen y counts downward, which is the sign on
--- the second one. Both mirror with the grip.
+-- The horizontal sign was derived and held up on the device; the vertical one
+-- was derived and was WRONG, and raising the tip drove the cursor down. It is
+-- now what a hand actually produced rather than what the right-hand rule was
+-- argued into, which is the only standing this kind of sign can have: the chain
+-- runs through the part's mounting, imu_map's frame, the panel rotation and the
+-- direction screen y counts, and being right about three of those four still
+-- gives a cursor that goes the wrong way. Mirrored for the other grip.
 --
--- These signs are NOT settled by argument. The last version derived one of them
--- correctly and the other backwards, and the difference was invisible until a
--- hand moved: the chain runs through the part's mounting, imu_map's frame, the
--- panel rotation and the direction screen y counts, and being right about three
--- of those four still gives a cursor that goes the wrong way. The debug line
--- below shows both raw axes so this is settled by reading.
-function axes_for(lin_y, lin_z, flipped)
-  local across = flipped and -lin_z or lin_z
-  local down = flipped and -lin_y or lin_y
-  return across, down
+-- Global so the host test can drive it directly; everything else in this file
+-- is a radio or a clock.
+function cursor_step(gy, gz, flipped)
+  -- A device with no gyroscope reports no axes at all rather than zeros (see
+  -- catnip_hal.h), so this is a real case, not a defensive one.
+  if not gy or not gz then return 0, 0 end
+  local across = flipped and -gy or gy
+  local down = flipped and -gz or gz
+  return step(across, PX_PER_DEG_X), step(down, PX_PER_DEG_Y)
 end
 
--- The lift, as a state machine over the strongest acceleration on any axis.
+-- The lift, as a state machine over the largest rate on any axis. Global for
+-- the same reason: a threshold with hysteresis is a thing worth a test.
 function lift_next(state, mag, calm_ms)
   if state == "lifted" then
     if mag < LIFT_EXIT and calm_ms >= LIFT_SETTLE_MS then return "pointing" end
@@ -190,16 +167,16 @@ function lift_next(state, mag, calm_ms)
 end
 
 -- ---------------------------------------------------------------------------
--- The screen. It cannot be read while the device is being moved, so the LED
--- carries the same story - see led_for().
+-- The screen. It cannot be read while the wand is pointed at anything, so the
+-- LED carries the same story - see led_for().
 -- ---------------------------------------------------------------------------
 
 local state_line = ui.label{ id = "state", text = "starting", style = "title" }
 local who = ui.label{ id = "who", text = "Pair with \"MeowKit Mouse\"", style = "body" }
-local how = ui.label{ id = "how", text = "Move it  -  A to click", style = "caption" }
--- DEBUG (#59): the linear axes, the grip, and what the lift is doing. Here to
--- settle the signs and the gains by reading rather than guessing; it comes out
--- once they are settled.
+local how = ui.label{ id = "how", text = "Point and wave  -  A to click", style = "caption" }
+-- DEBUG (#59): the raw rates and what the lift is doing. This is here to settle
+-- INVERT_X / INVERT_Y and the thresholds above by reading rather than guessing,
+-- and comes out once they are settled.
 local dbg = ui.label{ id = "dbg", text = "", style = "caption" }
 ui.screen{ state_line, who, how, dbg }
 
@@ -210,7 +187,9 @@ local SAYS = {
 }
 
 -- Repaint only when the word changed. Every touch of the tree is a full-panel
--- blit and this loop runs fifty times a second.
+-- blit and this loop runs fifty times a second; a page that rewrote the same
+-- word every frame would spend the whole app redrawing a screen nobody is
+-- looking at while the cursor it exists to move stuttered.
 local shown
 local function say(state)
   if state == shown then return end
@@ -220,13 +199,14 @@ local function say(state)
   state_line.text = s.line
 end
 
--- The LED says the same three things the header does, because while the device
--- is being moved the screen cannot be read. Breathing blue is waiting to be
--- paired, green is connected, amber is lifted - and that last earns a colour of
--- its own, because "why is the cursor ignoring me" is the question this app can
--- most easily provoke.
+-- The LED says the same three things the header does, because in this posture
+-- the screen is edge-on to the user and the header cannot be read. Blue
+-- breathing is waiting to be paired, green is connected and pointing, amber is
+-- lifted - and that last one earns its own colour, because "why is the cursor
+-- ignoring me" is the question this app can most easily provoke.
 local function led_for(state, lift, phase)
   if state ~= "connected" then
+    -- A slow breath, so "nothing has happened yet" does not look like a fault.
     local b = 4 + math.floor(10 * (0.5 + 0.5 * math.sin(phase)))
     return 0, 0, b
   end
@@ -248,72 +228,60 @@ if not device.mouse.start() then
   end
 end
 
--- nil until the first sample: the estimate starts AT the first reading rather
--- than at zero, or the first second of the app is a cursor being flung by a
--- gravity estimate still climbing toward 1g.
-local gx_, gy_, gz_ = nil, nil, nil
-local vx, vy = 0, 0
+local bias_x, bias_y, bias_z = 0, 0, 0
 local still_ms, calm_ms = 0, 0
 local lift = "pointing"
-local flipped = false
 local phase = 0
+-- Glass to the right until gravity says otherwise. Either is a real grip; this
+-- one is only the assumption held for the first few milliseconds.
+local flipped = false
 
 while true do
   local m = sensor.imu()
+  local gx, gy, gz = m.gx, m.gy, m.gz
   local state = device.mouse.state()
 
-  if m.ax and m.ay and m.az then
-    -- The gravity estimate, and what is left over after it.
-    if not gx_ then
-      gx_, gy_, gz_ = m.ax, m.ay, m.az
-    else
-      gx_ = gx_ + (m.ax - gx_) * GRAV_FOLLOW
-      gy_ = gy_ + (m.ay - gy_) * GRAV_FOLLOW
-      gz_ = gz_ + (m.az - gz_) * GRAV_FOLLOW
-    end
-    local lx, ly, lz = m.ax - gx_, m.ay - gy_, m.az - gz_
+  flipped = grip_flipped(m.ay, flipped)
 
-    flipped = grip_flipped(gy_, flipped)
-    local across, down = axes_for(ly, lz, flipped)
+  if gx and gy and gz then
+    local cx, cy, cz = gx - bias_x, gy - bias_y, gz - bias_z
 
-    local acc_mag = math.max(math.abs(lx), math.abs(ly), math.abs(lz))
-    local rate_mag = 0
-    if m.gx and m.gy and m.gz then
-      rate_mag = math.max(math.abs(m.gx), math.abs(m.gy), math.abs(m.gz))
-    end
+    -- The largest rate on any axis. All three, not just the two that steer: a
+    -- flick to reset the wrist rolls the wand as much as it turns it, and a
+    -- lift that watched only the steering axes would miss half of them.
+    local mag = math.max(math.abs(cx), math.abs(cy), math.abs(cz))
 
-    calm_ms = (acc_mag < LIFT_EXIT) and (calm_ms + FRAME_MS) or 0
-    lift = lift_next(lift, acc_mag, calm_ms)
-
-    vx = velocity_step(vx, across)
-    vy = velocity_step(vy, down)
-
-    -- The zero-velocity update. Set, not decayed: a velocity that is only ever
-    -- damped keeps whatever error it has picked up, and this app draws the
-    -- integral of that error.
-    if acc_mag < STILL_ACC and rate_mag < STILL_RATE then
+    -- Re-zero while nothing is happening. Judged on the corrected rate, so a
+    -- bias that is already right keeps being confirmed rather than walking.
+    if mag < STILL_RATE then
       still_ms = still_ms + FRAME_MS
-      if still_ms >= ZUPT_MS then vx, vy = 0, 0 end
     else
       still_ms = 0
     end
+    if still_ms >= STILL_MS then
+      bias_x = bias_x + (gx - bias_x) * BIAS_FOLLOW
+      bias_y = bias_y + (gy - bias_y) * BIAS_FOLLOW
+      bias_z = bias_z + (gz - bias_z) * BIAS_FOLLOW
+    end
+
+    calm_ms = (mag < LIFT_EXIT) and (calm_ms + FRAME_MS) or 0
+    lift = lift_next(lift, mag, calm_ms)
 
     if state == "connected" then
       local dx, dy = 0, 0
-      -- Lifted means the device is being repositioned, not aimed: the buttons
+      -- Lifted means the wand is being repositioned, not aimed: the buttons
       -- still report, because letting go of A during a flick must still reach
       -- the host, but the movement does not.
-      if lift == "pointing" then dx, dy = cursor_step(vx, vy) end
+      if lift == "pointing" then dx, dy = cursor_step(cy, cz, flipped) end
       local buttons = device.button("a") and device.mouse.LEFT or 0
       device.mouse.move(dx, dy, buttons)
     end
 
-    -- DEBUG (#59): the two linear axes that steer, the velocity they have
-    -- integrated to, the grip gravity says this is, and the lift state.
-    dbg.text = string.format("ly %.2f lz %.2f | v %.3f %.3f | %s | %s", ly, lz, vx, vy,
-      flipped and "left" or "right", lift)
+    -- DEBUG (#59): raw rates, the grip gravity says this is, and the lift state.
+    dbg.text = string.format("gy %.0f gz %.0f ay %.2f | glass %s | %s", gy, gz,
+      m.ay or 0, flipped and "left" or "right", lift)
   else
-    dbg.text = "no accelerometer on this device"
+    dbg.text = "no gyroscope on this device"
   end
 
   say(state)
