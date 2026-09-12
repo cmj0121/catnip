@@ -147,6 +147,21 @@ typedef struct {
     /* HTTP GET: write body into buf (cap incl. NUL); return length or -1. */
     int (*http_get)(void *ud, const char *url, char *buf, size_t cap);
 
+    /* service.usb.* - the composite USB HID surface (Batch 1, #61).
+     *
+     * The device ships as a TinyUSB composite (CDC + HID keyboard). The HID
+     * interface is always present, but typing is inert until it is enabled:
+     * usb_hid_enable(ud, 1) arms it and (ud, 0) disarms it, usb_hid_enabled
+     * answers which, and usb_hid_key sends nothing while disarmed. Disabled is
+     * the boot default. NULL throughout is a device that cannot be a keyboard -
+     * it reports disabled and types nothing - which is what the host build and
+     * every non-composite build are. */
+    void (*usb_hid_enable)(void *ud, int on);
+    int (*usb_hid_enabled)(void *ud);
+    /* Tap one key: hold `mods` (a HID modifier bitmask), press `usage` (a HID
+     * usage id, 0 for a modifier-only chord), then release. */
+    void (*usb_hid_key)(void *ud, unsigned char mods, unsigned char usage);
+
     /* fs.* base directory. NULL disables fs. */
     const char *fs_base;
     /* Reformat / reinitialize the SD card (destructive). Returns 0 on success.

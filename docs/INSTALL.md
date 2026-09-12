@@ -22,6 +22,20 @@ release BOOT**, then re-run.
 
 On Linux you may need serial permission: `sudo usermod -aG dialout "$USER"` (re-login).
 
+### The BOOT+RESET dance is now required on every flash
+
+Catnip ships as a single **TinyUSB composite** image (a CDC console plus a USB
+HID keyboard, `ARDUINO_USB_MODE=0`). Moving onto the TinyUSB stack is what lets
+the keyboard and the console share one USB device — but it gives up the ROM's
+USB-Serial/JTAG reset-to-download path that used to put the board into download
+mode on its own. So from this firmware onward **every** flash needs the manual
+dance, not just a first-time or stuck one:
+
+> **hold BOOT, tap RESET, release BOOT**, then run `make flash` / `make install`.
+
+This is a known, accepted trade of the composite design. The device is never
+bricked — ROM download mode is always reachable this way.
+
 ## Install
 
 ```sh
@@ -50,6 +64,40 @@ so the device cannot be permanently bricked by flashing. If anything looks wrong
 
 1. Enter download mode (hold BOOT, tap RESET, release BOOT).
 2. `make uninstall` (restores your backup or official stock).
+
+## USB HID and BadUSB
+
+The composite image presents a USB keyboard to the host, but it is **disabled at
+boot and types nothing** until you turn it on. Open the **USB HID** app and press
+**A** to enable typing (the header grows a keyboard glyph while it is on); press A
+again to disable it.
+
+**Long A** in that app opens the HID feature menu. **BadUSB** runs a
+[Ducky Script](https://docs.hak5.org/hak5-usb-rubber-ducky) over the keyboard. It
+is greyed until HID is enabled and until there is at least one script on the card:
+
+- Put `.txt` scripts in **`/sd/catnip/badusb/`** on the SD card
+  (e.g. `/sd/catnip/badusb/hello.txt`).
+- A US-QWERTY subset is understood: `REM`, `STRING`, `STRINGLN`, `ENTER`, `TAB`,
+  `ESC`, `DELETE`, `BACKSPACE`, `DELAY <ms>`, the arrow keys, and the modifier
+  words `GUI`/`WINDOWS`, `CTRL`, `ALT`, `SHIFT` (alone or leading a chord such as
+  `GUI r` or `CTRL ALT DELETE`).
+
+Nothing types until HID is enabled and a script is deliberately picked and run —
+there is no autostart. A minimal script:
+
+```text
+REM opens a run box and says hello
+GUI r
+DELAY 500
+STRING notepad
+ENTER
+DELAY 800
+STRINGLN hello from catnip
+```
+
+Mass Storage appears in the same menu but is disabled in this release; it lands in
+a later batch.
 
 ## Configuration
 

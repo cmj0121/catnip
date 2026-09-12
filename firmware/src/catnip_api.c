@@ -10,6 +10,7 @@
 #include <sys/stat.h>
 
 #include "catnip_fs_path.h"
+#include "ducky.h"
 #include "lauxlib.h"
 #include "lua.h"
 
@@ -410,6 +411,95 @@ static int l_http_get(lua_State *L)
     return 1;
 }
 
+/* ---- service.usb.* - the composite USB HID surface (#61) ---- */
+
+/* Arm or disarm HID typing. HID is inert until this is called with true, and
+ * disabled is the boot default. A NULL hook is a device that cannot be a
+ * keyboard - the call is a safe no-op and hid_enabled() stays false. */
+static int l_usb_hid_enable(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+    int on = lua_toboolean(L, 1);
+    if (h && h->usb_hid_enable) h->usb_hid_enable(h->ud, on);
+    return 0;
+}
+
+static int l_usb_hid_enabled(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+    lua_pushboolean(L, (h && h->usb_hid_enabled) ? h->usb_hid_enabled(h->ud) : 0);
+    return 1;
+}
+
+/* Tap one key - a HID usage id and a modifier mask. Refused unless HID is
+ * enabled, and the refusal is here, in the shared layer a host test can reach,
+ * as well as in the driver: the arm gate is the whole safety of this surface,
+ * so no reader has to trust that the one place below it also checks. Returns
+ * whether the key was actually sent. */
+static int l_usb_hid_tap(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+    int usage = (int)luaL_checkinteger(L, 1);
+    int mods = (int)luaL_optinteger(L, 2, 0);
+    int armed = (h && h->usb_hid_enabled) ? h->usb_hid_enabled(h->ud) : 0;
+
+    if (armed && h->usb_hid_key) {
+        h->usb_hid_key(h->ud, (unsigned char)mods, (unsigned char)usage);
+        lua_pushboolean(L, 1);
+    } else {
+        lua_pushboolean(L, 0);
+    }
+    return 1;
+}
+
+/* service.usb.ducky_parse(text) -> { {usage=, mods=} | {delay=}, ... }.
+ *
+ * The parser and keymap are in host-tested C (ducky.h); this only marshals the
+ * event list into a Lua array the BadUSB app walks - typing each key with
+ * service.usb.hid_tap and sleeping each delay with sys.sleep, so a long pause
+ * yields to the scheduler rather than freezing the screen. nil + a reason when
+ * the script needs more events than the cap, because a payload typed halfway is
+ * worse than one refused. */
+static int l_usb_ducky_parse(lua_State *L)
+{
+    size_t len = 0;
+    const char *text = luaL_checklstring(L, 1, &len);
+    /* A ceiling on a payload, not a budget an app has to know: a few thousand
+     * keystrokes is a long script, and the buffer is freed before we return. */
+    const int cap = 4096;
+    ducky_event *evs = (ducky_event *)malloc((size_t)cap * sizeof(*evs));
+    int n;
+
+    if (!evs) {
+        lua_pushnil(L);
+        lua_pushstring(L, "out of memory");
+        return 2;
+    }
+    n = ducky_parse(text, len, evs, cap);
+    if (n < 0) {
+        free(evs);
+        lua_pushnil(L);
+        lua_pushstring(L, "script too long");
+        return 2;
+    }
+    lua_createtable(L, n, 0);
+    for (int i = 0; i < n; i++) {
+        lua_createtable(L, 0, 2);
+        if (evs[i].kind == DUCKY_DELAY) {
+            lua_pushinteger(L, evs[i].delay_ms);
+            lua_setfield(L, -2, "delay");
+        } else {
+            lua_pushinteger(L, evs[i].usage);
+            lua_setfield(L, -2, "usage");
+            lua_pushinteger(L, evs[i].mods);
+            lua_setfield(L, -2, "mods");
+        }
+        lua_rawseti(L, -2, i + 1);
+    }
+    free(evs);
+    return 1;
+}
+
 /* ---- fs.* (flat, confined to hal->fs_base) ---- */
 
 /* The one place a name chosen by an app becomes a path on the device. Every
@@ -679,6 +769,10 @@ int catnip_api_open(catnip_rt *rt, const catnip_hal *hal)
                                              {"ble_rescan", l_ble_rescan},
                                              {"ntp_last", l_ntp_last},
                                              {"http_get", l_http_get},
+                                             {"usb_hid_enable", l_usb_hid_enable},
+                                             {"usb_hid_enabled", l_usb_hid_enabled},
+                                             {"usb_hid_tap", l_usb_hid_tap},
+                                             {"usb_ducky_parse", l_usb_ducky_parse},
                                              {NULL, NULL}};
     static const luaL_Reg fs_funcs[] = {{"read", l_fs_read},     {"write", l_fs_write},
                                         {"exists", l_fs_exists}, {"list", l_fs_list},
@@ -698,10 +792,16 @@ int catnip_api_open(catnip_rt *rt, const catnip_hal *hal)
         "service.ble = { scan = service.ble_scan, rescan = service.ble_rescan }\n"
         "service.ntp = { last = service.ntp_last }\n"
         "service.http = { get = service.http_get }\n"
+        "service.usb = { hid_enable = service.usb_hid_enable,\n"
+        "                hid_enabled = service.usb_hid_enabled,\n"
+        "                hid_tap = service.usb_hid_tap,\n"
+        "                ducky_parse = service.usb_ducky_parse }\n"
         "service.wifi_status, service.wifi_ssid, service.wifi_scan = nil, nil, nil\n"
         "service.wifi_rescan = nil\n"
         "service.ble_scan, service.ble_rescan = nil, nil\n"
-        "service.ntp_last, service.http_get = nil, nil\n";
+        "service.ntp_last, service.http_get = nil, nil\n"
+        "service.usb_hid_enable, service.usb_hid_enabled = nil, nil\n"
+        "service.usb_hid_tap, service.usb_ducky_parse = nil, nil\n";
     if (luaL_dostring(L, SERVICE_LUA) != LUA_OK) {
         catnip_rt_report_error(rt, L);
         return -1;

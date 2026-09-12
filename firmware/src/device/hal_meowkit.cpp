@@ -62,6 +62,7 @@
 #include "pmu.h"
 #include "rtc.h"
 #include "sd_mount.h"
+#include "usb_hid.h"
 
 namespace {
 
@@ -277,6 +278,26 @@ void hal_imu(void *ud, float out[6])
     }
 }
 
+/* service.usb.* - the composite USB keyboard (#61). A wiring diagram like the
+ * rest of this file: the arm gate and the reports live in usb_hid.cpp. */
+void hal_usb_hid_enable(void *ud, int on)
+{
+    (void)ud;
+    catnip_usb_hid_enable(on != 0);
+}
+
+int hal_usb_hid_enabled(void *ud)
+{
+    (void)ud;
+    return catnip_usb_hid_enabled() ? 1 : 0;
+}
+
+void hal_usb_hid_key(void *ud, unsigned char mods, unsigned char usage)
+{
+    (void)ud;
+    catnip_usb_hid_key(mods, usage);
+}
+
 } /* namespace */
 
 const catnip_hal *catnip_meowkit_hal_begin(void)
@@ -318,6 +339,11 @@ const catnip_hal *catnip_meowkit_hal_begin(void)
     g_hal.ble_adv_state = hal_ble_adv_state;
     g_hal.ble_adv_set_type = hal_ble_adv_set_type;
     g_hal.ble_adv_set_addr = hal_ble_adv_set_addr;
+    /* The composite USB keyboard (#61). Present but inert until the HID app
+     * arms it; usb_hid.cpp keeps the gate. */
+    g_hal.usb_hid_enable = hal_usb_hid_enable;
+    g_hal.usb_hid_enabled = hal_usb_hid_enabled;
+    g_hal.usb_hid_key = hal_usb_hid_key;
 
     /* fs.* is the card and nothing else. The root is the mount point itself,
      * because catnip_api.c reaches the card through plain stdio - fopen,
