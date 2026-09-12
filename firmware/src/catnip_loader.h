@@ -30,6 +30,11 @@ typedef struct {
      * right now, and a card can be taken out between one launch and the next -
      * so the answer to "can this run" is not stored here, only the question. */
     int needs_fs;
+    /* 0 when the manifest says `"launch": false`: the app is a glance cell with
+     * nothing behind it, so the launcher refuses to open a face for it. See
+     * catnip_manifest's `launchable`. Default 1, set only when the manifest
+     * parsed - an app the loader could not read launches nothing regardless. */
+    int launchable;
 } catnip_app_entry;
 
 /* The apps compiled into the firmware, listed before anything on the card.

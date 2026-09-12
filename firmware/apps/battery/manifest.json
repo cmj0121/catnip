@@ -7,6 +7,7 @@
   "entry": "main.lua",
   "icon": "icon.png",
   "glance": "battery",
+  "launch": false,
   "frame": "bare",
   "hints": false,
   "counter": false,

@@ -107,6 +107,7 @@ int catnip_loader_builtin(catnip_app_entry *out, int max)
                         catnip_manifest_compatible(&m);
         if (e->compatible) {
             e->needs_fs = manifest_needs_fs(&m);
+            e->launchable = m.launchable;
             snprintf(e->glance, sizeof(e->glance), "%s", m.glance);
         }
         n++;
@@ -155,6 +156,7 @@ int catnip_loader_discover(const char *apps_root, catnip_app_entry *out, int max
                 snprintf(entry->glance, sizeof(entry->glance), "%s", m.glance);
                 entry->compatible = catnip_manifest_compatible(&m);
                 entry->needs_fs = manifest_needs_fs(&m);
+                entry->launchable = m.launchable;
             } else {
                 snprintf(entry->name, sizeof(entry->name), "%s", "(invalid manifest)");
                 entry->compatible = 0;

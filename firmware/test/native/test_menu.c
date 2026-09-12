@@ -45,6 +45,9 @@ static catnip_app_entry app(const char *id, const char *name)
      * satisfy. Without it these fixtures are apps the launcher would rightly
      * refuse, which is not what any of these cases is about. */
     e.compatible = 1;
+    /* A normal app launches; the launcher only refuses one whose manifest opted
+     * out, which glance_only_app() below is for. */
+    e.launchable = 1;
     return e;
 }
 
@@ -55,6 +58,33 @@ static catnip_app_entry glance_app(const char *id, const char *name, const char 
     catnip_app_entry e = app(id, name);
     snprintf(e.glance, sizeof(e.glance), "%s", type);
     return e;
+}
+
+/* A glance-only app: it shows a value and there is nothing behind it, so the
+ * launcher must open no face for it however its cell is activated - the Battery
+ * app's shape. */
+static catnip_app_entry glance_only_app(const char *id, const char *name,
+                                        const char *type)
+{
+    catnip_app_entry e = glance_app(id, name, type);
+    e.launchable = 0;
+    return e;
+}
+
+/* Whether a node with `id` is in the built tree, read through the same index an
+ * app sees. Used to tell the shape of a glance cell apart: the battery cell has
+ * an icon node beside its value where the clock cell has the value alone. */
+static bool node_exists(catnip_rt *rt, const char *id)
+{
+    lua_State *L = catnip_rt_lua(rt);
+    char code[96];
+
+    snprintf(code, sizeof(code), "_G.__ex = ui.get('%s') ~= nil", id);
+    catnip_rt_dostring(rt, code, "=t");
+    lua_getglobal(L, "__ex");
+    bool ex = lua_toboolean(L, -1);
+    lua_pop(L, 1);
+    return ex;
 }
 
 /* What the face at ring position `i` (one-based, past home) currently reads,
@@ -207,6 +237,44 @@ int main(void)
 
         catnip_menu_update_glances(m, 1757404980u, 42);
         CHECK(strcmp(face_text(rt, 3), "42%") == 0, "and follows the charge as it moves");
+
+        /* The two cells are not the same shape. The battery cell is a picture
+         * and its value - the app's own icon beside the percent - and the clock
+         * cell is the value alone, which is host-observable as the icon node the
+         * one carries and the other does not. */
+        CHECK(node_exists(rt, "menu_glyph3"),
+              "the battery cell carries its app icon beside the percent");
+        CHECK(!node_exists(rt, "menu_glyph2"), "and the clock cell is the time alone");
+    }
+
+    /* ---- a glance-only app is a widget, not a launch -------------------- */
+    /* Activating its cell opens no face, however the cell is reached. The clock
+     * beside it still launches, so the refusal is the app's own opt-out and not
+     * "a glance cannot launch". */
+    {
+        catnip_app_entry widgets[2] = {glance_app("clock", "Clock", "time"),
+                                       glance_only_app("battery", "Battery", "battery")};
+        /* Both are glances, so they keep discovery order: clock is the first
+         * cell past home, the battery the second. */
+        catnip_menu_home(m);
+        catnip_menu_show(m, widgets, 2, true, NULL);
+        catnip_rt_dostring(rt, "ui.fire('menu_list', 'next')", "=t"); /* clock */
+        catnip_rt_dostring(rt, "ui.fire('menu_list', 'click')", "=t");
+        pick = catnip_menu_take_pick(m);
+        CHECK(pick != NULL && strcmp(pick, "clock") == 0,
+              "a launchable glance app still launches");
+
+        catnip_menu_home(m);
+        catnip_menu_show(m, widgets, 2, true, NULL);
+        catnip_rt_dostring(rt, "ui.fire('menu_list', 'next')", "=t"); /* clock */
+        catnip_rt_dostring(rt, "ui.fire('menu_list', 'next')", "=t"); /* battery */
+        catnip_rt_dostring(rt, "ui.fire('menu_list', 'click')", "=t");
+        CHECK(catnip_menu_take_pick(m) == NULL,
+              "a glance-only app launches nothing when its cell is stepped to");
+        /* Named directly by index too - a finger on the cell, not a step to it. */
+        catnip_rt_dostring(rt, "ui.fire('menu_list', 'click', 3)", "=t");
+        CHECK(catnip_menu_take_pick(m) == NULL,
+              "and not even a direct tap on its cell opens a face");
     }
 
     /* Leaving an app comes back to the app you left, not to the cat: the spec
