@@ -56,6 +56,15 @@ typedef struct {
      * whose whole surface is the point, which is the same claim `frame: "bare"`
      * makes and is stated the same way - by saying so. */
     int hints;
+    /* 0 when the manifest says `"launch": false`: this app is a glance and
+     * nothing behind it - its carousel cell shows a value and pressing A on it
+     * opens no face, because there is none to open. The Battery app is the
+     * first of these.
+     *
+     * Default on, the mirror of `hints`: an app that says nothing is launched,
+     * because "here is an app" is what a menu entry means and opting out of it
+     * is a claim an author makes deliberately, by saying so. */
+    int launchable;
     /* The catalogue of things this app can do, which is the only place any of
      * them is named. `on_options` answers with ids out of this and the platform
      * draws them, so every app's Delete is the same word beside the same glyph

@@ -124,6 +124,7 @@ static struct {
     int saves;
     int diags;
     uint32_t epoch;
+    int battery;
 } g_board;
 
 /* What the board would say about the card right now. The test moves it to stand
@@ -166,6 +167,12 @@ static uint32_t env_now_epoch(void *ud)
     return g_board.epoch;
 }
 
+static int env_battery(void *ud)
+{
+    (void)ud;
+    return g_board.battery;
+}
+
 static void env_enter_diag(void *ud)
 {
     (void)ud;
@@ -173,8 +180,8 @@ static void env_enter_diag(void *ud)
 }
 
 static const catnip_pages_env kEnv = {
-    env_info_rows, env_apply,     env_save,       env_title, NULL,
-    NULL,          env_now_epoch, env_enter_diag, NULL,
+    env_info_rows, env_apply,     env_save,    env_title,      NULL,
+    NULL,          env_now_epoch, env_battery, env_enter_diag, NULL,
 };
 
 /* ---- pressing buttons --------------------------------------------------- */

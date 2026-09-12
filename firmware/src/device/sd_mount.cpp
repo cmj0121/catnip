@@ -93,6 +93,19 @@ bool catnip_sd_mounted(void)
     return g_mounted;
 }
 
+void catnip_sd_unmount(void)
+{
+    if (!g_mounted) return;
+    /* SD_MMC.end() unmounts FatFs and deinitialises the SDMMC host, which is
+     * exactly what leaves the raw card free for usb_msc.cpp to take. */
+    SD_MMC.end();
+    g_mounted = false;
+    /* So a card still physically in the slot is reported present again the next
+     * time it is mounted, rather than counted as the empty slot backing off. */
+    g_said_empty = false;
+    g_misses = 0;
+}
+
 /* A second is far longer than a card swap takes to matter and far shorter than
  * a person's patience, and it keeps a filesystem open off the loop's back. */
 #define SD_POLL_MS 1000

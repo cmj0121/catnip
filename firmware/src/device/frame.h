@@ -89,9 +89,19 @@ void catnip_frame_show_hint(bool on);
 void catnip_frame_set_status(bool card, bool radio, bool syncing);
 
 /* The battery, top-left. Below zero means "not measured", and the frame then
- * draws no percentage at all rather than a plausible wrong one - the same rule
- * device.battery() answers -1 by. */
+ * draws the empty-battery glyph rather than nothing (#6): the battery is always
+ * shown, so a header with no battery on it reads as a fault rather than as an
+ * unread gauge. The exact percentage is not shown here - it lives on the device
+ * page - because the level as a glyph leaves room for the status strip beside
+ * it without folding the bar onto a second line. */
 void catnip_frame_set_battery(int percent);
+
+/* Whether USB HID typing is armed (#61): draws a keyboard in the status strip
+ * when true, nothing when false. Pushed like the status glyphs, from the arm
+ * gate the HID app drives - the header mark is for the mode being on, not for
+ * which image is running. Off is the boot state and every state until the owner
+ * enables typing. */
+void catnip_frame_set_hid(bool enabled);
 
 /* The action bar (long A), drawn rising from the bottom over whatever is on
  * screen - the content stays visible underneath, because an action is always

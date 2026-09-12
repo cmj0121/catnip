@@ -3,13 +3,10 @@
 
 #include "catnip_typescale.h"
 
-#include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
 #include "catnip_pins.h"
 #include "catnip_render.h"
-#include "device/rtc_time.h"
 #include "device/ui_input.h"
 
 struct catnip_pages {
@@ -33,9 +30,6 @@ struct catnip_pages {
      * exactly what was there. */
     bool unsaved;
     catnip_config was;
-    /* What the ring's clock cell was last told, so a pass that changes nothing
-     * costs nothing. */
-    char shown_time[16];
 };
 
 static void call_title(catnip_pages *p, const char *t)
@@ -119,16 +113,11 @@ void catnip_pages_rebuild(catnip_pages *p)
      * it. An app that takes over says who it is; the launcher has nothing to
      * add. */
     call_title(p, "");
-    p->shown_time[0] = '\0';
     catnip_pages_glance(p);
 }
 
 void catnip_pages_glance(catnip_pages *p)
 {
-    uint32_t t;
-    char hm[8];
-    uint32_t h, mi;
-
     if (!p) return;
 
     /* The device page's facts go stale while they are being read: a card comes
@@ -159,23 +148,16 @@ void catnip_pages_glance(catnip_pages *p)
      * always - and answered by going to the I2C bus for a clock nobody could
      * see. */
     if (p->shell && catnip_shell_state(p->shell) == CATNIP_SHELL_RUNNING) return;
-    if (!p->env.now_epoch) return;
 
-    t = p->env.now_epoch(p->env.ud);
-    if (!t) {
-        /* The same admission the clock's own face makes. */
-        catnip_menu_set_glance(p->menu, NULL);
-        p->shown_time[0] = '\0';
-        return;
-    }
-    /* The hour and the minute, and nothing else asked for: the ring's cell
-     * shows the time alone now, so the date and the weekday this used to
-     * compute went out with the two labels that displayed them. */
-    catnip_rtc_split(t, NULL, NULL, NULL, &h, &mi, NULL);
-    snprintf(hm, sizeof(hm), "%02u:%02u", (unsigned)h, (unsigned)mi);
-    if (strcmp(hm, p->shown_time) == 0) return;
-    snprintf(p->shown_time, sizeof(p->shown_time), "%s", hm);
-    catnip_menu_set_glance(p->menu, hm);
+    /* Every glance cell, each from its own type. The clock's epoch and the
+     * battery's charge are the two live values a glance reads today; both are
+     * asked for here, on this slow cadence, and the menu rewrites only the
+     * cells whose value has actually moved. A missing source is the value that
+     * reads as "not known yet" - a zero epoch, a negative charge - which is the
+     * placeholder the cell already shows. */
+    catnip_menu_update_glances(p->menu,
+                               p->env.now_epoch ? p->env.now_epoch(p->env.ud) : 0,
+                               p->env.battery ? p->env.battery(p->env.ud) : -1);
 }
 
 /* The grid of every app (#71), reached by pushing up from the ring. Built from

@@ -1,0 +1,11 @@
+{
+  "id": "hid",
+  "name": "USB HID",
+  "version": "0.1.0",
+  "author": "cmj",
+  "catnip_api": "1.0",
+  "entry": "main.lua",
+  "icon": "icon.png",
+  "counter": false,
+  "permissions": ["usb.hid", "fs.read"]
+}

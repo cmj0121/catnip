@@ -22,6 +22,8 @@
 #include "catnip_runtime.h"
 #include "catnip_ui.h"
 
+#include "lua.h"
+
 static int failures;
 #define CHECK(cond, name)                                                                \
     do {                                                                                 \
@@ -43,7 +45,65 @@ static catnip_app_entry app(const char *id, const char *name)
      * satisfy. Without it these fixtures are apps the launcher would rightly
      * refuse, which is not what any of these cases is about. */
     e.compatible = 1;
+    /* A normal app launches; the launcher only refuses one whose manifest opted
+     * out, which glance_only_app() below is for. */
+    e.launchable = 1;
     return e;
+}
+
+/* An app whose carousel cell shows a live value rather than its icon: `type` is
+ * the manifest's glance string, the same one the loader copies. */
+static catnip_app_entry glance_app(const char *id, const char *name, const char *type)
+{
+    catnip_app_entry e = app(id, name);
+    snprintf(e.glance, sizeof(e.glance), "%s", type);
+    return e;
+}
+
+/* A glance-only app: it shows a value and there is nothing behind it, so the
+ * launcher must open no face for it however its cell is activated - the Battery
+ * app's shape. */
+static catnip_app_entry glance_only_app(const char *id, const char *name,
+                                        const char *type)
+{
+    catnip_app_entry e = glance_app(id, name, type);
+    e.launchable = 0;
+    return e;
+}
+
+/* Whether a node with `id` is in the built tree, read through the same index an
+ * app sees. Used to tell the shape of a glance cell apart: the battery cell has
+ * an icon node beside its value where the clock cell has the value alone. */
+static bool node_exists(catnip_rt *rt, const char *id)
+{
+    lua_State *L = catnip_rt_lua(rt);
+    char code[96];
+
+    snprintf(code, sizeof(code), "_G.__ex = ui.get('%s') ~= nil", id);
+    catnip_rt_dostring(rt, code, "=t");
+    lua_getglobal(L, "__ex");
+    bool ex = lua_toboolean(L, -1);
+    lua_pop(L, 1);
+    return ex;
+}
+
+/* What the face at ring position `i` (one-based, past home) currently reads,
+ * followed by its name through the stub's own node index - the same __index an
+ * app sees. Empty when there is no such cell. */
+static const char *face_text(catnip_rt *rt, int i)
+{
+    static char buf[32];
+    lua_State *L = catnip_rt_lua(rt);
+    char code[96];
+
+    buf[0] = '\0';
+    snprintf(code, sizeof(code),
+             "local f = ui.get('menu_time%d'); _G.__ft = f and f.text or ''", i);
+    catnip_rt_dostring(rt, code, "=t");
+    lua_getglobal(L, "__ft");
+    if (lua_isstring(L, -1)) snprintf(buf, sizeof(buf), "%s", lua_tostring(L, -1));
+    lua_pop(L, 1);
+    return buf;
 }
 
 int main(void)
@@ -133,10 +193,89 @@ int main(void)
     catnip_rt_dostring(rt, "ui.fire('menu_list', 'click')", "=t");
     CHECK(catnip_menu_take_pick(m) == NULL, "an empty carousel latches no pick");
 
-    /* The status line takes text without a screen having to know its shape. */
-    catnip_menu_show(m, apps, 3, true, NULL);
-    /* The battery moved into the frame's bar, which is the platform's and not
-     * the menu's - so there is no status line here to set any more. */
+    /* ---- glance cells: each shows its own value, by its type ----------- */
+    /* The type dispatch on its own, which is the piece a device cannot show:
+     * time from the epoch, battery from the charge, and the placeholder each
+     * opens on when its value is not known yet. */
+    {
+        char gt[16];
+        CHECK(catnip_glance_text("time", 0, -1, gt, sizeof(gt)) &&
+                  strcmp(gt, "--:--") == 0,
+              "a time glance with no clock is --:--");
+        CHECK(catnip_glance_text("time", 1757404980u, -1, gt, sizeof(gt)) &&
+                  strlen(gt) == 5 && gt[2] == ':',
+              "and a known epoch is HH:MM");
+        CHECK(catnip_glance_text("battery", 0, -1, gt, sizeof(gt)) &&
+                  strcmp(gt, "--%") == 0,
+              "a battery glance that cannot be read is --%");
+        CHECK(catnip_glance_text("battery", 0, 89, gt, sizeof(gt)) &&
+                  strcmp(gt, "89%") == 0,
+              "a charge of 89 is 89%");
+        CHECK(catnip_glance_text("battery", 0, 100, gt, sizeof(gt)) &&
+                  strcmp(gt, "100%") == 0,
+              "and a full one is 100%");
+        CHECK(!catnip_glance_text("moon", 0, -1, gt, sizeof(gt)) && gt[0] == '\0',
+              "a glance this firmware does not know is refused and fills nothing");
+    }
+
+    /* On the ring, a clock and a battery cell together, each following its own
+     * value. Glance apps sit last, so File Browser is position 1 and the two
+     * faces are the cells at 2 (clock) and 3 (battery). */
+    {
+        catnip_app_entry mixed[3] = {glance_app("clock", "Clock", "time"),
+                                     app("files", "File Browser"),
+                                     glance_app("battery", "Battery", "battery")};
+        catnip_menu_home(m);
+        catnip_menu_show(m, mixed, 3, true, NULL);
+        CHECK(strcmp(face_text(rt, 2), "--:--") == 0, "the clock cell opens on --:--");
+        CHECK(strcmp(face_text(rt, 3), "--%") == 0, "the battery cell opens on --%");
+
+        catnip_menu_update_glances(m, 1757404980u, 89);
+        CHECK(strlen(face_text(rt, 2)) == 5, "the clock cell fills to HH:MM");
+        CHECK(strcmp(face_text(rt, 3), "89%") == 0,
+              "and the battery cell fills to its own percent, not the clock's");
+
+        catnip_menu_update_glances(m, 1757404980u, 42);
+        CHECK(strcmp(face_text(rt, 3), "42%") == 0, "and follows the charge as it moves");
+
+        /* The two cells are not the same shape. The battery cell is a picture
+         * and its value - the app's own icon beside the percent - and the clock
+         * cell is the value alone, which is host-observable as the icon node the
+         * one carries and the other does not. */
+        CHECK(node_exists(rt, "menu_glyph3"),
+              "the battery cell carries its app icon beside the percent");
+        CHECK(!node_exists(rt, "menu_glyph2"), "and the clock cell is the time alone");
+    }
+
+    /* ---- a glance-only app is a widget, not a launch -------------------- */
+    /* Activating its cell opens no face, however the cell is reached. The clock
+     * beside it still launches, so the refusal is the app's own opt-out and not
+     * "a glance cannot launch". */
+    {
+        catnip_app_entry widgets[2] = {glance_app("clock", "Clock", "time"),
+                                       glance_only_app("battery", "Battery", "battery")};
+        /* Both are glances, so they keep discovery order: clock is the first
+         * cell past home, the battery the second. */
+        catnip_menu_home(m);
+        catnip_menu_show(m, widgets, 2, true, NULL);
+        catnip_rt_dostring(rt, "ui.fire('menu_list', 'next')", "=t"); /* clock */
+        catnip_rt_dostring(rt, "ui.fire('menu_list', 'click')", "=t");
+        pick = catnip_menu_take_pick(m);
+        CHECK(pick != NULL && strcmp(pick, "clock") == 0,
+              "a launchable glance app still launches");
+
+        catnip_menu_home(m);
+        catnip_menu_show(m, widgets, 2, true, NULL);
+        catnip_rt_dostring(rt, "ui.fire('menu_list', 'next')", "=t"); /* clock */
+        catnip_rt_dostring(rt, "ui.fire('menu_list', 'next')", "=t"); /* battery */
+        catnip_rt_dostring(rt, "ui.fire('menu_list', 'click')", "=t");
+        CHECK(catnip_menu_take_pick(m) == NULL,
+              "a glance-only app launches nothing when its cell is stepped to");
+        /* Named directly by index too - a finger on the cell, not a step to it. */
+        catnip_rt_dostring(rt, "ui.fire('menu_list', 'click', 3)", "=t");
+        CHECK(catnip_menu_take_pick(m) == NULL,
+              "and not even a direct tap on its cell opens a face");
+    }
 
     /* Leaving an app comes back to the app you left, not to the cat: the spec
      * promises that short B returns you to where you came from, and the thing

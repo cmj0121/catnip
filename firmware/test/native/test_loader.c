@@ -81,6 +81,20 @@ int main(void)
                                 &m, err, sizeof(err)) == 0 &&
               m.hints,
           "only the literal false turns them off, not anything false-looking");
+    /* Launchability is the mirror of hints: an app that says nothing is
+     * launched, and only the literal false makes it a glance with nothing
+     * behind it. */
+    CHECK(m.launchable, "an app that says nothing about launch is launchable");
+    CHECK(catnip_manifest_parse("{\"id\":\"a\",\"name\":\"A\",\"catnip_api\":\"1.0\","
+                                "\"launch\":false}",
+                                &m, err, sizeof(err)) == 0 &&
+              !m.launchable,
+          "and one that says launch:false is not");
+    CHECK(catnip_manifest_parse("{\"id\":\"a\",\"name\":\"A\",\"catnip_api\":\"1.0\","
+                                "\"launch\":\"no\"}",
+                                &m, err, sizeof(err)) == 0 &&
+              m.launchable,
+          "only the literal false opts out, not anything false-looking");
     CHECK(catnip_manifest_parse("{\"name\":\"A\",\"catnip_api\":\"1.0\"}", &m, err,
                                 sizeof(err)) != 0,
           "missing id is rejected");

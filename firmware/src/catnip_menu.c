@@ -2,7 +2,9 @@
 #include "catnip_menu.h"
 
 #include "catnip_pins.h"
+#include "device/rtc_time.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
@@ -19,7 +21,8 @@
  * that only latches it, because launching from inside this handler would tear
  * down the very tree the handler is running on. */
 static const char CATNIP_MENU_LUA[] =
-    "function __catnip_menu_build(names, ids, ready, glance, open)\n"
+    "function __catnip_menu_build(names, ids, ready, launch, gtext, gstyle, gicon, "
+    "open)\n"
     /* Home is the cat, and the apps sit either side of it: one carousel, one
      * `selected`, stepped left and right. The mascot is the first position
      * rather than a screen of its own, so arriving at it and leaving it cost
@@ -36,18 +39,44 @@ static const char CATNIP_MENU_LUA[] =
     /* `disabled` is the platform's word for "here but not usable"; the backend
      * dims it and the handler below refuses to launch it. */
     /* A cell that shows a value is not a picture and not a word, so the cell is
-     * the whole region and is laid out as a face - one centrepiece, and nothing
-     * else. The date and the weekday used to sit on the line under it, and they
-     * are gone: this is one position on a ring the user is stepping past to
-     * find something else, and what it owes them at that speed is the one fact
-     * they came for. The rest is worth reading, so it is on the app's own face
-     * where there is room to read it. */
-    "    if glance[i] ~= '' then\n"
-    "      local face = ui.list{ id = 'menu_app' .. i, layout = 'canvas',\n"
-    "                            disabled = not ready[i] }\n"
-    "      __catnip_menu_faces[i] =\n"
-    "        ui.label{ id = 'menu_time' .. i, text = glance[i], style = 'display' }\n"
-    "      face:set_children({ __catnip_menu_faces[i] })\n"
+     * the whole region and is laid out as a face - the value, and at most the
+     * picture it is a value of. The date and the weekday used to sit on the line
+     * under the clock, and they are gone: this is one position on a ring the
+     * user is stepping past to find something else, and what it owes them at
+     * that speed is the one fact they came for. The rest is worth reading, so it
+     * is on the app's own face where there is room to read it. */
+    /* The role a value cell draws its value in is the glance type's, not one for
+     * all of them: the clock's `14:32` is the `display` role - digits, a colon
+     * and nothing else, the readout that owns the screen - but the battery's
+     * `89%` cannot use it, because `display` has no `%` and the sign would
+     * simply not appear. So a battery cell asks for a prose role, which carries
+     * the whole of ASCII; `catnip_glance_style` in C decides which, per type. */
+    "    if gtext[i] ~= '' then\n"
+    "      local pct =\n"
+    "        ui.label{ id = 'menu_time' .. i, text = gtext[i], style = gstyle[i] }\n"
+    "      __catnip_menu_faces[i] = pct\n"
+    /* Whether this glance is a value alone or a picture and a value. The clock's
+     * `14:32` is the whole of what it says, so its cell is one centrepiece on a
+     * canvas and nothing else. The battery's `89%` is a reading off a thing, and
+     * the thing has a picture - the app's own icon.png, resolved from ids[i] the
+     * same way an ordinary cell's is - so its cell carries the icon beside the
+     * percent. A `row` rather than a canvas, because an icon draws only for a
+     * list child that is a row, and rather than a plain column because a column
+     * is the one list shape that wears a border, which is the frame the canvas
+     * was chosen to drop. gicon[i] is C's per-type answer, so no glance name is
+     * spelled out here. */
+    "      local face\n"
+    "      if gicon[i] then\n"
+    "        face = ui.list{ id = 'menu_app' .. i, layout = 'row',\n"
+    "                        disabled = not ready[i] }\n"
+    "        face:set_children({\n"
+    "          ui.label{ id = 'menu_glyph' .. i, image = ids[i],\n"
+    "                    icon = 'placeholder' }, pct })\n"
+    "      else\n"
+    "        face = ui.list{ id = 'menu_app' .. i, layout = 'canvas',\n"
+    "                        disabled = not ready[i] }\n"
+    "        face:set_children({ pct })\n"
+    "      end\n"
     "      rows[i + 1] = face\n"
     "    else\n"
     "      rows[i + 1] = ui.label{ id = 'menu_app' .. i, text = name,\n"
@@ -78,17 +107,24 @@ static const char CATNIP_MENU_LUA[] =
     /* A tap names the position it landed on, exactly as in any other list. */
     "    on_click = function(self, i)\n"
     "      if i then sel = i; list.selected = sel end\n"
-    /* Position 1 is home; there is nothing to launch there. */
-    "      if sel > 1 and ready[sel - 1] then __catnip_menu_pick(sel - 1) end\n"
+    /* Position 1 is home; there is nothing to launch there. A glance-only app -
+     * launch[i] false - has nothing behind its cell either, so its A does
+     * nothing at all. */
+    "      if sel > 1 and ready[sel - 1] and launch[sel - 1] then\n"
+    "        __catnip_menu_pick(sel - 1)\n"
+    "      end\n"
     "    end }\n"
     "  list:set_children(rows)\n"
     "  list.selected = sel\n"
     "  ui.screen{ list }\n"
     "end\n"
-    /* One property write per cell that actually differs. The tree is not
-     * rebuilt, which is what the renderer being retained is for. */
-    "function __catnip_menu_glance(time)\n"
-    "  for _, f in pairs(__catnip_menu_faces) do f.text = time end\n"
+    /* One cell, by its ring position, and one property write. The tree is not
+     * rebuilt, which is what the renderer being retained is for; and it is one
+     * cell rather than all of them, because a glance is per app now and two
+     * cells on the ring can be showing two different things. */
+    "function __catnip_menu_glance(i, text)\n"
+    "  local f = __catnip_menu_faces[i]\n"
+    "  if f then f.text = text end\n"
     "end\n";
 
 /* Mirrors CATNIP_SHELL_MAX_APPS in catnip_shell.h, which is where the app list
@@ -100,16 +136,23 @@ struct catnip_menu {
     catnip_rt *rt;
     char ids[MENU_MAX_APPS][64];
     char names[MENU_MAX_APPS][64]; /* kept so the header can name the focus */
-    /* Which cells draw a value rather than a picture, and which apps could run
-     * if they were picked. Both are answered while the ring is being built, in
-     * ring order, so the Lua tables below are a straight copy. */
+    /* Which cells draw a value rather than a picture, what value each one draws
+     * (the glance type off the manifest, "" for a picture cell), and which apps
+     * could run if they were picked. All answered while the ring is being
+     * built, in ring order, so the Lua tables below are a straight copy. */
     bool has_glance[MENU_MAX_APPS];
+    char glance_type[MENU_MAX_APPS][16];
     bool ready[MENU_MAX_APPS];
-    /* What the value cells were last told, so a pass that changes nothing costs
-     * nothing. The time alone is enough: the date cannot change without it -
-     * midnight is 23:59 becoming 00:00 - which is the same reason the weekday
-     * is not compared either. */
-    char shown_time[16];
+    /* Which apps the launcher will open a face for. A glance-only app - the
+     * Battery - is false: its cell is the widget, and there is nothing behind
+     * it. Kept here as well as guarded in Lua so the C bridge that latches the
+     * pick refuses one too, and a pick that should not happen cannot. */
+    bool launchable[MENU_MAX_APPS];
+    /* What each value cell was last told, so a pass that changes nothing costs
+     * nothing. Per cell rather than one string, because two glance cells can be
+     * showing two unrelated values - a clock and a charge - and a shared
+     * last-shown would make each of them look changed on the other's cadence. */
+    char shown[MENU_MAX_APPS][16];
     int n;
     int pick;  /* zero-based index of a latched pick, or -1 for none */
     int focus; /* one-based carousel position; 1 is home */
@@ -120,6 +163,66 @@ struct catnip_menu {
     char resume[64];
 };
 
+/* ---- glances ------------------------------------------------------------ */
+
+bool catnip_glance_text(const char *type, uint32_t epoch, int battery, char *out,
+                        size_t cap)
+{
+    if (!out || cap == 0) return false;
+    out[0] = '\0';
+    if (!type) return false;
+
+    if (strcmp(type, "time") == 0) {
+        /* The hour and the minute, and nothing else: the ring's cell shows the
+         * time alone, and a zero epoch is the clock not knowing rather than a
+         * confident midnight. */
+        if (!epoch) {
+            snprintf(out, cap, "--:--");
+        } else {
+            uint32_t h, mi;
+            catnip_rtc_split(epoch, NULL, NULL, NULL, &h, &mi, NULL);
+            snprintf(out, cap, "%02u:%02u", (unsigned)h, (unsigned)mi);
+        }
+        return true;
+    }
+    if (strcmp(type, "battery") == 0) {
+        /* -1 is "cannot be read", drawn as unknown rather than as flat - the
+         * same distinction device.battery() and the header's gauge both make. */
+        if (battery < 0) snprintf(out, cap, "--%%");
+        else snprintf(out, cap, "%d%%", battery);
+        return true;
+    }
+    return false;
+}
+
+/* Whether `type` is a glance this firmware knows how to fill. */
+static bool glance_known(const char *type)
+{
+    char scratch[16];
+    return catnip_glance_text(type, 0, -1, scratch, sizeof(scratch));
+}
+
+/* The render style role a glance of `type` draws in. `display` for a readout
+ * that is digits and a colon, the way the clock's face uses it; a prose role
+ * for anything carrying a sign, because `display` has no `%` and one asked of
+ * it would not appear. `body` is the size the Battery app draws its own percent
+ * at, so the cell and the app agree. */
+static const char *glance_style(const char *type)
+{
+    if (type && strcmp(type, "battery") == 0) return "body";
+    return "display";
+}
+
+/* Whether a glance of `type` carries a picture beside its value. A battery is a
+ * reading off a thing and the thing has an icon, so its cell shows the app's own
+ * icon.png with the percent; the clock's time is the whole of what it says and
+ * its cell is the value alone. Per type here rather than a glance name in the
+ * Lua, so the shell decides the shape and the tree only builds it. */
+static bool glance_has_icon(const char *type)
+{
+    return type && strcmp(type, "battery") == 0;
+}
+
 /* The bridge the menu's on_click calls. It only latches the one-based index the
  * row carries; the map from index to id, and the launch itself, are C's. */
 static int menu_pick_cb(lua_State *L)
@@ -127,7 +230,11 @@ static int menu_pick_cb(lua_State *L)
     catnip_menu *m = (catnip_menu *)lua_touserdata(L, lua_upvalueindex(1));
     int idx = (int)luaL_checkinteger(L, 1);
 
-    if (m && idx >= 1 && idx <= m->n) {
+    /* Launchability is checked here as well as in the Lua handler: a glance-only
+     * app has nothing to open, so its index is not latched even if a call gets
+     * this far. The two guards are the same rule read on both sides of the
+     * bridge. */
+    if (m && idx >= 1 && idx <= m->n && m->launchable[idx - 1]) {
         m->pick = idx - 1;
         /* Remembered now, because by the time the launch happens this menu's
          * tree is gone and nothing else knows where the user was. */
@@ -206,10 +313,6 @@ void catnip_menu_show(catnip_menu *m, const catnip_app_entry *apps, int n, bool 
     m->n = n;
     m->pick = -1;
     m->focus = 1;
-    /* The new cells hold placeholders, so what was last written is no longer on
-     * screen and the next update has to write again. Without this, coming back
-     * from an app left the clock reading `--:--` until the minute changed. */
-    m->shown_time[0] = '\0';
 
     /* Apps that show a value go last, which on a ring is one step *left* of the
      * cat - the shortest glance there is. That is the whole reason such a cell
@@ -223,17 +326,28 @@ void catnip_menu_show(catnip_menu *m, const catnip_app_entry *apps, int n, bool 
     int order[MENU_MAX_APPS]; /* scratch: everything below is stored in ring
                                * order, so nothing after this needs it */
     int k = 0;
+    /* A glance this firmware cannot fill is not a glance here: it sorts and
+     * draws as an ordinary icon cell, which is the manifest's own promise that
+     * an unknown glance degrades to "no glance" on an older firmware. */
     for (i = 0; i < n; i++)
-        if (pinned[i]->glance[0] == '\0') order[k++] = i;
+        if (!glance_known(pinned[i]->glance)) order[k++] = i;
     for (i = 0; i < n; i++)
-        if (pinned[i]->glance[0] != '\0') order[k++] = i;
+        if (glance_known(pinned[i]->glance)) order[k++] = i;
 
     for (i = 0; i < n; i++) {
         const catnip_app_entry *a = pinned[order[i]];
         snprintf(m->ids[i], sizeof(m->ids[i]), "%s", a->id);
         snprintf(m->names[i], sizeof(m->names[i]), "%s", a->name);
-        m->has_glance[i] = a->glance[0] != '\0';
+        m->has_glance[i] = glance_known(a->glance);
+        snprintf(m->glance_type[i], sizeof(m->glance_type[i]), "%s",
+                 m->has_glance[i] ? a->glance : "");
         m->ready[i] = a->compatible && (fs_ready || !a->needs_fs);
+        m->launchable[i] = a->launchable;
+        /* The new cell holds a placeholder, so what was last written is no
+         * longer on screen and the next update has to write again. Without it,
+         * coming back from an app left the clock reading `--:--` until the
+         * minute changed. */
+        m->shown[i][0] = '\0';
     }
 
     /* Where it was left, which is where leaving an app puts you back - found by
@@ -263,36 +377,62 @@ void catnip_menu_show(catnip_menu *m, const catnip_app_entry *apps, int n, bool 
         lua_pushboolean(L, m->ready[i]);
         lua_rawseti(L, -2, i + 1);
     }
-    lua_newtable(L); /* what each cell shows, when it shows a value */
+    lua_newtable(L); /* whether A opens a face for each, false for a glance-only app */
     for (i = 0; i < n; i++) {
-        lua_pushstring(L, m->has_glance[i] ? "--:--" : "");
+        lua_pushboolean(L, m->launchable[i]);
+        lua_rawseti(L, -2, i + 1);
+    }
+    lua_newtable(L); /* the placeholder each value cell opens on, "" otherwise */
+    for (i = 0; i < n; i++) {
+        char text[16] = "";
+        if (m->has_glance[i])
+            catnip_glance_text(m->glance_type[i], 0, -1, text, sizeof(text));
+        lua_pushstring(L, text);
+        lua_rawseti(L, -2, i + 1);
+    }
+    lua_newtable(L); /* the role each value cell draws its value in, by glance type */
+    for (i = 0; i < n; i++) {
+        lua_pushstring(L, m->has_glance[i] ? glance_style(m->glance_type[i]) : "");
+        lua_rawseti(L, -2, i + 1);
+    }
+    lua_newtable(L); /* whether each value cell carries an icon beside its value */
+    for (i = 0; i < n; i++) {
+        lua_pushboolean(L, m->has_glance[i] && glance_has_icon(m->glance_type[i]));
         lua_rawseti(L, -2, i + 1);
     }
     lua_pushinteger(L, m->focus);
-    if (lua_pcall(L, 5, 0, 0) != LUA_OK) catnip_rt_report_error(m->rt, L);
+    if (lua_pcall(L, 8, 0, 0) != LUA_OK) catnip_rt_report_error(m->rt, L);
 }
 
-void catnip_menu_set_glance(catnip_menu *m, const char *time)
+void catnip_menu_update_glances(catnip_menu *m, uint32_t epoch, int battery)
 {
     lua_State *L;
+    int i;
 
     if (!m) return;
     L = catnip_rt_lua(m->rt);
     if (!L) return;
-    if (!time) time = "--:--";
 
-    /* Nothing at all on the pass where nothing differs, which is twenty-nine
-     * passes out of thirty: the face changes once a minute. */
-    if (strcmp(m->shown_time, time) == 0) return;
-    snprintf(m->shown_time, sizeof(m->shown_time), "%s", time);
+    for (i = 0; i < m->n; i++) {
+        char text[16];
 
-    lua_getglobal(L, "__catnip_menu_glance");
-    if (!lua_isfunction(L, -1)) {
-        lua_pop(L, 1);
-        return;
+        if (!m->has_glance[i]) continue;
+        catnip_glance_text(m->glance_type[i], epoch, battery, text, sizeof(text));
+        /* Nothing at all on the passes where this cell's value has not moved,
+         * which is nearly all of them: a glance changes once a minute or
+         * slower. */
+        if (strcmp(m->shown[i], text) == 0) continue;
+        snprintf(m->shown[i], sizeof(m->shown[i]), "%s", text);
+
+        lua_getglobal(L, "__catnip_menu_glance");
+        if (!lua_isfunction(L, -1)) {
+            lua_pop(L, 1);
+            return;
+        }
+        lua_pushinteger(L, i + 1);
+        lua_pushstring(L, text);
+        if (lua_pcall(L, 2, 0, 0) != LUA_OK) catnip_rt_report_error(m->rt, L);
     }
-    lua_pushstring(L, time);
-    if (lua_pcall(L, 1, 0, 0) != LUA_OK) catnip_rt_report_error(m->rt, L);
 }
 
 const char *catnip_menu_focus_name(const catnip_menu *m)

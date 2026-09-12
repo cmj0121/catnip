@@ -308,12 +308,117 @@ def blespam_png():
     return im.resize((SIZE, SIZE), Image.LANCZOS)
 
 
+# ---- Battery: a cell three-quarters full ----------------------------------
+# The mark reads as "battery" at a glance and as "mostly charged" a beat later:
+# a horizontal cell with a nub, the body outlined in the light ink and filled
+# three-quarters across in the accent. The fraction is the identity - a full or
+# an empty cell would say "battery" too, but this one also says which app draws
+# a level, which is the whole of what it does.
+BAT_BODY = (16.0, 44.0, 96.0, 84.0)  # x0, y0, x1, y1 - outer of the outlined body
+BAT_R = 11.0
+BAT_STROKE = 8.0
+BAT_NUB = (99.0, 55.0, 111.0, 73.0)  # the terminal on the right
+BAT_FILL_FRAC = 0.75
+BAT_PAD = 7.0  # gap between the outline's inner edge and the fill
+
+
+def _bat_fill_box():
+    x0, y0, x1, y1 = BAT_BODY
+    ix0 = x0 + BAT_STROKE / 2 + BAT_PAD
+    iy0 = y0 + BAT_STROKE / 2 + BAT_PAD
+    ix1 = x1 - BAT_STROKE / 2 - BAT_PAD
+    iy1 = y1 - BAT_STROKE / 2 - BAT_PAD
+    return ix0, iy0, ix0 + (ix1 - ix0) * BAT_FILL_FRAC, iy1
+
+
+def battery_svg():
+    x0, y0, x1, y1 = BAT_BODY
+    nx0, ny0, nx1, ny1 = BAT_NUB
+    fx0, fy0, fx1, fy1 = _bat_fill_box()
+    parts = [
+        '  <rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="%.1f" ry="%.1f" '
+        'fill="none" stroke="%s" stroke-width="%.1f"/>'
+        % (x0, y0, x1 - x0, y1 - y0, BAT_R, BAT_R, BODY, BAT_STROKE),
+        '  <rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="3" ry="3" fill="%s"/>'
+        % (nx0, ny0, nx1 - nx0, ny1 - ny0, BODY),
+        '  <rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="4" ry="4" fill="%s"/>'
+        % (fx0, fy0, fx1 - fx0, fy1 - fy0, ACCENT),
+    ]
+    return _svg(parts)
+
+
+def battery_png():
+    from PIL import Image, ImageDraw
+
+    im = Image.new("RGBA", (SIZE * SS, SIZE * SS), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    bx = [v * SS for v in BAT_BODY]
+    d.rounded_rectangle(bx, radius=BAT_R * SS, outline=BODY, width=int(BAT_STROKE * SS))
+    nx = [v * SS for v in BAT_NUB]
+    d.rounded_rectangle(nx, radius=3 * SS, fill=BODY)
+    fx = [v * SS for v in _bat_fill_box()]
+    d.rounded_rectangle(fx, radius=4 * SS, fill=ACCENT)
+    return im.resize((SIZE, SIZE), Image.LANCZOS)
+
+
+# ---- USB HID: a keyboard, a row of keys and the space bar ------------------
+# The composite image's HID half is a keyboard, so the hub for it is drawn as
+# one: the body outlined in the light ink like the rest of the set, a row of
+# keys in the same ink, and the space bar as the single accent. It reads as
+# "keyboard" at 64 px, which is the one thing every feature behind this app has
+# in common - they all type.
+HID_BODY = (14.0, 40.0, 114.0, 90.0)  # x0, y0, x1, y1
+HID_R = 12.0
+HID_STROKE = 8.0
+HID_KEY = 12.0
+HID_KEYS_Y = 52.0
+HID_KEYS_X = (28.0, 46.0, 64.0, 82.0)
+HID_SPACE = (34.0, 72.0, 94.0, 82.0)  # x0, y0, x1, y1 - the accent space bar
+
+
+def hid_svg():
+    x0, y0, x1, y1 = HID_BODY
+    parts = [
+        '  <rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="%.1f" ry="%.1f" '
+        'fill="none" stroke="%s" stroke-width="%.1f"/>'
+        % (x0, y0, x1 - x0, y1 - y0, HID_R, HID_R, BODY, HID_STROKE),
+    ]
+    for kx in HID_KEYS_X:
+        parts.append(
+            '  <rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="3" ry="3" '
+            'fill="%s"/>' % (kx, HID_KEYS_Y, HID_KEY, HID_KEY, BODY)
+        )
+    sx0, sy0, sx1, sy1 = HID_SPACE
+    parts.append(
+        '  <rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="4" ry="4" fill="%s"/>'
+        % (sx0, sy0, sx1 - sx0, sy1 - sy0, ACCENT)
+    )
+    return _svg(parts)
+
+
+def hid_png():
+    from PIL import Image, ImageDraw
+
+    im = Image.new("RGBA", (SIZE * SS, SIZE * SS), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    bx = [v * SS for v in HID_BODY]
+    d.rounded_rectangle(bx, radius=HID_R * SS, outline=BODY, width=int(HID_STROKE * SS))
+    for kx in HID_KEYS_X:
+        kb = [kx * SS, HID_KEYS_Y * SS, (kx + HID_KEY) * SS, (HID_KEYS_Y + HID_KEY) * SS]
+        d.rounded_rectangle(kb, radius=3 * SS, fill=BODY)
+    sx = [v * SS for v in HID_SPACE]
+    d.rounded_rectangle(sx, radius=4 * SS, fill=ACCENT)
+    return im.resize((SIZE, SIZE), Image.LANCZOS)
+
+
 ICONS = {
     "beacon": (beacon_svg, beacon_png),
     "blespam": (blespam_svg, blespam_png),
     "matrixrain": (matrixrain_svg, matrixrain_png),
     "scanner": (scanner_svg, scanner_png),
     "clock": (clock_svg, clock_png),
+    "battery": (battery_svg, battery_png),
+    "hid": (hid_svg, hid_png),
 }
 
 

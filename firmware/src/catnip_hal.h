@@ -147,6 +147,36 @@ typedef struct {
     /* HTTP GET: write body into buf (cap incl. NUL); return length or -1. */
     int (*http_get)(void *ud, const char *url, char *buf, size_t cap);
 
+    /* service.usb.* - the composite USB HID surface (Batch 1, #61).
+     *
+     * The device ships as a TinyUSB composite (CDC + HID keyboard). The HID
+     * interface is always present, but typing is inert until it is enabled:
+     * usb_hid_enable(ud, 1) arms it and (ud, 0) disarms it, usb_hid_enabled
+     * answers which, and usb_hid_key sends nothing while disarmed. Disabled is
+     * the boot default. NULL throughout is a device that cannot be a keyboard -
+     * it reports disabled and types nothing - which is what the host build and
+     * every non-composite build are. */
+    void (*usb_hid_enable)(void *ud, int on);
+    int (*usb_hid_enabled)(void *ud);
+    /* Tap one key: hold `mods` (a HID modifier bitmask), press `usage` (a HID
+     * usage id, 0 for a modifier-only chord), then release. */
+    void (*usb_hid_key)(void *ud, unsigned char mods, unsigned char usage);
+
+    /* service.usb.* - USB Mass Storage, the composite's third interface
+     * (Batch 2, #56).
+     *
+     * The card has one owner. usb_msc_enable(ud, 1) hands the whole SD to the
+     * host as a USB drive - unmounting /sd locally first, so the host and FatFs
+     * never write it at once - and (ud, 0) takes it back and remounts. While it
+     * is handed over, fs.* reports "not available" and SD apps and scripts are
+     * gone; built-in apps still run. usb_msc_active answers whether the host
+     * owns it now, and usb_has_card whether there is a card to hand over at all
+     * (the HID app greys Mass Storage when there is not). NULL throughout is a
+     * device with no Mass Storage - it reports no card and hands nothing over. */
+    void (*usb_msc_enable)(void *ud, int on);
+    int (*usb_msc_active)(void *ud);
+    int (*usb_has_card)(void *ud);
+
     /* fs.* base directory. NULL disables fs. */
     const char *fs_base;
     /* Reformat / reinitialize the SD card (destructive). Returns 0 on success.

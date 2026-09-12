@@ -85,6 +85,15 @@ int catnip_manifest_parse(const char *json, catnip_manifest *out, char *errbuf,
         out->hints = !cJSON_IsFalse(hints);
     }
 
+    /* Only the literal false makes it a glance-and-nothing-else, the same shape
+     * of default as `hints`: silence means "launch me", because an app that did
+     * not think about it wants what a menu entry ordinarily is, and a widget
+     * with nothing behind it is the thing that has to be declared. */
+    {
+        const cJSON *launch = cJSON_GetObjectItemCaseSensitive(root, "launch");
+        out->launchable = !cJSON_IsFalse(launch);
+    }
+
     const cJSON *entry = cJSON_GetObjectItemCaseSensitive(root, "entry");
     if (cJSON_IsString(entry) && entry->valuestring[0]) {
         copy_str(out->entry, sizeof(out->entry), entry);

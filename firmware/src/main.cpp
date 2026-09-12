@@ -40,6 +40,8 @@
 #include "device/ble.h"
 #include "device/ble_hid.h"
 #include "device/ble_adv.h"
+#include "device/usb_hid.h"
+#include "device/usb_msc.h"
 #include "device/lvgl_backend.h"
 #include "device/lvgl_port.h"
 #include "device/pmu.h"
@@ -569,6 +571,14 @@ static uint32_t env_now_epoch(void *ud)
     return catnip_rtc_now();
 }
 
+/* The same gauge the frame's bar reads, so the ring's battery glance and the
+ * header show one number. */
+static int env_battery(void *ud)
+{
+    (void)ud;
+    return catnip_pmu_battery_percent();
+}
+
 static void env_enter_diag(void *ud)
 {
     (void)ud;
@@ -576,8 +586,8 @@ static void env_enter_diag(void *ud)
 }
 
 static const catnip_pages_env kPagesEnv = {
-    env_info_rows,    env_apply,     env_save,       env_title, env_icons_load,
-    env_card_present, env_now_epoch, env_enter_diag, nullptr,
+    env_info_rows,    env_apply,     env_save,    env_title,      env_icons_load,
+    env_card_present, env_now_epoch, env_battery, env_enter_diag, nullptr,
 };
 
 /* The battery in the frame's bar. Every two seconds rather than every pass: the
@@ -617,6 +627,23 @@ void setup()
      * this was the very first call, a fault inside it left no output at all
      * and looked exactly like a board that never booted. */
     catnip_led_begin();
+
+    /* The Mass Storage drive, the composite's third interface (#56). Its
+     * interface was registered before app_main by the global USBMSC object;
+     * this fills in the drive's behaviour and leaves it media-absent. Before the
+     * HID begin below, which is what reaches USB.begin(), so the drive is fully
+     * configured by the time the host enumerates it: a device that just booted
+     * is a drive the host can see with nothing in it, until the app hands a card
+     * over. */
+    catnip_usb_msc_begin();
+
+    /* The composite USB keyboard (#61). The HID interface was already
+     * registered before this - the global keyboard object did it at static-init,
+     * before app_main - so this only starts the class; USB itself came up with
+     * the CDC console on boot. Typing is disabled until the HID app enables it,
+     * so a device that just booted is a keyboard the host can see and that never
+     * types. */
+    catnip_usb_hid_begin();
 
     /* Order matters: the expander sits on LDO4, so the rail has to be up
      * before the expander can answer, and the expander has to release the
@@ -898,7 +925,11 @@ void loop()
      * times a second. */
     static unsigned sd_last;
     unsigned now_ms = (unsigned)millis();
-    bool ask_sd = (unsigned)(now_ms - sd_last) >= 250u;
+    /* Not while Mass Storage owns the card: the poll's job is to mount a card
+     * it finds, and mounting the card the host is writing is the one thing this
+     * whole app is built to never do. The card comes back through
+     * service.usb.msc_enable(false), not through the slot poll. */
+    bool ask_sd = !catnip_usb_msc_active() && (unsigned)(now_ms - sd_last) >= 250u;
     if (ask_sd) sd_last = now_ms;
     if (ask_sd && catnip_sd_poll()) {
         bool mounted = catnip_sd_mounted();
@@ -1108,6 +1139,10 @@ void loop()
     catnip_frame_set_status(catnip_sd_mounted(),
                             catnip_wifi_status() == CATNIP_WIFI_CONNECTED,
                             catnip_net_time_busy());
+    /* The keyboard glyph, from the arm gate (#61). Every pass, but the setter
+     * does nothing unless the state moved, so a header with HID off never
+     * repaints for it. */
+    catnip_frame_set_hid(catnip_usb_hid_enabled());
     /* Running an app, the shell answers what the header reads - a title the app
      * set, else its manifest name - and only after app code could have run,
      * since that is the only thing that can change the answer and the question

@@ -74,6 +74,11 @@ int g_batt_pct = -1;
 bool g_has_card;
 bool g_has_radio;
 bool g_syncing;
+/* Whether USB HID typing is armed (#61). Drives the keyboard glyph in the
+ * status strip: a header mark for the mode the HID app enables, not for an OTA
+ * partition. Off is the boot state and every state until the owner turns it
+ * on. */
+bool g_hid_on;
 char g_last_left[48];
 
 void set_if_changed(lv_obj_t *label, char *last, size_t cap, const char *text)
@@ -90,6 +95,12 @@ lv_obj_t *make_cell(lv_obj_t *parent, lv_text_align_t align, uint32_t ink)
     lv_obj_set_flex_grow(label, 1);
     lv_obj_set_style_text_align(label, align, 0);
     lv_obj_set_style_text_color(label, lv_color_hex(ink), 0);
+    /* The bar is one line, always. A cell's default long mode is WRAP, so a
+     * left group that outgrows its third of the width - battery plus the status
+     * glyphs, which is exactly what a keyboard mark tips over - would fold onto
+     * a second line and double the bar's height. CLIP keeps it to the one line
+     * the bar reserves; a group that cannot fit is trimmed, not wrapped. */
+    lv_label_set_long_mode(label, LV_LABEL_LONG_CLIP);
     lv_label_set_text(label, "");
     return label;
 }
@@ -520,12 +531,33 @@ void compose_left(void)
     char buf[48];
     int off = 0;
 
-    if (g_batt_pct < 0) buf[off] = '\0';
-    else off = snprintf(buf, sizeof(buf), "%s %d%%", LV_SYMBOL_BATTERY_FULL, g_batt_pct);
+    /* The battery, always, as the glyph rather than a number beside a full one
+     * (#6). Four digits of "100%" are the widest thing in the left group and the
+     * first to be clipped once a status mark or two joins them; the battery
+     * symbol already comes in five levels, so the charge is still readable and
+     * the group is a third narrower. When the level is not known - the gauge
+     * unread, g_batt_pct below zero - the empty glyph is drawn rather than
+     * nothing, so the header never reads as one that forgot the battery. The
+     * exact percent lives on the device page for anyone who wants it. */
+    const char *g;
+    if (g_batt_pct < 0) g = LV_SYMBOL_BATTERY_EMPTY;
+    else if (g_batt_pct > 80) g = LV_SYMBOL_BATTERY_FULL;
+    else if (g_batt_pct > 60) g = LV_SYMBOL_BATTERY_3;
+    else if (g_batt_pct > 40) g = LV_SYMBOL_BATTERY_2;
+    else if (g_batt_pct > 20) g = LV_SYMBOL_BATTERY_1;
+    else g = LV_SYMBOL_BATTERY_EMPTY;
+    off = snprintf(buf, sizeof(buf), "%s", g);
+
     if (g_has_card && off < (int)sizeof(buf))
         off += snprintf(buf + off, sizeof(buf) - off, "  %s", LV_SYMBOL_SD_CARD);
     if (g_has_radio && off < (int)sizeof(buf))
         off += snprintf(buf + off, sizeof(buf) - off, " %s", LV_SYMBOL_WIFI);
+    /* A keyboard while USB HID typing is armed (#61). It is a mode the HID app
+     * turns on, read from the arm gate the app drives - not from a partition -
+     * and absent whenever typing is off, which is the boot state and the state
+     * on every build without the composite keyboard. */
+    if (g_hid_on && off < (int)sizeof(buf))
+        off += snprintf(buf + off, sizeof(buf) - off, "  %s", LV_SYMBOL_KEYBOARD);
     if (g_syncing && off < (int)sizeof(buf))
         off += snprintf(buf + off, sizeof(buf) - off, " %s", LV_SYMBOL_REFRESH);
     set_if_changed(g_battery, g_last_left, sizeof(g_last_left), buf);
@@ -546,6 +578,17 @@ void catnip_frame_set_status(bool card, bool radio, bool syncing)
     g_has_card = card;
     g_has_radio = radio;
     g_syncing = syncing;
+    compose_left();
+}
+
+void catnip_frame_set_hid(bool enabled)
+{
+    if (!ensure_bar()) return;
+    /* Called every pass, so the cheap thing is to do nothing when it has not
+     * moved: compose_left already guards the repaint, but the arm state barely
+     * changes and this saves rebuilding the string on every frame. */
+    if (g_hid_on == enabled) return;
+    g_hid_on = enabled;
     compose_left();
 }
 
