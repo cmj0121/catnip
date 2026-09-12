@@ -41,6 +41,7 @@
 #include "device/ble_hid.h"
 #include "device/ble_adv.h"
 #include "device/usb_hid.h"
+#include "device/usb_msc.h"
 #include "device/lvgl_backend.h"
 #include "device/lvgl_port.h"
 #include "device/pmu.h"
@@ -619,6 +620,15 @@ void setup()
      * and looked exactly like a board that never booted. */
     catnip_led_begin();
 
+    /* The Mass Storage drive, the composite's third interface (#56). Its
+     * interface was registered before app_main by the global USBMSC object;
+     * this fills in the drive's behaviour and leaves it media-absent. Before the
+     * HID begin below, which is what reaches USB.begin(), so the drive is fully
+     * configured by the time the host enumerates it: a device that just booted
+     * is a drive the host can see with nothing in it, until the app hands a card
+     * over. */
+    catnip_usb_msc_begin();
+
     /* The composite USB keyboard (#61). The HID interface was already
      * registered before this - the global keyboard object did it at static-init,
      * before app_main - so this only starts the class; USB itself came up with
@@ -907,7 +917,11 @@ void loop()
      * times a second. */
     static unsigned sd_last;
     unsigned now_ms = (unsigned)millis();
-    bool ask_sd = (unsigned)(now_ms - sd_last) >= 250u;
+    /* Not while Mass Storage owns the card: the poll's job is to mount a card
+     * it finds, and mounting the card the host is writing is the one thing this
+     * whole app is built to never do. The card comes back through
+     * service.usb.msc_enable(false), not through the slot poll. */
+    bool ask_sd = !catnip_usb_msc_active() && (unsigned)(now_ms - sd_last) >= 250u;
     if (ask_sd) sd_last = now_ms;
     if (ask_sd && catnip_sd_poll()) {
         bool mounted = catnip_sd_mounted();

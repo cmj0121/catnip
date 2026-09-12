@@ -162,6 +162,21 @@ typedef struct {
      * usage id, 0 for a modifier-only chord), then release. */
     void (*usb_hid_key)(void *ud, unsigned char mods, unsigned char usage);
 
+    /* service.usb.* - USB Mass Storage, the composite's third interface
+     * (Batch 2, #56).
+     *
+     * The card has one owner. usb_msc_enable(ud, 1) hands the whole SD to the
+     * host as a USB drive - unmounting /sd locally first, so the host and FatFs
+     * never write it at once - and (ud, 0) takes it back and remounts. While it
+     * is handed over, fs.* reports "not available" and SD apps and scripts are
+     * gone; built-in apps still run. usb_msc_active answers whether the host
+     * owns it now, and usb_has_card whether there is a card to hand over at all
+     * (the HID app greys Mass Storage when there is not). NULL throughout is a
+     * device with no Mass Storage - it reports no card and hands nothing over. */
+    void (*usb_msc_enable)(void *ud, int on);
+    int (*usb_msc_active)(void *ud);
+    int (*usb_has_card)(void *ud);
+
     /* fs.* base directory. NULL disables fs. */
     const char *fs_base;
     /* Reformat / reinitialize the SD card (destructive). Returns 0 on success.

@@ -11,6 +11,7 @@
 
 #include "catnip_fs_path.h"
 #include "ducky.h"
+#include "msc_core.h"
 #include "lauxlib.h"
 #include "lua.h"
 
@@ -500,6 +501,50 @@ static int l_usb_ducky_parse(lua_State *L)
     return 1;
 }
 
+/* service.usb.msc_enable(on) -> whether the host now owns the card.
+ *
+ * Handing the card over is refused unless there is a card and it is not already
+ * handed over - the same arm-gate philosophy the keyboard uses, checked here in
+ * the shared layer as well as in the driver, so a caller cannot enter Mass
+ * Storage twice or with no card even if it skips the app's own greying. Taking
+ * it back (on = false) is always allowed. Returns the resulting state, so the
+ * caller learns whether the handover actually happened. */
+static int l_usb_msc_enable(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+    int on = lua_toboolean(L, 1);
+    if (on) {
+        int card = (h && h->usb_has_card) ? h->usb_has_card(h->ud) : 0;
+        int active = (h && h->usb_msc_active) ? h->usb_msc_active(h->ud) : 0;
+        if (!catnip_msc_can_enter(card != 0, active != 0)) {
+            /* Report the true state, not a flat false: refused because it is
+             * already active reads back as active (idempotent), refused because
+             * there is no card reads back as inactive. */
+            lua_pushboolean(L, active);
+            return 1;
+        }
+    }
+    if (h && h->usb_msc_enable) h->usb_msc_enable(h->ud, on);
+    lua_pushboolean(L, (h && h->usb_msc_active) ? h->usb_msc_active(h->ud) : 0);
+    return 1;
+}
+
+/* service.usb.msc_active() -> whether the host owns the card now. */
+static int l_usb_msc_active(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+    lua_pushboolean(L, (h && h->usb_msc_active) ? h->usb_msc_active(h->ud) : 0);
+    return 1;
+}
+
+/* service.usb.has_card() -> whether there is a card to hand over. */
+static int l_usb_has_card(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+    lua_pushboolean(L, (h && h->usb_has_card) ? h->usb_has_card(h->ud) : 0);
+    return 1;
+}
+
 /* ---- fs.* (flat, confined to hal->fs_base) ---- */
 
 /* The one place a name chosen by an app becomes a path on the device. Every
@@ -773,6 +818,9 @@ int catnip_api_open(catnip_rt *rt, const catnip_hal *hal)
                                              {"usb_hid_enabled", l_usb_hid_enabled},
                                              {"usb_hid_tap", l_usb_hid_tap},
                                              {"usb_ducky_parse", l_usb_ducky_parse},
+                                             {"usb_msc_enable", l_usb_msc_enable},
+                                             {"usb_msc_active", l_usb_msc_active},
+                                             {"usb_has_card", l_usb_has_card},
                                              {NULL, NULL}};
     static const luaL_Reg fs_funcs[] = {{"read", l_fs_read},     {"write", l_fs_write},
                                         {"exists", l_fs_exists}, {"list", l_fs_list},
@@ -795,13 +843,18 @@ int catnip_api_open(catnip_rt *rt, const catnip_hal *hal)
         "service.usb = { hid_enable = service.usb_hid_enable,\n"
         "                hid_enabled = service.usb_hid_enabled,\n"
         "                hid_tap = service.usb_hid_tap,\n"
-        "                ducky_parse = service.usb_ducky_parse }\n"
+        "                ducky_parse = service.usb_ducky_parse,\n"
+        "                msc_enable = service.usb_msc_enable,\n"
+        "                msc_active = service.usb_msc_active,\n"
+        "                has_card = service.usb_has_card }\n"
         "service.wifi_status, service.wifi_ssid, service.wifi_scan = nil, nil, nil\n"
         "service.wifi_rescan = nil\n"
         "service.ble_scan, service.ble_rescan = nil, nil\n"
         "service.ntp_last, service.http_get = nil, nil\n"
         "service.usb_hid_enable, service.usb_hid_enabled = nil, nil\n"
-        "service.usb_hid_tap, service.usb_ducky_parse = nil, nil\n";
+        "service.usb_hid_tap, service.usb_ducky_parse = nil, nil\n"
+        "service.usb_msc_enable, service.usb_msc_active = nil, nil\n"
+        "service.usb_has_card = nil\n";
     if (luaL_dostring(L, SERVICE_LUA) != LUA_OK) {
         catnip_rt_report_error(rt, L);
         return -1;

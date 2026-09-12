@@ -63,6 +63,7 @@
 #include "rtc.h"
 #include "sd_mount.h"
 #include "usb_hid.h"
+#include "usb_msc.h"
 
 namespace {
 
@@ -292,6 +293,29 @@ int hal_usb_hid_enabled(void *ud)
     return catnip_usb_hid_enabled() ? 1 : 0;
 }
 
+/* service.usb.* - USB Mass Storage (#56). The card's one owner is switched
+ * here: usb_msc.cpp does the unmount-before-expose ordering, and this then
+ * points fs.* at whoever holds the card afterwards - away while the host owns
+ * it, back when it is returned - the same set_fs the slot poll below uses. */
+void hal_usb_msc_enable(void *ud, int on)
+{
+    (void)ud;
+    catnip_usb_msc_enable(on != 0);
+    catnip_meowkit_hal_set_fs(catnip_sd_mounted());
+}
+
+int hal_usb_msc_active(void *ud)
+{
+    (void)ud;
+    return catnip_usb_msc_active() ? 1 : 0;
+}
+
+int hal_usb_has_card(void *ud)
+{
+    (void)ud;
+    return catnip_usb_msc_has_card() ? 1 : 0;
+}
+
 void hal_usb_hid_key(void *ud, unsigned char mods, unsigned char usage)
 {
     (void)ud;
@@ -344,6 +368,10 @@ const catnip_hal *catnip_meowkit_hal_begin(void)
     g_hal.usb_hid_enable = hal_usb_hid_enable;
     g_hal.usb_hid_enabled = hal_usb_hid_enabled;
     g_hal.usb_hid_key = hal_usb_hid_key;
+    /* USB Mass Storage (#56): the same composite, its third interface. */
+    g_hal.usb_msc_enable = hal_usb_msc_enable;
+    g_hal.usb_msc_active = hal_usb_msc_active;
+    g_hal.usb_has_card = hal_usb_has_card;
 
     /* fs.* is the card and nothing else. The root is the mount point itself,
      * because catnip_api.c reaches the card through plain stdio - fopen,

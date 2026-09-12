@@ -33,6 +33,13 @@ bool catnip_sd_mount(void);
 /* True once the card is mounted. */
 bool catnip_sd_mounted(void);
 
+/* Release the card: unmount /sd so FatFs lets go of it, leaving the SDMMC host
+ * free for another owner. This is how USB Mass Storage takes the raw card (see
+ * device/usb_msc.cpp) - it unmounts here first, so the host and FatFs are never
+ * both touching the card. A no-op when nothing is mounted. Pair it with
+ * catnip_sd_mount() to take the card back. */
+void catnip_sd_unmount(void);
+
 /* Look at the slot and report whether what is in it changed since the last
  * look. True means "rescan": a card arrived and its apps should appear, or one
  * left and they should go.

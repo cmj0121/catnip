@@ -60,12 +60,21 @@ end
 local scripts = {}
 
 local function feat_available(key)
+  -- Mass Storage is not typing, so it does not wait on HID being on - only on
+  -- there being a card to hand over.
+  if key == "msc" then return service.usb.has_card() end
   if not hid_on() then return false end
   if key == "badusb" then return #scripts > 0 end
-  return false -- Mass Storage is Batch 2
+  return false
 end
 
 local function feat_why(key)
+  if key == "msc" then
+    if not service.usb.has_card() then
+      return "no SD card in the slot\ninsert one first"
+    end
+    return "A hands the whole card to the\ncomputer as a USB drive"
+  end
   if not hid_on() then
     return "HID is off\nenable it first (B, then A)"
   end
@@ -74,9 +83,6 @@ local function feat_why(key)
       return "no scripts found in\n/sd/catnip/badusb/*.txt"
     end
     return "A opens the script list\nthe chosen one types to the host"
-  end
-  if key == "msc" then
-    return "Mass Storage is coming\nin a later update"
   end
   return ""
 end
@@ -111,6 +117,7 @@ local pick_sel = 1
 -- ---- the features menu -----------------------------------------------------
 
 local open_picker -- defined below; the features menu opens it
+local open_msc    -- defined below; the features menu opens it too
 
 local function paint_feat_note()
   local f = FEATURES[feat_sel]
@@ -140,7 +147,8 @@ local function activate_feature()
     paint_feat_note()
     return
   end
-  if f.key == "badusb" then open_picker() end
+  if f.key == "badusb" then open_picker()
+  elseif f.key == "msc" then open_msc() end
 end
 
 local function open_features()
@@ -219,6 +227,42 @@ function open_picker()
   pick_list:set_children(rows)
   pick_list.selected = pick_sel
   run_note("A runs the highlighted script\nit types to the USB host")
+end
+
+-- ---- Mass Storage ----------------------------------------------------------
+
+-- Entering hands the whole SD card to the computer as a USB drive. The card has
+-- one owner: while it is the host's, /sd is unmounted here, so SD apps, config
+-- and BadUSB scripts are gone until it comes back - built-in apps still run.
+-- Leaving (B) takes the card back and remounts it, which is why the screen says
+-- to eject on the computer first. This is the workflow BadUSB relies on: drop a
+-- Ducky script over USB, take the card back, then run it.
+local msc_screen, msc_note
+
+function open_msc()
+  ui.title("Mass Storage")
+  -- The enable is refused if there is no card (has_card is the same gate the
+  -- menu greyed on), so the note reflects what actually happened.
+  local active = service.usb.msc_enable(true)
+  if not msc_note then
+    msc_note = ui.label{ id = "msc_note", align = "center", style = "body" }
+    -- B takes the card back before the screen closes, so the owner never leaves
+    -- with the card still handed away by accident. Then the title returns to the
+    -- features menu and the platform pops, the same shape the picker uses.
+    msc_screen = ui.push{ id = "msc_screen", msc_note,
+      on_back = function()
+        service.usb.msc_enable(false)
+        ui.title("HID features")
+        return false
+      end }
+  else
+    ui.push(msc_screen)
+  end
+  if active then
+    msc_note.text = "the SD card is the\ncomputer's now.\n\neject it there, then press B\nto take it back."
+  else
+    msc_note.text = "could not hand over the card\n(no card, or already busy)"
+  end
 end
 
 -- ---- running a script ------------------------------------------------------
