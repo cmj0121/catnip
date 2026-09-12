@@ -571,6 +571,14 @@ static uint32_t env_now_epoch(void *ud)
     return catnip_rtc_now();
 }
 
+/* The same gauge the frame's bar reads, so the ring's battery glance and the
+ * header show one number. */
+static int env_battery(void *ud)
+{
+    (void)ud;
+    return catnip_pmu_battery_percent();
+}
+
 static void env_enter_diag(void *ud)
 {
     (void)ud;
@@ -578,8 +586,8 @@ static void env_enter_diag(void *ud)
 }
 
 static const catnip_pages_env kPagesEnv = {
-    env_info_rows,    env_apply,     env_save,       env_title, env_icons_load,
-    env_card_present, env_now_epoch, env_enter_diag, nullptr,
+    env_info_rows,    env_apply,     env_save,    env_title,      env_icons_load,
+    env_card_present, env_now_epoch, env_battery, env_enter_diag, nullptr,
 };
 
 /* The battery in the frame's bar. Every two seconds rather than every pass: the

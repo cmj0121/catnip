@@ -875,6 +875,19 @@ void relayout_canvas(Entry *screen)
         }
     }
 
+    /* A canvas list built with a single cell and no display centrepiece is a
+     * one-value face: the battery glance is exactly this, a `89%` in a prose
+     * role rather than the display one, because the display face is digits and
+     * a colon and has no `%` for it. There is nothing to lay out *around*, so
+     * the sole child is the centrepiece, centred the way a display one would
+     * be. Only a canvas list, and only when it is alone: a bare screen is not
+     * given this, because `frame: "bare"` makes every screen an app pushes bare
+     * and one without a display child is a page that wants stacking, not a
+     * face - which is the distinction the note below turns on. */
+    if (centre < 0 && screen->kind == CATNIP_NODE_LIST &&
+        screen->layout == CATNIP_LAYOUT_CANVAS && n == 1)
+        centre = 0;
+
     /* A canvas is laid out *around its centrepiece*, so a screen without one has
      * nothing to lay out around and stacks like any other.
      *

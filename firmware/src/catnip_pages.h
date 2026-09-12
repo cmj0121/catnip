@@ -76,6 +76,11 @@ typedef struct {
     /* Seconds since the epoch, or 0 for "the clock does not know" - which the
      * ring shows as `--:--` rather than as a confident midnight. */
     uint32_t (*now_epoch)(void *ud);
+    /* The battery's charge, 0..100, or -1 for "cannot be read" - the same
+     * source and the same units the header's gauge reads, so the ring's battery
+     * glance and the bar never disagree. -1 shows as `--%`, unknown rather than
+     * flat, the way `now_epoch`'s 0 shows as `--:--`. */
+    int (*battery)(void *ud);
     /* Hand the screen to the input diagnostic. It does not come back on its
      * own; the caller's own long-B handling gives it back. */
     void (*enter_diag)(void *ud);

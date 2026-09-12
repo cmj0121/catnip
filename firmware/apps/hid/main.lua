@@ -97,12 +97,16 @@ local pending_run = nil
 
 -- ---- the root screen -------------------------------------------------------
 
-local state = ui.label{ id = "hid_state", align = "center", style = "display", text = "" }
+-- The mode, plainly, so entering the app answers "is typing on" at a glance.
+-- A prose role and not `display`: `display` is digits and a colon only, so its
+-- letters would come out as missing-glyph boxes; `title` is the panel's largest
+-- prose and carries the whole word.
+local state = ui.label{ id = "hid_state", align = "center", style = "title", text = "" }
 local caption = ui.label{ id = "hid_cap", align = "center", style = "caption",
                           text = "A toggles typing\nlong A for features" }
 
 local function paint_root()
-  state.text = hid_on() and "HID ENABLED" or "HID disabled"
+  state.text = hid_on() and "HID: enabled" or "HID: disabled"
 end
 
 -- The features menu, built once and refreshed on open.

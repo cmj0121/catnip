@@ -22,6 +22,8 @@
 #include "catnip_runtime.h"
 #include "catnip_ui.h"
 
+#include "lua.h"
+
 static int failures;
 #define CHECK(cond, name)                                                                \
     do {                                                                                 \
@@ -44,6 +46,34 @@ static catnip_app_entry app(const char *id, const char *name)
      * refuse, which is not what any of these cases is about. */
     e.compatible = 1;
     return e;
+}
+
+/* An app whose carousel cell shows a live value rather than its icon: `type` is
+ * the manifest's glance string, the same one the loader copies. */
+static catnip_app_entry glance_app(const char *id, const char *name, const char *type)
+{
+    catnip_app_entry e = app(id, name);
+    snprintf(e.glance, sizeof(e.glance), "%s", type);
+    return e;
+}
+
+/* What the face at ring position `i` (one-based, past home) currently reads,
+ * followed by its name through the stub's own node index - the same __index an
+ * app sees. Empty when there is no such cell. */
+static const char *face_text(catnip_rt *rt, int i)
+{
+    static char buf[32];
+    lua_State *L = catnip_rt_lua(rt);
+    char code[96];
+
+    buf[0] = '\0';
+    snprintf(code, sizeof(code),
+             "local f = ui.get('menu_time%d'); _G.__ft = f and f.text or ''", i);
+    catnip_rt_dostring(rt, code, "=t");
+    lua_getglobal(L, "__ft");
+    if (lua_isstring(L, -1)) snprintf(buf, sizeof(buf), "%s", lua_tostring(L, -1));
+    lua_pop(L, 1);
+    return buf;
 }
 
 int main(void)
@@ -133,10 +163,51 @@ int main(void)
     catnip_rt_dostring(rt, "ui.fire('menu_list', 'click')", "=t");
     CHECK(catnip_menu_take_pick(m) == NULL, "an empty carousel latches no pick");
 
-    /* The status line takes text without a screen having to know its shape. */
-    catnip_menu_show(m, apps, 3, true, NULL);
-    /* The battery moved into the frame's bar, which is the platform's and not
-     * the menu's - so there is no status line here to set any more. */
+    /* ---- glance cells: each shows its own value, by its type ----------- */
+    /* The type dispatch on its own, which is the piece a device cannot show:
+     * time from the epoch, battery from the charge, and the placeholder each
+     * opens on when its value is not known yet. */
+    {
+        char gt[16];
+        CHECK(catnip_glance_text("time", 0, -1, gt, sizeof(gt)) &&
+                  strcmp(gt, "--:--") == 0,
+              "a time glance with no clock is --:--");
+        CHECK(catnip_glance_text("time", 1757404980u, -1, gt, sizeof(gt)) &&
+                  strlen(gt) == 5 && gt[2] == ':',
+              "and a known epoch is HH:MM");
+        CHECK(catnip_glance_text("battery", 0, -1, gt, sizeof(gt)) &&
+                  strcmp(gt, "--%") == 0,
+              "a battery glance that cannot be read is --%");
+        CHECK(catnip_glance_text("battery", 0, 89, gt, sizeof(gt)) &&
+                  strcmp(gt, "89%") == 0,
+              "a charge of 89 is 89%");
+        CHECK(catnip_glance_text("battery", 0, 100, gt, sizeof(gt)) &&
+                  strcmp(gt, "100%") == 0,
+              "and a full one is 100%");
+        CHECK(!catnip_glance_text("moon", 0, -1, gt, sizeof(gt)) && gt[0] == '\0',
+              "a glance this firmware does not know is refused and fills nothing");
+    }
+
+    /* On the ring, a clock and a battery cell together, each following its own
+     * value. Glance apps sit last, so File Browser is position 1 and the two
+     * faces are the cells at 2 (clock) and 3 (battery). */
+    {
+        catnip_app_entry mixed[3] = {glance_app("clock", "Clock", "time"),
+                                     app("files", "File Browser"),
+                                     glance_app("battery", "Battery", "battery")};
+        catnip_menu_home(m);
+        catnip_menu_show(m, mixed, 3, true, NULL);
+        CHECK(strcmp(face_text(rt, 2), "--:--") == 0, "the clock cell opens on --:--");
+        CHECK(strcmp(face_text(rt, 3), "--%") == 0, "the battery cell opens on --%");
+
+        catnip_menu_update_glances(m, 1757404980u, 89);
+        CHECK(strlen(face_text(rt, 2)) == 5, "the clock cell fills to HH:MM");
+        CHECK(strcmp(face_text(rt, 3), "89%") == 0,
+              "and the battery cell fills to its own percent, not the clock's");
+
+        catnip_menu_update_glances(m, 1757404980u, 42);
+        CHECK(strcmp(face_text(rt, 3), "42%") == 0, "and follows the charge as it moves");
+    }
 
     /* Leaving an app comes back to the app you left, not to the cat: the spec
      * promises that short B returns you to where you came from, and the thing

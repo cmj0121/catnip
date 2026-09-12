@@ -19,6 +19,8 @@
 #define CATNIP_MENU_H
 
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #include "catnip_loader.h"
 #include "catnip_runtime.h"
@@ -60,13 +62,34 @@ const char *catnip_menu_take_pick(catnip_menu *m);
  * clear it - it is a state, not an event. */
 const char *catnip_menu_focus_name(const catnip_menu *m);
 
-/* A value cell is a small face: the time in the middle, the date and the
- * weekday on the line under it, one at each end. Three strings because they are
- * three roles, and a node carries one.
+/* The text a glance cell of `type` shows for the given live values, written
+ * into `out` (always NUL-terminated when `cap` > 0).
  *
- * Writes only what differs, so the twenty-nine passes a minute where nothing
- * has changed cost nothing at all. */
-void catnip_menu_set_glance(catnip_menu *m, const char *time);
+ * Returns true when `type` is a glance this firmware knows how to fill - "time"
+ * from `epoch`, "battery" from the charge - and false for any other string,
+ * which is how an app built against a later firmware's glance degrades to an
+ * ordinary icon cell here rather than to a blank one. A zero epoch and a
+ * negative battery are "not known yet" and give the placeholder the cell opens
+ * on (--:--, --%), the same admission the clock's and the battery's own faces
+ * make.
+ *
+ * A plain switch on the type string on purpose: adding a glance is adding a
+ * case here, and the ring, the ordering next to home and the update loop
+ * already work for whatever the case fills in - none of them is a second
+ * hardcoded clock. */
+bool catnip_glance_text(const char *type, uint32_t epoch, int battery, char *out,
+                        size_t cap);
+
+/* Refresh every glance cell from its own type: the clock cell from `epoch`, the
+ * battery cell from `battery`, each through catnip_glance_text. A negative
+ * battery is "unknown", the value device.battery() and the header's gauge both
+ * pass through unchanged.
+ *
+ * Writes only what differs, so the passes where nothing has changed cost
+ * nothing at all - and a glance moves once a minute or slower, so that is most
+ * of them. Replaces the clock-only setter: a glance is per app now, not one
+ * time string written to all of them. */
+void catnip_menu_update_glances(catnip_menu *m, uint32_t epoch, int battery);
 
 /* Forget where the ring was, so the next rebuild opens on the cat.
  *
