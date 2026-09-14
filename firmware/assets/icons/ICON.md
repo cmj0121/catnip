@@ -105,7 +105,7 @@ unmistakable from each other — that pair matters more than any single icon.
 ## App identity
 
 This file is the 14 px category set. An app's face in the grid is a different
-thing: `apps/<id>/icon.svg`, a 128 master in the same two inks, rastered to
-`icon.png` by `tools/emit_app_icons.py`. The grid stretches that PNG to 64; the
-carousel draws it at its own size. The cat is still not one of them — the mascot
-means home.
+thing: `apps/<id>/icon.png`, named in the manifest, embedded as PNG bytes. The
+grid stretches it to 64; the carousel draws it at its own size. There is no
+app-folder SVG — the device has no SVG rasteriser, and a card app already ships
+only a PNG. The cat is still not one of them — the mascot means home.

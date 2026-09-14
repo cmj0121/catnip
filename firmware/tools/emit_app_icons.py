@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Write the built-in apps' identity icons. Hand-run, like emit_icon_svgs.py.
+"""Write the built-in apps' identity PNGs. Hand-run.
 
-The SVG is the source. The PNG is a raster of it, which is what gen_apps.py
-embeds. Palette is the File Browser's: body in a light ink, one accent in the
-earthy yellow, so the launcher grid is a set. Matrix Rain keeps green, because
-that colour is the app.
+An app ships `icon.png`; that is what the manifest names and what gen_apps.py
+embeds. This script can rebuild those PNGs. It does not write an `icon.svg`
+into the app folder — the device never reads one.
 
-rsvg-convert does the raster (transparent ground). Geometry lives once, in the
-SVG emitters.
+Palette is the File Browser's: body in a light ink, one accent in the earthy
+yellow, so the launcher grid is a set. Matrix Rain keeps green, because that
+colour is the app.
 """
 import math
 import os
@@ -284,14 +284,9 @@ def write_png(svg_text, png_path):
 
 def main():
     for app, svg in sorted(ICONS.items()):
-        d = os.path.join(APPS, app)
-        text = svg()
-        svg_path = os.path.join(d, "icon.svg")
-        png_path = os.path.join(d, "icon.png")
-        with open(svg_path, "w") as f:
-            f.write(text)
-        write_png(text, png_path)
-        print("emit_app_icons: wrote icon.svg and icon.png in apps/%s" % app)
+        png_path = os.path.join(APPS, app, "icon.png")
+        write_png(svg(), png_path)
+        print("emit_app_icons: wrote icon.png in apps/%s" % app)
 
 
 if __name__ == "__main__":
