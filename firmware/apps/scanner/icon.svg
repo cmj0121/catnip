@@ -3,5 +3,5 @@
   <path fill="none" stroke="#DCE3EC" stroke-width="12.0" stroke-linecap="round" d="M 43.431 88.513 A 32.000 32.000 0 0 1 43.431 39.487"/>
   <path fill="none" stroke="#DCE3EC" stroke-width="12.0" stroke-linecap="round" d="M 102.644 29.205 A 52.000 52.000 0 0 1 102.644 98.795"/>
   <path fill="none" stroke="#DCE3EC" stroke-width="12.0" stroke-linecap="round" d="M 25.356 98.795 A 52.000 52.000 0 0 1 25.356 29.205"/>
-  <circle fill="#E5B845" cx="64.0" cy="64.0" r="12.0"/>
+  <circle fill="#E5B845" cx="64.00" cy="64.00" r="12.00"/>
 </svg>

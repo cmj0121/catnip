@@ -1,23 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
-  <rect x="12.4" y="91.0" width="9.9" height="9.9" rx="2.8" fill="#C8FFCE"/>
-  <rect x="12.4" y="75.0" width="9.9" height="9.9" rx="2.8" fill="#5BF06A"/>
-  <rect x="12.4" y="59.0" width="9.9" height="9.9" rx="2.8" fill="#34C63F"/>
-  <rect x="12.4" y="43.0" width="9.9" height="9.9" rx="2.8" fill="#1E9128"/>
-  <rect x="31.0" y="107.0" width="9.9" height="9.9" rx="2.8" fill="#34C63F"/>
-  <rect x="31.0" y="91.0" width="9.9" height="9.9" rx="2.8" fill="#1E9128"/>
-  <rect x="31.0" y="75.0" width="9.9" height="9.9" rx="2.8" fill="#135C18"/>
-  <rect x="31.0" y="59.0" width="9.9" height="9.9" rx="2.8" fill="#0C3E10"/>
-  <rect x="49.7" y="59.0" width="9.9" height="9.9" rx="2.8" fill="#C8FFCE"/>
-  <rect x="49.7" y="43.0" width="9.9" height="9.9" rx="2.8" fill="#5BF06A"/>
-  <rect x="49.7" y="27.0" width="9.9" height="9.9" rx="2.8" fill="#34C63F"/>
-  <rect x="49.7" y="11.0" width="9.9" height="9.9" rx="2.8" fill="#1E9128"/>
-  <rect x="68.4" y="107.0" width="9.9" height="9.9" rx="2.8" fill="#5BF06A"/>
-  <rect x="68.4" y="91.0" width="9.9" height="9.9" rx="2.8" fill="#34C63F"/>
-  <rect x="68.4" y="75.0" width="9.9" height="9.9" rx="2.8" fill="#1E9128"/>
-  <rect x="87.0" y="43.0" width="9.9" height="9.9" rx="2.8" fill="#C8FFCE"/>
-  <rect x="87.0" y="27.0" width="9.9" height="9.9" rx="2.8" fill="#5BF06A"/>
-  <rect x="87.0" y="11.0" width="9.9" height="9.9" rx="2.8" fill="#34C63F"/>
-  <rect x="105.7" y="107.0" width="9.9" height="9.9" rx="2.8" fill="#C8FFCE"/>
-  <rect x="105.7" y="91.0" width="9.9" height="9.9" rx="2.8" fill="#5BF06A"/>
-  <rect x="105.7" y="75.0" width="9.9" height="9.9" rx="2.8" fill="#34C63F"/>
+  <path fill="#DCE3EC" fill-rule="evenodd" d="M 32.00 14.00 H 96.00 A 18.00 18.00 0 0 1 114.00 32.00 V 96.00 A 18.00 18.00 0 0 1 96.00 114.00 H 32.00 A 18.00 18.00 0 0 1 14.00 96.00 V 32.00 A 18.00 18.00 0 0 1 32.00 14.00 Z M 36.00 28.00 H 92.00 A 8.00 8.00 0 0 1 100.00 36.00 V 92.00 A 8.00 8.00 0 0 1 92.00 100.00 H 36.00 A 8.00 8.00 0 0 1 28.00 92.00 V 36.00 A 8.00 8.00 0 0 1 36.00 28.00 Z"/>
+  <rect x="30.81" y="81.38" width="6.38" height="6.38" rx="1.79" ry="1.79" fill="#C8FFCE"/>
+  <rect x="30.81" y="71.10" width="6.38" height="6.38" rx="1.79" ry="1.79" fill="#5BF06A"/>
+  <rect x="30.81" y="60.81" width="6.38" height="6.38" rx="1.79" ry="1.79" fill="#34C63F"/>
+  <rect x="30.81" y="50.53" width="6.38" height="6.38" rx="1.79" ry="1.79" fill="#1E9128"/>
+  <rect x="42.81" y="91.67" width="6.38" height="6.38" rx="1.79" ry="1.79" fill="#34C63F"/>
+  <rect x="42.81" y="81.38" width="6.38" height="6.38" rx="1.79" ry="1.79" fill="#1E9128"/>
+  <rect x="42.81" y="71.10" width="6.38" height="6.38" rx="1.79" ry="1.79" fill="#135C18"/>
+  <rect x="42.81" y="60.81" width="6.38" height="6.38" rx="1.79" ry="1.79" fill="#0C3E10"/>
+  <rect x="54.81" y="60.81" width="6.38" height="6.38" rx="1.79" ry="1.79" fill="#C8FFCE"/>
+  <rect x="54.81" y="50.53" width="6.38" height="6.38" rx="1.79" ry="1.79" fill="#5BF06A"/>
+  <rect x="54.81" y="40.24" width="6.38" height="6.38" rx="1.79" ry="1.79" fill="#34C63F"/>
+  <rect x="54.81" y="29.95" width="6.38" height="6.38" rx="1.79" ry="1.79" fill="#1E9128"/>
+  <rect x="66.81" y="91.67" width="6.38" height="6.38" rx="1.79" ry="1.79" fill="#5BF06A"/>
+  <rect x="66.81" y="81.38" width="6.38" height="6.38" rx="1.79" ry="1.79" fill="#34C63F"/>
+  <rect x="66.81" y="71.10" width="6.38" height="6.38" rx="1.79" ry="1.79" fill="#1E9128"/>
+  <rect x="78.81" y="50.53" width="6.38" height="6.38" rx="1.79" ry="1.79" fill="#C8FFCE"/>
+  <rect x="78.81" y="40.24" width="6.38" height="6.38" rx="1.79" ry="1.79" fill="#5BF06A"/>
+  <rect x="78.81" y="29.95" width="6.38" height="6.38" rx="1.79" ry="1.79" fill="#34C63F"/>
+  <rect x="90.81" y="91.67" width="6.38" height="6.38" rx="1.79" ry="1.79" fill="#C8FFCE"/>
+  <rect x="90.81" y="81.38" width="6.38" height="6.38" rx="1.79" ry="1.79" fill="#5BF06A"/>
+  <rect x="90.81" y="71.10" width="6.38" height="6.38" rx="1.79" ry="1.79" fill="#34C63F"/>
 </svg>

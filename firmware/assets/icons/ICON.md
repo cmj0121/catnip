@@ -101,3 +101,11 @@ unmistakable from each other — that pair matters more than any single icon.
    offers side by side.
 4. The set looks like one hand drew it in one sitting.
 5. It looks like it belongs on a device with a cat on the box.
+
+## App identity
+
+This file is the 14 px category set. An app's face in the grid is a different
+thing: `apps/<id>/icon.svg`, a 128 master in the same two inks, rastered to
+`icon.png` by `tools/emit_app_icons.py`. The grid stretches that PNG to 64; the
+carousel draws it at its own size. The cat is still not one of them — the mascot
+means home.
