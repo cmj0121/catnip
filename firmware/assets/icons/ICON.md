@@ -52,7 +52,7 @@ platform image with an id of its own, drawn whole where it is given the room.
 | ------------- | ----------------------------------------------- | ------------------------------------------------- |
 | `folder`      | a directory you can go into                     | `#5AABFF` stepped tab                             |
 | `file`        | a plain file of no particular kind              | `#CFC7B6`                                         |
-| `placeholder` | a slot that must show something and has nothing | `#7B7D7B` hollow frame                            |
+| `placeholder` | a slot that must show something and has nothing | `#7B7D7B` four corners                            |
 | `image`       | a picture file                                  | `#E6E6E6` + `#000000` card + black sun/mountain   |
 | `audio`       | a sound file                                    | `#45E0CB`                                         |
 | `settings`    | configure this                                  | `#C6CDD6` 8-tooth gear, evenodd centre hole       |
