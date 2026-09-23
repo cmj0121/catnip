@@ -177,6 +177,23 @@ typedef struct {
     int (*usb_msc_active)(void *ud);
     int (*usb_has_card)(void *ud);
 
+    /* service.usb.flash_mode() - reboot the chip into the ROM serial bootloader
+     * (Batch 3, #61 / PLAN).
+     *
+     * The composite the two surfaces above ride on (USB_MODE=0) is exactly what
+     * gives up the ROM's USB-Serial/JTAG reset-to-download path, so today every
+     * flash needs the BOOT+RESET dance by hand (see docs/INSTALL.md). This is
+     * that dance in software: it reboots into ROM download mode over the same
+     * cable, so the next esptool run connects without anyone touching the board.
+     *
+     * It does not return on the device - the chip comes back up in the
+     * bootloader, and only a flash or a plain RESET brings the firmware back.
+     * So a caller shows its warning and gets its confirmation *before* the call;
+     * there is nothing to do after it. NULL is a build that cannot do this - the
+     * host, and every non-composite build - where the call is a safe no-op and
+     * Lua gets false, which is how the app knows to grey the action. */
+    void (*usb_flash_mode)(void *ud);
+
     /* fs.* base directory. NULL disables fs. */
     const char *fs_base;
     /* Reformat / reinitialize the SD card (destructive). Returns 0 on success.

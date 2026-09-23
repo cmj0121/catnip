@@ -18,6 +18,7 @@ typedef struct {
     int armed;
     int keys; /* how many taps reached the HAL */
     unsigned char last_mods, last_usage;
+    int flashed; /* how many times flash_mode reached the HAL */
 } usb_mock;
 
 static void m_usb_enable(void *ud, int on)
@@ -34,6 +35,12 @@ static void m_usb_key(void *ud, unsigned char mods, unsigned char usage)
     m->keys++;
     m->last_mods = mods;
     m->last_usage = usage;
+}
+/* On the device this reboots and never returns; the mock just records that the
+ * API forwarded the call, so the test can hold that wiring in place. */
+static void m_usb_flash(void *ud)
+{
+    ((usb_mock *)ud)->flashed++;
 }
 
 static int failures;
@@ -70,6 +77,7 @@ int main(void)
     hal.usb_hid_enable = m_usb_enable;
     hal.usb_hid_enabled = m_usb_enabled;
     hal.usb_hid_key = m_usb_key;
+    hal.usb_flash_mode = m_usb_flash;
 
     catnip_rt *rt = catnip_rt_new_tracked();
     catnip_ui_open(rt);
@@ -119,6 +127,20 @@ int main(void)
               "and marshals key events and a delay into a Lua array");
         lua_pop(L, 4);
     }
+
+    /* flash_mode forwards to the HAL. It "returns" false here only because the
+     * mock returns at all - on the device it reboots and nothing after it runs -
+     * but the wiring under test is that the call reached the hook. */
+    CHECK(run(rt, "R = service.usb.flash_mode()") == 0 && boolean(L, "R") == 0 &&
+              mk.flashed == 1,
+          "flash_mode reaches the HAL and reports false to Lua");
+
+    /* With no such hook - the host default, and every non-composite build - the
+     * call is a safe no-op and stays false, which is how the app greys it. */
+    hal.usb_flash_mode = NULL;
+    CHECK(run(rt, "R = service.usb.flash_mode()") == 0 && boolean(L, "R") == 0 &&
+              mk.flashed == 1,
+          "flash_mode with no hook is a safe no-op and forwards nothing");
 
     catnip_rt_free(rt);
     printf("%s (%d failures)\n", failures ? "FAILED" : "PASSED", failures);

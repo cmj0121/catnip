@@ -545,6 +545,25 @@ static int l_usb_has_card(lua_State *L)
     return 1;
 }
 
+/* service.usb.flash_mode() -> false, or does not return.
+ *
+ * Reboots the device into ROM download mode so the next flash needs no BOOT+RESET
+ * dance (see catnip_hal.h). On the device the call does not return - the chip
+ * comes back up in the bootloader - so nothing after it runs. It returns false
+ * only when there is no such hook (the host, and every non-composite build),
+ * which is how the Flash Mode app knows to grey the action rather than promise a
+ * reboot that will not happen. There is deliberately no confirmation here: the
+ * gate is the app's warning screen, and a script that calls this meant to. */
+static int l_usb_flash_mode(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+    if (h && h->usb_flash_mode) {
+        h->usb_flash_mode(h->ud); /* does not return on the device */
+    }
+    lua_pushboolean(L, 0);
+    return 1;
+}
+
 /* ---- fs.* (flat, confined to hal->fs_base) ---- */
 
 /* The one place a name chosen by an app becomes a path on the device. Every
@@ -821,6 +840,7 @@ int catnip_api_open(catnip_rt *rt, const catnip_hal *hal)
                                              {"usb_msc_enable", l_usb_msc_enable},
                                              {"usb_msc_active", l_usb_msc_active},
                                              {"usb_has_card", l_usb_has_card},
+                                             {"usb_flash_mode", l_usb_flash_mode},
                                              {NULL, NULL}};
     static const luaL_Reg fs_funcs[] = {{"read", l_fs_read},     {"write", l_fs_write},
                                         {"exists", l_fs_exists}, {"list", l_fs_list},
@@ -846,7 +866,8 @@ int catnip_api_open(catnip_rt *rt, const catnip_hal *hal)
         "                ducky_parse = service.usb_ducky_parse,\n"
         "                msc_enable = service.usb_msc_enable,\n"
         "                msc_active = service.usb_msc_active,\n"
-        "                has_card = service.usb_has_card }\n"
+        "                has_card = service.usb_has_card,\n"
+        "                flash_mode = service.usb_flash_mode }\n"
         "service.wifi_status, service.wifi_ssid, service.wifi_scan = nil, nil, nil\n"
         "service.wifi_rescan = nil\n"
         "service.ble_scan, service.ble_rescan = nil, nil\n"
@@ -854,7 +875,7 @@ int catnip_api_open(catnip_rt *rt, const catnip_hal *hal)
         "service.usb_hid_enable, service.usb_hid_enabled = nil, nil\n"
         "service.usb_hid_tap, service.usb_ducky_parse = nil, nil\n"
         "service.usb_msc_enable, service.usb_msc_active = nil, nil\n"
-        "service.usb_has_card = nil\n";
+        "service.usb_has_card, service.usb_flash_mode = nil, nil\n";
     if (luaL_dostring(L, SERVICE_LUA) != LUA_OK) {
         catnip_rt_report_error(rt, L);
         return -1;
