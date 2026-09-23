@@ -10,6 +10,7 @@
 #   uninstall    restore stock: re-flash your backup, or official stock (#14)
 #   restore-stock  download & flash the official MeowKit firmware (#14)
 #   monitor      watch the serial log (the fastest way to see a boot succeed)
+#   mode         show the device's USB mode: HID, download, or not detected (#95)
 #
 # Safety model (see the "Install" story): the ESP32-S3 ROM download mode is
 # always reachable over USB, so a flash can always be redone. Never burn eFuses
@@ -384,6 +385,68 @@ cmd_monitor() {
 	serial_read 0
 }
 
+# ---- mode: which USB face is the device showing right now? (#95) ------------
+#
+# The three states, read from USB enumeration alone - never a reset, so it is
+# safe to ask while the firmware runs:
+#
+#   HID           Catnip is running. The composite (USB_MODE=0) presents a HID
+#                 keyboard interface, which is what the host - and this - see.
+#   download      No HID interface: the ROM's USB-Serial/JTAG unit is up. This is
+#                 the flashable face, whether reached by the BOOT dance or by the
+#                 Flash Mode app. esptool (make probe) is the authoritative
+#                 flash-readiness check; this only names the face.
+#   not detected  No MeowKit (VID 0x303A) on the bus at all.
+#
+# The signal is the HID interface, because a running Catnip always exposes the
+# keyboard and the ROM download unit never does. VID 0x303A is Espressif; the
+# MeowKit's S3 enumerates under it in either face.
+ESP_VID_HEX="303a"
+ESP_VID_DEC=12346 # 0x303A, for macOS ioreg which prints idVendor in decimal
+
+# Is an Espressif USB device on the bus at all?
+usb_present() {
+	case "$(uname -s)" in
+		Darwin) ioreg -p IOUSB -w0 -l 2>/dev/null | grep -q "\"idVendor\" = $ESP_VID_DEC" ;;
+		*)      grep -qix "$ESP_VID_HEX" /sys/bus/usb/devices/*/idVendor 2>/dev/null ;;
+	esac
+}
+
+# Does that device expose a HID interface (the composite keyboard)?
+usb_has_hid() {
+	case "$(uname -s)" in
+		# hidutil lists every HID service with its VendorID as 0x-prefixed hex;
+		# the keyboard shows up here only while Catnip is running.
+		Darwin) hidutil list 2>/dev/null | grep -qi "0x$ESP_VID_HEX" ;;
+		# sysfs: for each 0x303A device, look for an interface of class 03 (HID).
+		*)
+			local vend base iface
+			for vend in /sys/bus/usb/devices/*/idVendor; do
+				[ -f "$vend" ] || continue
+				[ "$(cat "$vend" 2>/dev/null)" = "$ESP_VID_HEX" ] || continue
+				base="${vend%/idVendor}"
+				for iface in "$base":*/bInterfaceClass; do
+					[ -f "$iface" ] || continue
+					[ "$(cat "$iface" 2>/dev/null)" = "03" ] && return 0
+				done
+			done
+			return 1
+			;;
+	esac
+}
+
+cmd_mode() {
+	if ! usb_present; then
+		log "mode: not detected (no MeowKit on the USB bus)"
+		return 0
+	fi
+	if usb_has_hid; then
+		log "mode: HID (Catnip is running; the host sees the composite keyboard)"
+	else
+		log "mode: download (ROM serial is up and flashable; no HID interface)"
+	fi
+}
+
 usage() {
 	sed -n '2,23p' "$0"
 	exit "${1:-0}"
@@ -401,8 +464,9 @@ main() {
 		uninstall) cmd_uninstall "$@" ;;
 		restore-stock) cmd_restore_stock "$@" ;;
 		monitor) cmd_monitor "$@" ;;
+		mode) cmd_mode "$@" ;;
 		-h|--help|help) usage 0 ;;
-		*) die "unknown subcommand: $cmd (try: flash, probe, backup, install, uninstall, restore-stock, monitor)" ;;
+		*) die "unknown subcommand: $cmd (try: flash, probe, backup, install, uninstall, restore-stock, monitor, mode)" ;;
 	esac
 }
 

@@ -1,6 +1,6 @@
 SUBDIR :=
 
-.PHONY: all clean build ci flash backup install monitor uninstall upgrade help $(SUBDIR)
+.PHONY: all clean build ci flash backup install monitor mode uninstall upgrade help $(SUBDIR)
 
 all: $(SUBDIR) 		# default action
 	@[ -f .git/hooks/pre-commit ] || pre-commit install --install-hooks
@@ -33,6 +33,9 @@ install: ci			# check, back up stock, flash Catnip, and verify it started
 
 monitor:			# watch the serial log (RESET=1 to restart and catch the boot)
 	@scripts/meowkit.sh monitor
+
+mode:				# show the device's USB mode: HID, download, or not detected
+	@scripts/meowkit.sh mode
 
 uninstall:			# restore the MeowKit to stock (from your backup, or official)
 	@scripts/meowkit.sh uninstall
