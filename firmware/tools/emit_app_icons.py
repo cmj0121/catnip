@@ -247,6 +247,22 @@ def hid_svg():
     ])
 
 
+# ---- Flash Mode: a download arrow dropping into a tray --------------------
+# The app reboots the device into ROM download mode to be flashed. The glyph is
+# the universal "load into the device" mark - an arrow coming down into an open
+# tray - not a lightning bolt, which on a battery-powered thing would read as
+# power. The tray is the body; the arrow is the accent, the thing being sent.
+
+def flashmode_svg():
+    return _svg([
+        _rect(22, 100, 84, 14, BODY, 5),
+        _rect(22, 84, 12, 22, BODY, 4),
+        _rect(94, 84, 12, 22, BODY, 4),
+        _rect(55, 22, 18, 40, ACCENT, 5),
+        _path("M 42 56 L 86 56 L 64 94 Z", ACCENT),
+    ])
+
+
 ICONS = {
     "filebrowser": filebrowser_svg,
     "clock": clock_svg,
@@ -256,6 +272,7 @@ ICONS = {
     "blespam": blespam_svg,
     "battery": battery_svg,
     "hid": hid_svg,
+    "flashmode": flashmode_svg,
 }
 
 
