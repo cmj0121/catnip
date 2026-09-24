@@ -18,9 +18,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 APPS = os.path.join(os.path.dirname(HERE), "apps")
 
 SIZE = 128
-INK = "#8E9DB0"
-GREEN = "#3A7358"
-SW = 5.6
+INK = "#B0BFD0"
+GREEN = "#5AAA7C"
+SW = 8.0
 
 
 def _svg(parts):
@@ -118,7 +118,7 @@ def clock_svg():
     hx, hy, hw, hh = 14.0, 40.0, 100.0, 48.0
     cx, cy = hx + hw / 2.0, hy + hh / 2.0
     parts = [_rect(hx, hy, hw, hh, 16, INK, SW)]
-    swd = max(3.2, SW * 0.52)
+    swd = max(4.4, SW * 0.58)
     dh, dw = 26.0, 13.0
     w1, gap, cgap, colon = 4.2, 3.4, 5.0, 4.4
     items = (
@@ -135,8 +135,8 @@ def clock_svg():
         if kind == "1":
             parts.append(_line(x + w / 2.0, y + pad, x + w / 2.0, y + dh - pad, INK, swd))
         elif kind == ":":
-            parts.append(_circle(x + w / 2.0, cy - 5.0, 2.0, INK, 0, INK))
-            parts.append(_circle(x + w / 2.0, cy + 5.0, 2.0, INK, 0, INK))
+            parts.append(_circle(x + w / 2.0, cy - 5.2, 2.6, INK, 0, INK))
+            parts.append(_circle(x + w / 2.0, cy + 5.2, 2.6, INK, 0, INK))
         elif kind in ("2", "0"):
             which = "abged" if kind == "2" else "abcdef"
             parts += _segs(x, y, w, dh, INK, swd, which)
@@ -167,7 +167,7 @@ def matrixrain_svg():
         x = 38 + i * 10.4
         for k in range(n):
             y0 = 36 + k * 9.2
-            parts.append(_line(x, y0, x, y0 + 5.2, GREEN, 3.5))
+            parts.append(_line(x, y0, x, y0 + 6.0, GREEN, 5.0))
     return _svg(parts)
 
 
@@ -199,8 +199,8 @@ def blespam_svg():
         rad = math.radians(aim)
         cx = 64.0 + reach * math.cos(rad)
         cy = 64.0 + reach * math.sin(rad)
-        parts.append(_circle(cx, cy, 11, INK, SW))
-        parts.append(_path(_arc(cx, cy, 20, aim - spread, aim + spread), INK, SW * 0.92))
+        parts.append(_circle(cx, cy, 12, INK, SW))
+        parts.append(_path(_arc(cx, cy, 24, aim - spread, aim + spread), INK, SW))
     return _svg(parts)
 
 
