@@ -10,6 +10,7 @@
 #   uninstall    restore stock: re-flash your backup, or official stock (#14)
 #   restore-stock  download & flash the official MeowKit firmware (#14)
 #   monitor      watch the serial log (the fastest way to see a boot succeed)
+#   mode         show USB mode: HID, download (esptool-confirmed), running, none (#95)
 #
 # Safety model (see the "Install" story): the ESP32-S3 ROM download mode is
 # always reachable over USB, so a flash can always be redone. Never burn eFuses
@@ -212,6 +213,7 @@ cmd_install() {
 	fi
 
 	resolve_pio
+	resolve_esptool
 	detect_port
 	# PNGs are the source of truth. rgb565 blobs and generated headers from
 	# earlier (12-frame, giant-arm) waves must not ride into this flash.
@@ -384,6 +386,89 @@ cmd_monitor() {
 	serial_read 0
 }
 
+# ---- mode: which USB face is the device showing right now? (#95) ------------
+#
+# Four states:
+#
+#   HID           Catnip is running. The composite (USB_MODE=0) presents a HID
+#                 keyboard interface, which is what the host - and this - see.
+#                 Read from USB enumeration alone; no reset, so it is safe.
+#   download      The ROM bootloader is listening and the device is ready to
+#                 flash. CONFIRMED with esptool, not guessed: ROM download mode
+#                 and a running non-Catnip firmware show the identical
+#                 USB-Serial/JTAG face (303A:1001, "USB JTAG_serial debug
+#                 unit"), so the descriptor cannot tell them apart - only an
+#                 esptool sync can. The sync uses --before no-reset, so a device
+#                 that is only running is not disturbed.
+#   running       A MeowKit is present but the ROM is not answering: it is
+#                 running firmware that is not the Catnip composite (no HID) -
+#                 e.g. stock. NOT flashable until it is put into download.
+#   not detected  No MeowKit (VID 0x303A) on the bus at all.
+#
+# The HID interface is the running-Catnip signal, because a running Catnip
+# always exposes the keyboard and the ROM download unit never does. VID 0x303A
+# is Espressif; the MeowKit's S3 enumerates under it in every face.
+ESP_VID_HEX="303a"
+ESP_VID_DEC=12346 # 0x303A, for macOS ioreg which prints idVendor in decimal
+
+# Is an Espressif USB device on the bus at all?
+usb_present() {
+	case "$(uname -s)" in
+		Darwin) ioreg -p IOUSB -w0 -l 2>/dev/null | grep "\"idVendor\" = $ESP_VID_DEC" >/dev/null ;;
+		*)      grep -qix "$ESP_VID_HEX" /sys/bus/usb/devices/*/idVendor 2>/dev/null ;;
+	esac
+}
+
+# Does that device expose a HID interface (the composite keyboard)?
+usb_has_hid() {
+	case "$(uname -s)" in
+		# hidutil lists every HID service with its VendorID as 0x-prefixed hex;
+		# the keyboard shows up here only while Catnip is running.
+		Darwin) hidutil list 2>/dev/null | grep -i "0x$ESP_VID_HEX" >/dev/null ;;
+		# sysfs: for each 0x303A device, look for an interface of class 03 (HID).
+		*)
+			local vend base iface
+			for vend in /sys/bus/usb/devices/*/idVendor; do
+				[ -f "$vend" ] || continue
+				[ "$(cat "$vend" 2>/dev/null)" = "$ESP_VID_HEX" ] || continue
+				base="${vend%/idVendor}"
+				for iface in "$base":*/bInterfaceClass; do
+					[ -f "$iface" ] || continue
+					[ "$(cat "$iface" 2>/dev/null)" = "03" ] && return 0
+				done
+			done
+			return 1
+			;;
+	esac
+}
+
+cmd_mode() {
+	if ! usb_present; then
+		log "mode: not detected (no MeowKit on the USB bus)"
+		return 0
+	fi
+	if usb_has_hid; then
+		log "mode: HID (Catnip is running; the host sees the composite keyboard)"
+		return 0
+	fi
+	# No HID interface - but that alone does NOT mean flashable. ROM download
+	# mode and a running non-Catnip firmware show the same USB-Serial/JTAG face
+	# (303A:1001, "USB JTAG_serial debug unit"), so the descriptor cannot tell
+	# "ready to flash" from "just running something else". Ask esptool whether
+	# the ROM is actually listening - with --before no-reset, so a device that is
+	# merely running is left undisturbed rather than being kicked into download.
+	resolve_esptool
+	detect_port
+	if "${ESPTOOL_CMD[@]}" --chip "$CHIP" --port "$PORT" --baud "$BAUD" \
+		--before no-reset --after no-reset --connect-attempts 1 flash-id >/dev/null 2>&1; then
+		log "mode: download (the ROM bootloader is listening; ready to flash)"
+	else
+		log "mode: running (a device is present but the ROM is not listening - not"
+		log "      Catnip, or other firmware). Enter download with the Flash Mode app,"
+		log "      or the BOOT dance, then re-check."
+	fi
+}
+
 usage() {
 	sed -n '2,23p' "$0"
 	exit "${1:-0}"
@@ -401,8 +486,9 @@ main() {
 		uninstall) cmd_uninstall "$@" ;;
 		restore-stock) cmd_restore_stock "$@" ;;
 		monitor) cmd_monitor "$@" ;;
+		mode) cmd_mode "$@" ;;
 		-h|--help|help) usage 0 ;;
-		*) die "unknown subcommand: $cmd (try: flash, probe, backup, install, uninstall, restore-stock, monitor)" ;;
+		*) die "unknown subcommand: $cmd (try: flash, probe, backup, install, uninstall, restore-stock, monitor, mode)" ;;
 	esac
 }
 

@@ -23,6 +23,14 @@ void catnip_power_hold(void);
  * power cycle, which is what the button does when nothing is running. */
 void catnip_power_off(void);
 
+/* Freeze the power-rail latch so it survives a software reset, without itself
+ * restarting. The rail is then never interrupted across the reset the caller
+ * triggers next - an esp_restart(), or a reboot into the ROM bootloader (Flash
+ * Mode, #61) - so the board comes back rather than switching off, which on
+ * battery is what a bare reset does here. catnip_power_hold() releases it once
+ * the next boot has taken the pin over again. */
+void catnip_power_hold_freeze(void);
+
 /* Keep the rail latched across a software restart, then restart.
  *
  * ESP.restart() on its own switches this board off. PWR_HOLD is a level, not a

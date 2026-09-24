@@ -52,7 +52,7 @@ platform image with an id of its own, drawn whole where it is given the room.
 | ------------- | ----------------------------------------------- | ------------------------------------------------- |
 | `folder`      | a directory you can go into                     | `#5AABFF` stepped tab                             |
 | `file`        | a plain file of no particular kind              | `#CFC7B6`                                         |
-| `placeholder` | a slot that must show something and has nothing | `#7B7D7B` hollow frame                            |
+| `placeholder` | a slot that must show something and has nothing | `#7B7D7B` four corners                            |
 | `image`       | a picture file                                  | `#E6E6E6` + `#000000` card + black sun/mountain   |
 | `audio`       | a sound file                                    | `#45E0CB`                                         |
 | `settings`    | configure this                                  | `#C6CDD6` 8-tooth gear, evenodd centre hole       |
@@ -101,3 +101,11 @@ unmistakable from each other — that pair matters more than any single icon.
    offers side by side.
 4. The set looks like one hand drew it in one sitting.
 5. It looks like it belongs on a device with a cat on the box.
+
+## App identity
+
+This file is the 14 px category set. An app's face in the grid is a different
+thing: `apps/<id>/icon.png`, named in the manifest, embedded as PNG bytes. The
+grid stretches it to 64; the carousel draws it at its own size. There is no
+app-folder SVG — the device has no SVG rasteriser, and a card app already ships
+only a PNG. The cat is still not one of them — the mascot means home.

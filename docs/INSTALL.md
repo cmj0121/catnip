@@ -17,24 +17,32 @@ make flash
 ```
 
 Puts the MeowKit into flash/download status and confirms your machine can talk to
-it. If it cannot connect, enter ROM download mode by hand: **hold BOOT, tap RESET,
-release BOOT**, then re-run.
+it. If it cannot connect, enter ROM download mode first (see below), then re-run.
 
 On Linux you may need serial permission: `sudo usermod -aG dialout "$USER"` (re-login).
 
-### The BOOT+RESET dance is now required on every flash
+### Entering download mode: the Flash Mode app
 
 Catnip ships as a single **TinyUSB composite** image (a CDC console plus a USB
 HID keyboard, `ARDUINO_USB_MODE=0`). Moving onto the TinyUSB stack is what lets
 the keyboard and the console share one USB device — but it gives up the ROM's
-USB-Serial/JTAG reset-to-download path that used to put the board into download
-mode on its own. So from this firmware onward **every** flash needs the manual
-dance, not just a first-time or stuck one:
+USB-Serial/JTAG reset-to-download path, so esptool cannot put the board into
+download mode on its own. The **Flash Mode** app does it instead:
 
-> **hold BOOT, tap RESET, release BOOT**, then run `make flash` / `make install`.
+1. Open **Flash Mode** on the device and press **A**, then **A** again to confirm.
+2. The screen goes dark: the MeowKit is waiting in ROM download mode.
+3. `make mode` says `download`; `make install` flashes and restarts it.
 
-This is a known, accepted trade of the composite design. The device is never
-bricked — ROM download mode is always reachable this way.
+To back out without flashing, unplug and replug USB-C. The power button does
+nothing while it waits — it is the firmware that answers it, and the firmware is
+not running.
+
+If Catnip is not running (a stock or broken image), use the manual route. The
+case has no RESET button and the battery keeps the chip powered with USB
+unplugged, so it takes a power-button cold start: hold power 3-4s until the
+screen goes dark, hold **BOOT**, press power 1-2s, then release BOOT after a
+second or two. The device is never bricked — ROM download mode is always
+reachable this way.
 
 ## Install
 
@@ -62,7 +70,7 @@ and flashes the official stock firmware instead.
 The ESP32-S3 ROM download mode is always reachable over USB and is never disabled,
 so the device cannot be permanently bricked by flashing. If anything looks wrong:
 
-1. Enter download mode (hold BOOT, tap RESET, release BOOT).
+1. Enter download mode: the Flash Mode app, or the manual BOOT + power-button route above.
 2. `make uninstall` (restores your backup or official stock).
 
 ## USB HID and BadUSB

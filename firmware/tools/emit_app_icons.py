@@ -1,20 +1,18 @@
 #!/usr/bin/env python3
-"""Write the built-in apps' icons. Hand-run, like emit_icon_svgs.py.
+"""Write the built-in apps' identity PNGs. Hand-run.
 
-They are generated rather than drawn, for the same reason the twelve platform
-glyphs are: these are flat geometric marks, and a script that emits one is a
-source anyone can re-run and adjust, where a binary is a thing to be trusted.
+An app ships `icon.png`; that is what the manifest names and what gen_apps.py
+embeds. This script can rebuild those PNGs. It does not write an `icon.svg`
+into the app folder — the device never reads one.
 
-They share a palette with the File Browser's icon so the launcher's grid looks
-like a set rather than a collection: the body in a light ink, exactly one accent
-in the earthy yellow. Each app gets an `icon.svg` master and the `icon.png`
-gen_apps.py actually embeds.
-
-To replace one with real artwork, drop in an `icon.svg` and stop running this
-for that app - nothing downstream knows the difference.
+Palette is the File Browser's: body in a light ink, one accent in the earthy
+yellow, so the launcher grid is a set. Matrix Rain keeps green, because that
+colour is the app.
 """
 import math
 import os
+import subprocess
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 APPS = os.path.join(os.path.dirname(HERE), "apps")
@@ -22,10 +20,7 @@ APPS = os.path.join(os.path.dirname(HERE), "apps")
 SIZE = 128
 BODY = "#DCE3EC"
 ACCENT = "#E5B845"
-
-# Supersample and shrink: PIL's arc and ellipse have no antialiasing of their
-# own, and an aliased curve at 128 px is a staircase.
-SS = 4
+GREEN = ("#C8FFCE", "#5BF06A", "#34C63F", "#1E9128", "#135C18", "#0C3E10")
 
 
 def _svg(parts):
@@ -35,24 +30,122 @@ def _svg(parts):
     )
 
 
-# ---- Scanner: a source, and waves either side of it -----------------------
-# The mark everybody reads as "radio". Symmetric, which is what keeps it off the
-# Wi-Fi cell's one-sided fan inside the app: a fan means one particular radio,
-# and this app listens on several.
-#
-# It was a radar - two open rings and a sweep - until somebody looked at it
-# small, where a radar is a bullseye: a thing you aim at rather than a thing
-# that is listening.
+def _rrect_d(x, y, w, h, r):
+    r = min(r, w / 2.0, h / 2.0)
+    return (
+        "M %.2f %.2f H %.2f A %.2f %.2f 0 0 1 %.2f %.2f "
+        "V %.2f A %.2f %.2f 0 0 1 %.2f %.2f "
+        "H %.2f A %.2f %.2f 0 0 1 %.2f %.2f "
+        "V %.2f A %.2f %.2f 0 0 1 %.2f %.2f Z"
+        % (
+            x + r, y, x + w - r, r, r, x + w, y + r,
+            y + h - r, r, r, x + w - r, y + h,
+            x + r, r, r, x, y + h - r,
+            y + r, r, r, x + r, y,
+        )
+    )
+
+
+def _path(d, fill, rule="nonzero"):
+    return '  <path fill="%s" fill-rule="%s" d="%s"/>' % (fill, rule, d)
+
+
+def _rect(x, y, w, h, fill, r=0):
+    if r:
+        return (
+            '  <rect x="%.2f" y="%.2f" width="%.2f" height="%.2f" '
+            'rx="%.2f" ry="%.2f" fill="%s"/>' % (x, y, w, h, r, r, fill)
+        )
+    return (
+        '  <rect x="%.2f" y="%.2f" width="%.2f" height="%.2f" fill="%s"/>'
+        % (x, y, w, h, fill)
+    )
+
+
+def _circle(cx, cy, r, fill):
+    return '  <circle fill="%s" cx="%.2f" cy="%.2f" r="%.2f"/>' % (fill, cx, cy, r)
+
+
+# ---- File Browser: an SD card, three gold contacts ------------------------
+# The card is the thing the app walks. A folder would steal the 14 px glyph.
+
+def filebrowser_svg():
+    return _svg([
+        _path(
+            "M32 10 H74 L104 40 V108 A12 12 0 0 1 92 120 H32 A12 12 0 0 1 20 108 "
+            "V22 A12 12 0 0 1 32 10 Z",
+            BODY,
+        ),
+        _rect(34, 22, 12, 26, ACCENT, 4),
+        _rect(52, 22, 12, 26, ACCENT, 4),
+        _rect(70, 22, 12, 26, ACCENT, 4),
+    ])
+
+
+# ---- Clock: a seven-segment module showing 12:00 --------------------------
+# Digit-shaped marks are the object, not a label. The housing is a hole so the
+# launcher ground is the LCD.
+
+_SEGS = {
+    "0": "abcdef",
+    "1": "bc",
+    "2": "abged",
+    "3": "abgcd",
+    "4": "fgbc",
+    "5": "afgcd",
+    "6": "afgecd",
+    "7": "abc",
+    "8": "abcdefg",
+    "9": "abfgcd",
+}
+
+
+def _seven_seg(x, y, w, h, t, which):
+    """Filled bars for one digit. `which` is the characters of 7-seg `a`–`g`."""
+    on = set(which)
+    parts = []
+    inner_w = w - 2 * t
+    half = (h - t) / 2.0
+    bars = {
+        "a": (x + t, y, inner_w, t),
+        "d": (x + t, y + h - t, inner_w, t),
+        "g": (x + t, y + half, inner_w, t),
+        "f": (x, y + t * 0.6, t, half - t * 0.4),
+        "b": (x + w - t, y + t * 0.6, t, half - t * 0.4),
+        "e": (x, y + half + t * 0.4, t, half - t * 0.4),
+        "c": (x + w - t, y + half + t * 0.4, t, half - t * 0.4),
+    }
+    for name, (sx, sy, sw, sh) in bars.items():
+        if name in on:
+            parts.append(_rect(sx, sy, sw, sh, ACCENT, min(t, sw, sh) * 0.4))
+    return parts
+
+
+def clock_svg():
+    outer = _rrect_d(10, 36, 108, 56, 16)
+    inner = _rrect_d(22, 48, 84, 32, 6)
+    parts = [_path(outer + " " + inner, BODY, "evenodd")]
+    dw, dh, t = 14.0, 26.0, 3.6
+    y = 51.0
+    parts.extend(_seven_seg(26.0, y, dw, dh, t, _SEGS["1"]))
+    parts.extend(_seven_seg(44.0, y, dw, dh, t, _SEGS["2"]))
+    parts.append(_circle(64.0, 58.0, 2.2, ACCENT))
+    parts.append(_circle(64.0, 70.0, 2.2, ACCENT))
+    parts.extend(_seven_seg(70.0, y, dw, dh, t, _SEGS["0"]))
+    parts.extend(_seven_seg(88.0, y, dw, dh, t, _SEGS["0"]))
+    return _svg(parts)
+
+
+# ---- Scanner: a source, waves either side ---------------------------------
+# Symmetric, so it is listening rather than a one-sided Wi-Fi fan.
+
 S_CX, S_CY = 64.0, 64.0
 S_DOT = 12.0
 S_STROKE = 12.0
-# (radius, degrees either side of straight out). The outer pair is narrower, so
-# the two arcs on a side nest rather than run parallel.
 S_ARCS = ((32.0, 50.0), (52.0, 42.0))
 
 
 def _arc_path(r, spread, side):
-    """One arc, as an SVG path. `side` is 0 for the right, 180 for the left."""
     a0 = math.radians(side - spread)
     a1 = math.radians(side + spread)
     x0, y0 = S_CX + r * math.cos(a0), S_CY + r * math.sin(a0)
@@ -69,366 +162,148 @@ def scanner_svg():
     for r, spread in S_ARCS:
         parts.append(_arc_path(r, spread, 0.0))
         parts.append(_arc_path(r, spread, 180.0))
-    parts.append(
-        '  <circle fill="%s" cx="%.1f" cy="%.1f" r="%.1f"/>' % (ACCENT, S_CX, S_CY, S_DOT)
-    )
+    parts.append(_circle(S_CX, S_CY, S_DOT, ACCENT))
     return _svg(parts)
 
 
-def scanner_png():
-    from PIL import Image, ImageDraw
+# ---- Matrix Rain: green rain inside a gadget screen -----------------------
+# The housing matches the set; the green is the app.
 
-    im = Image.new("RGBA", (SIZE * SS, SIZE * SS), (0, 0, 0, 0))
-    d = ImageDraw.Draw(im)
-    for r, spread in S_ARCS:
-        box = [(S_CX - r) * SS, (S_CY - r) * SS, (S_CX + r) * SS, (S_CY + r) * SS]
-        for side in (0.0, 180.0):
-            d.arc(box, side - spread, side + spread, fill=BODY, width=int(S_STROKE * SS))
-    d.ellipse(
-        [(S_CX - S_DOT) * SS, (S_CY - S_DOT) * SS, (S_CX + S_DOT) * SS, (S_CY + S_DOT) * SS],
-        fill=ACCENT,
-    )
-    return im.resize((SIZE, SIZE), Image.LANCZOS)
-
-
-# ---- Clock: a face and two hands ------------------------------------------
-# A ring rather than a filled disc, because the hands have to be the accent and
-# an accent on a light disc is the one pair in this palette with no contrast.
-# The hands point at twelve and three: any other time is a detail nobody reads
-# at 64 px, and those two are the ones that say "clock" fastest.
-C_CX, C_CY = 64.0, 64.0
-C_R = 48.0           # ring radius (centre of the stroke)
-C_RING = 12.0        # ring thickness
-C_HAND = 11.0        # hand thickness
-C_MINUTE = 34.0      # straight up
-C_HOUR = 24.0        # to the right
-C_DOT = 7.0
-
-
-def clock_svg():
-    parts = [
-        '  <circle fill="none" stroke="%s" stroke-width="%.1f" cx="%.1f" cy="%.1f" '
-        'r="%.1f"/>' % (BODY, C_RING, C_CX, C_CY, C_R),
-        '  <path stroke="%s" stroke-width="%.1f" stroke-linecap="round" '
-        'd="M %.1f %.1f V %.1f"/>' % (ACCENT, C_HAND, C_CX, C_CY, C_CY - C_MINUTE),
-        '  <path stroke="%s" stroke-width="%.1f" stroke-linecap="round" '
-        'd="M %.1f %.1f H %.1f"/>' % (ACCENT, C_HAND, C_CX, C_CY, C_CX + C_HOUR),
-        '  <circle fill="%s" cx="%.1f" cy="%.1f" r="%.1f"/>'
-        % (ACCENT, C_CX, C_CY, C_DOT),
-    ]
-    return _svg(parts)
-
-
-def clock_png():
-    from PIL import Image, ImageDraw
-
-    im = Image.new("RGBA", (SIZE * SS, SIZE * SS), (0, 0, 0, 0))
-    d = ImageDraw.Draw(im)
-    box = [(C_CX - C_R) * SS, (C_CY - C_R) * SS, (C_CX + C_R) * SS, (C_CY + C_R) * SS]
-    d.ellipse(box, outline=BODY, width=int(C_RING * SS))
-    d.line(
-        [C_CX * SS, C_CY * SS, C_CX * SS, (C_CY - C_MINUTE) * SS],
-        fill=ACCENT,
-        width=int(C_HAND * SS),
-    )
-    d.line(
-        [C_CX * SS, C_CY * SS, (C_CX + C_HOUR) * SS, C_CY * SS],
-        fill=ACCENT,
-        width=int(C_HAND * SS),
-    )
-    d.ellipse(
-        [(C_CX - C_DOT) * SS, (C_CY - C_DOT) * SS, (C_CX + C_DOT) * SS, (C_CY + C_DOT) * SS],
-        fill=ACCENT,
-    )
-    return im.resize((SIZE, SIZE), Image.LANCZOS)
-
-
-# ---- Matrix Rain: a crop of the screen the app draws -----------------------
-# Not an abstract mark - a small piece of the actual screen. Columns of glyph
-# cells fall down a grid; each drop is brightest at its head and fades up its
-# trail, and the columns sit at different heights the way one frame of the rain
-# catches them. Cells are squares, not letters: a letter is unreadable at this
-# size, and the app's own gaps and drops read fine as lit and dark blocks. The
-# green is the app's identity, so this icon keeps green where the rest of the
-# set is light + yellow - a grey matrix would say nothing.
-M_MARGIN = 8.0
-M_NCOLS = 6
-M_NROWS = 7
-# Green from the head down the trail: bright head, then the app's green, then
-# ever dimmer. Index is distance from the head; past the end stays the dimmest.
-M_FADE = ("#C8FFCE", "#5BF06A", "#34C63F", "#1E9128", "#135C18", "#0C3E10")
-# One drop per column: (head_row, trail_len). A head past the last row is a drop
-# whose bright end has already fallen off the bottom - only its trail shows,
-# which is what makes the columns look caught mid-fall rather than lined up.
+M_NCOLS, M_NROWS = 6, 7
 M_DROPS = ((5, 4), (8, 6), (3, 5), (7, 4), (2, 6), (6, 3))
+M_HOLE = (28.0, 28.0, 72.0, 72.0)
 
 
-def _m_cells():
-    """Yield (col, row, colour) for every lit cell, head brightest."""
+def matrixrain_svg():
+    hx, hy, hw, hh = M_HOLE
+    outer = _rrect_d(14, 14, 100, 100, 18)
+    inner = _rrect_d(hx, hy, hw, hh, 8)
+    parts = [_path(outer + " " + inner, BODY, "evenodd")]
+    px, py = hw / M_NCOLS, hh / M_NROWS
+    cell = min(px, py) * 0.62
     for col, (head, trail) in enumerate(M_DROPS):
         for dist in range(trail):
             row = head - dist
             if 0 <= row < M_NROWS:
-                yield col, row, M_FADE[dist if dist < len(M_FADE) else -1]
-
-
-def _m_geom():
-    area = SIZE - 2.0 * M_MARGIN
-    px, py = area / M_NCOLS, area / M_NROWS
-    cell = min(px, py) * 0.62
-    return px, py, cell
-
-
-def matrixrain_svg():
-    px, py, cell = _m_geom()
-    parts = []
-    for col, row, colour in _m_cells():
-        cx = M_MARGIN + (col + 0.5) * px
-        cy = M_MARGIN + (row + 0.5) * py
-        parts.append(
-            '  <rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="%.1f" '
-            'fill="%s"/>'
-            % (cx - cell / 2, cy - cell / 2, cell, cell, cell * 0.28, colour)
-        )
+                cx = hx + (col + 0.5) * px
+                cy = hy + (row + 0.5) * py
+                colour = GREEN[dist if dist < len(GREEN) else -1]
+                parts.append(
+                    _rect(cx - cell / 2, cy - cell / 2, cell, cell, colour, cell * 0.28)
+                )
     return _svg(parts)
 
 
-def matrixrain_png():
-    from PIL import Image, ImageDraw
-
-    px, py, cell = _m_geom()
-    im = Image.new("RGBA", (SIZE * SS, SIZE * SS), (0, 0, 0, 0))
-    d = ImageDraw.Draw(im)
-    for col, row, colour in _m_cells():
-        cx = M_MARGIN + (col + 0.5) * px
-        cy = M_MARGIN + (row + 0.5) * py
-        d.rounded_rectangle(
-            [
-                (cx - cell / 2) * SS,
-                (cy - cell / 2) * SS,
-                (cx + cell / 2) * SS,
-                (cy + cell / 2) * SS,
-            ],
-            radius=cell * 0.28 * SS,
-            fill=colour,
-        )
-    return im.resize((SIZE, SIZE), Image.LANCZOS)
-
-
-# ---- Beacon: a source, and waves rising from it ----------------------------
-# The Scanner listens on every side, so its mark is symmetric; a beacon speaks
-# in one direction, out and up, so its waves fan upward from a source low on the
-# mark. That one-sidedness is the whole difference between "I am listening" and
-# "I am saying something", and it is what keeps this off the Scanner's mark even
-# though both are a dot and some arcs.
-B_CX, B_CY = 64.0, 80.0
-B_DOT = 12.0
-B_STROKE = 12.0
-# (radius, degrees either side of straight up). The two arcs nest above the dot.
-B_ARCS = ((30.0, 60.0), (52.0, 52.0))
-# Straight up is -90 degrees in a y-down frame, which is 270 for PIL's arc.
-B_UP = -90.0
-
-
-def _beacon_arc_path(r, spread):
-    """One upward arc from the source, as an SVG path."""
-    a0 = math.radians(B_UP - spread)
-    a1 = math.radians(B_UP + spread)
-    x0, y0 = B_CX + r * math.cos(a0), B_CY + r * math.sin(a0)
-    x1, y1 = B_CX + r * math.cos(a1), B_CY + r * math.sin(a1)
-    return (
-        '  <path fill="none" stroke="%s" stroke-width="%.1f" '
-        'stroke-linecap="round" d="M %.3f %.3f A %.3f %.3f 0 0 1 %.3f %.3f"/>'
-        % (BODY, B_STROKE, x0, y0, r, r, x1, y1)
-    )
-
+# ---- Beacon: a lighthouse, one beam ---------------------------------------
+# Speaks in one direction. Not a Wi-Fi fan, not the Scanner's two-sided puck.
 
 def beacon_svg():
-    parts = [_beacon_arc_path(r, spread) for r, spread in B_ARCS]
-    parts.append(
-        '  <circle fill="%s" cx="%.1f" cy="%.1f" r="%.1f"/>' % (ACCENT, B_CX, B_CY, B_DOT)
-    )
-    return _svg(parts)
+    return _svg([
+        _path("M 46 56 L 82 56 L 76 112 L 52 112 Z", BODY),
+        _rect(40, 108, 48, 12, BODY, 3),
+        _rect(48, 28, 32, 10, BODY, 3),
+        _rect(52, 38, 24, 20, BODY, 3),
+        _rect(56, 42, 16, 12, ACCENT, 2),
+        _path("M 76 48 L 118 32 L 118 64 Z", ACCENT),
+    ])
 
 
-def beacon_png():
-    from PIL import Image, ImageDraw
-
-    im = Image.new("RGBA", (SIZE * SS, SIZE * SS), (0, 0, 0, 0))
-    d = ImageDraw.Draw(im)
-    for r, spread in B_ARCS:
-        box = [(B_CX - r) * SS, (B_CY - r) * SS, (B_CX + r) * SS, (B_CY + r) * SS]
-        d.arc(box, (B_UP + 360) - spread, (B_UP + 360) + spread, fill=BODY,
-              width=int(B_STROKE * SS))
-    d.ellipse(
-        [(B_CX - B_DOT) * SS, (B_CY - B_DOT) * SS, (B_CX + B_DOT) * SS, (B_CY + B_DOT) * SS],
-        fill=ACCENT,
-    )
-    return im.resize((SIZE, SIZE), Image.LANCZOS)
-
-
-# ---- BLE Spam: a source, and full rings all the way round ------------------
-# The beacon says one thing, upward, from a source low on the mark. Spam is the
-# same source shouting in every direction at once, so its rings are closed
-# circles centred on the dot rather than arcs fanning one way - the difference
-# between one advertiser and a room made to look full of them. Same dot, same
-# palette, so it reads as the beacon's louder cousin in the launcher grid.
-BS_CX, BS_CY = 64.0, 64.0
-BS_DOT = 12.0
-BS_STROKE = 10.0
-BS_RINGS = (26.0, 46.0)
-
+# ---- BLE Spam: three thick overlapping cards ------------------------------
+# A room full of advertisers. Chunky so it still reads at 64 px.
 
 def blespam_svg():
+    cards = ((16, 16), (36, 30), (56, 44))
+    cw, ch, r = 56.0, 72.0, 10.0
     parts = []
-    for r in BS_RINGS:
-        parts.append(
-            '  <circle fill="none" stroke="%s" stroke-width="%.1f" '
-            'cx="%.1f" cy="%.1f" r="%.1f"/>' % (BODY, BS_STROKE, BS_CX, BS_CY, r)
-        )
-    parts.append(
-        '  <circle fill="%s" cx="%.1f" cy="%.1f" r="%.1f"/>' % (ACCENT, BS_CX, BS_CY, BS_DOT)
-    )
+    for x, y in cards:
+        parts.append(_rect(x, y, cw, ch, BODY, r))
+        parts.append(_rect(x + cw - 14, y + 10, 10, 20, ACCENT, 3))
     return _svg(parts)
-
-
-def blespam_png():
-    from PIL import Image, ImageDraw
-
-    im = Image.new("RGBA", (SIZE * SS, SIZE * SS), (0, 0, 0, 0))
-    d = ImageDraw.Draw(im)
-    for r in BS_RINGS:
-        box = [(BS_CX - r) * SS, (BS_CY - r) * SS, (BS_CX + r) * SS, (BS_CY + r) * SS]
-        d.ellipse(box, outline=BODY, width=int(BS_STROKE * SS))
-    d.ellipse(
-        [(BS_CX - BS_DOT) * SS, (BS_CY - BS_DOT) * SS,
-         (BS_CX + BS_DOT) * SS, (BS_CY + BS_DOT) * SS],
-        fill=ACCENT,
-    )
-    return im.resize((SIZE, SIZE), Image.LANCZOS)
 
 
 # ---- Battery: a cell three-quarters full ----------------------------------
-# The mark reads as "battery" at a glance and as "mostly charged" a beat later:
-# a horizontal cell with a nub, the body outlined in the light ink and filled
-# three-quarters across in the accent. The fraction is the identity - a full or
-# an empty cell would say "battery" too, but this one also says which app draws
-# a level, which is the whole of what it does.
-BAT_BODY = (16.0, 44.0, 96.0, 84.0)  # x0, y0, x1, y1 - outer of the outlined body
-BAT_R = 11.0
-BAT_STROKE = 8.0
-BAT_NUB = (99.0, 55.0, 111.0, 73.0)  # the terminal on the right
-BAT_FILL_FRAC = 0.75
-BAT_PAD = 7.0  # gap between the outline's inner edge and the fill
-
-
-def _bat_fill_box():
-    x0, y0, x1, y1 = BAT_BODY
-    ix0 = x0 + BAT_STROKE / 2 + BAT_PAD
-    iy0 = y0 + BAT_STROKE / 2 + BAT_PAD
-    ix1 = x1 - BAT_STROKE / 2 - BAT_PAD
-    iy1 = y1 - BAT_STROKE / 2 - BAT_PAD
-    return ix0, iy0, ix0 + (ix1 - ix0) * BAT_FILL_FRAC, iy1
-
 
 def battery_svg():
-    x0, y0, x1, y1 = BAT_BODY
-    nx0, ny0, nx1, ny1 = BAT_NUB
-    fx0, fy0, fx1, fy1 = _bat_fill_box()
-    parts = [
-        '  <rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="%.1f" ry="%.1f" '
-        'fill="none" stroke="%s" stroke-width="%.1f"/>'
-        % (x0, y0, x1 - x0, y1 - y0, BAT_R, BAT_R, BODY, BAT_STROKE),
-        '  <rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="3" ry="3" fill="%s"/>'
-        % (nx0, ny0, nx1 - nx0, ny1 - ny0, BODY),
-        '  <rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="4" ry="4" fill="%s"/>'
-        % (fx0, fy0, fx1 - fx0, fy1 - fy0, ACCENT),
-    ]
-    return _svg(parts)
+    outer = _rrect_d(14, 42, 86, 44, 12)
+    inner = _rrect_d(24, 52, 66, 24, 5)
+    fill_w = 66 * 0.75
+    return _svg([
+        _path(outer + " " + inner, BODY, "evenodd"),
+        _rect(100, 54, 14, 20, BODY, 4),
+        _rect(28, 56, fill_w - 8, 16, ACCENT, 4),
+    ])
 
 
-def battery_png():
-    from PIL import Image, ImageDraw
-
-    im = Image.new("RGBA", (SIZE * SS, SIZE * SS), (0, 0, 0, 0))
-    d = ImageDraw.Draw(im)
-    bx = [v * SS for v in BAT_BODY]
-    d.rounded_rectangle(bx, radius=BAT_R * SS, outline=BODY, width=int(BAT_STROKE * SS))
-    nx = [v * SS for v in BAT_NUB]
-    d.rounded_rectangle(nx, radius=3 * SS, fill=BODY)
-    fx = [v * SS for v in _bat_fill_box()]
-    d.rounded_rectangle(fx, radius=4 * SS, fill=ACCENT)
-    return im.resize((SIZE, SIZE), Image.LANCZOS)
-
-
-# ---- USB HID: a keyboard, a row of keys and the space bar ------------------
-# The composite image's HID half is a keyboard, so the hub for it is drawn as
-# one: the body outlined in the light ink like the rest of the set, a row of
-# keys in the same ink, and the space bar as the single accent. It reads as
-# "keyboard" at 64 px, which is the one thing every feature behind this app has
-# in common - they all type.
-HID_BODY = (14.0, 40.0, 114.0, 90.0)  # x0, y0, x1, y1
-HID_R = 12.0
-HID_STROKE = 8.0
-HID_KEY = 12.0
-HID_KEYS_Y = 52.0
-HID_KEYS_X = (28.0, 46.0, 64.0, 82.0)
-HID_SPACE = (34.0, 72.0, 94.0, 82.0)  # x0, y0, x1, y1 - the accent space bar
-
+# ---- USB HID: a USB-C plug face -------------------------------------------
+# The hub is USB (HID, BadUSB, MSC), not only a keyboard. A pill with a
+# tongue, not a battery cell.
 
 def hid_svg():
-    x0, y0, x1, y1 = HID_BODY
-    parts = [
-        '  <rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="%.1f" ry="%.1f" '
-        'fill="none" stroke="%s" stroke-width="%.1f"/>'
-        % (x0, y0, x1 - x0, y1 - y0, HID_R, HID_R, BODY, HID_STROKE),
-    ]
-    for kx in HID_KEYS_X:
-        parts.append(
-            '  <rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="3" ry="3" '
-            'fill="%s"/>' % (kx, HID_KEYS_Y, HID_KEY, HID_KEY, BODY)
-        )
-    sx0, sy0, sx1, sy1 = HID_SPACE
-    parts.append(
-        '  <rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="4" ry="4" fill="%s"/>'
-        % (sx0, sy0, sx1 - sx0, sy1 - sy0, ACCENT)
-    )
-    return _svg(parts)
+    outer = _rrect_d(16, 46, 96, 36, 18)
+    inner = _rrect_d(30, 54, 68, 20, 10)
+    return _svg([
+        _rect(54, 28, 20, 22, ACCENT, 5),
+        _path(outer + " " + inner, BODY, "evenodd"),
+    ])
 
 
-def hid_png():
-    from PIL import Image, ImageDraw
+# ---- Flash Mode: a download arrow dropping into a tray --------------------
+# The app reboots the device into ROM download mode to be flashed. The glyph is
+# the universal "load into the device" mark - an arrow coming down into an open
+# tray - not a lightning bolt, which on a battery-powered thing would read as
+# power. The tray is the body; the arrow is the accent, the thing being sent.
 
-    im = Image.new("RGBA", (SIZE * SS, SIZE * SS), (0, 0, 0, 0))
-    d = ImageDraw.Draw(im)
-    bx = [v * SS for v in HID_BODY]
-    d.rounded_rectangle(bx, radius=HID_R * SS, outline=BODY, width=int(HID_STROKE * SS))
-    for kx in HID_KEYS_X:
-        kb = [kx * SS, HID_KEYS_Y * SS, (kx + HID_KEY) * SS, (HID_KEYS_Y + HID_KEY) * SS]
-        d.rounded_rectangle(kb, radius=3 * SS, fill=BODY)
-    sx = [v * SS for v in HID_SPACE]
-    d.rounded_rectangle(sx, radius=4 * SS, fill=ACCENT)
-    return im.resize((SIZE, SIZE), Image.LANCZOS)
+def flashmode_svg():
+    return _svg([
+        _rect(22, 100, 84, 14, BODY, 5),
+        _rect(22, 84, 12, 22, BODY, 4),
+        _rect(94, 84, 12, 22, BODY, 4),
+        _rect(55, 22, 18, 40, ACCENT, 5),
+        _path("M 42 56 L 86 56 L 64 94 Z", ACCENT),
+    ])
 
 
 ICONS = {
-    "beacon": (beacon_svg, beacon_png),
-    "blespam": (blespam_svg, blespam_png),
-    "matrixrain": (matrixrain_svg, matrixrain_png),
-    "scanner": (scanner_svg, scanner_png),
-    "clock": (clock_svg, clock_png),
-    "battery": (battery_svg, battery_png),
-    "hid": (hid_svg, hid_png),
+    "filebrowser": filebrowser_svg,
+    "clock": clock_svg,
+    "scanner": scanner_svg,
+    "matrixrain": matrixrain_svg,
+    "beacon": beacon_svg,
+    "blespam": blespam_svg,
+    "battery": battery_svg,
+    "hid": hid_svg,
+    "flashmode": flashmode_svg,
 }
 
 
+def write_png(svg_text, png_path):
+    fd, tmp = tempfile.mkstemp(suffix=".svg")
+    try:
+        os.write(fd, svg_text.encode("utf-8"))
+        os.close(fd)
+        subprocess.check_call(
+            [
+                "rsvg-convert",
+                "-w",
+                str(SIZE),
+                "-h",
+                str(SIZE),
+                "--background-color",
+                "none",
+                "-o",
+                png_path,
+                tmp,
+            ]
+        )
+    finally:
+        os.unlink(tmp)
+
+
 def main():
-    for app, (svg, png) in sorted(ICONS.items()):
-        d = os.path.join(APPS, app)
-        with open(os.path.join(d, "icon.svg"), "w") as f:
-            f.write(svg())
-        png().save(os.path.join(d, "icon.png"))
-        print("emit_app_icons: wrote icon.svg and icon.png in apps/%s" % app)
+    for app, svg in sorted(ICONS.items()):
+        png_path = os.path.join(APPS, app, "icon.png")
+        write_png(svg(), png_path)
+        print("emit_app_icons: wrote icon.png in apps/%s" % app)
 
 
 if __name__ == "__main__":

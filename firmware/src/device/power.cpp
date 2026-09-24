@@ -39,10 +39,15 @@ void catnip_power_off(void)
     }
 }
 
-void catnip_power_restart(void)
+void catnip_power_hold_freeze(void)
 {
     /* The pad keeps driving high through the reset, so the rail is never
      * interrupted and the board comes back rather than going out. */
     gpio_hold_en((gpio_num_t)CATNIP_PIN_PWR_HOLD);
+}
+
+void catnip_power_restart(void)
+{
+    catnip_power_hold_freeze();
     esp_restart();
 }

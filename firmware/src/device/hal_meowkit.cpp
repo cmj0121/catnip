@@ -62,6 +62,7 @@
 #include "pmu.h"
 #include "rtc.h"
 #include "sd_mount.h"
+#include "usb_flash.h"
 #include "usb_hid.h"
 #include "usb_msc.h"
 
@@ -322,6 +323,14 @@ void hal_usb_hid_key(void *ud, unsigned char mods, unsigned char usage)
     catnip_usb_hid_key(mods, usage);
 }
 
+/* service.usb.flash_mode() (#61). Reboots into the ROM bootloader; usb_flash.cpp
+ * does not return here on the device. */
+void hal_usb_flash_mode(void *ud)
+{
+    (void)ud;
+    catnip_usb_flash_mode();
+}
+
 } /* namespace */
 
 const catnip_hal *catnip_meowkit_hal_begin(void)
@@ -372,6 +381,9 @@ const catnip_hal *catnip_meowkit_hal_begin(void)
     g_hal.usb_msc_enable = hal_usb_msc_enable;
     g_hal.usb_msc_active = hal_usb_msc_active;
     g_hal.usb_has_card = hal_usb_has_card;
+    /* The BOOT+RESET dance in software (#61): reboot into ROM download mode so a
+     * flash needs no buttons. usb_flash.cpp does the reboot. */
+    g_hal.usb_flash_mode = hal_usb_flash_mode;
 
     /* fs.* is the card and nothing else. The root is the mount point itself,
      * because catnip_api.c reaches the card through plain stdio - fopen,
