@@ -5,9 +5,9 @@ An app ships `icon.png`; that is what the manifest names and what gen_apps.py
 embeds. This script can rebuild those PNGs. It does not write an `icon.svg`
 into the app folder — the device never reads one.
 
-Palette is the File Browser's: body in a light ink, one accent in the earthy
-yellow, so the launcher grid is a set. Matrix Rain keeps green, because that
-colour is the app.
+One stroke, one slate. The launcher ground is already dark, and the focus
+ring is `#00B0FF`, so the ink stays off both. Matrix Rain keeps a dim green,
+because that colour is the app. Judged at 64 px, which is the grid.
 """
 import math
 import os
@@ -18,9 +18,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 APPS = os.path.join(os.path.dirname(HERE), "apps")
 
 SIZE = 128
-BODY = "#DCE3EC"
-ACCENT = "#E5B845"
-GREEN = ("#C8FFCE", "#5BF06A", "#34C63F", "#1E9128", "#135C18", "#0C3E10")
+INK = "#B0BFD0"
+GREEN = "#5AAA7C"
+SW = 8.0
 
 
 def _svg(parts):
@@ -30,208 +30,195 @@ def _svg(parts):
     )
 
 
-def _rrect_d(x, y, w, h, r):
-    r = min(r, w / 2.0, h / 2.0)
+def _line(x1, y1, x2, y2, stroke, w):
     return (
-        "M %.2f %.2f H %.2f A %.2f %.2f 0 0 1 %.2f %.2f "
-        "V %.2f A %.2f %.2f 0 0 1 %.2f %.2f "
-        "H %.2f A %.2f %.2f 0 0 1 %.2f %.2f "
-        "V %.2f A %.2f %.2f 0 0 1 %.2f %.2f Z"
-        % (
-            x + r, y, x + w - r, r, r, x + w, y + r,
-            y + h - r, r, r, x + w - r, y + h,
-            x + r, r, r, x, y + h - r,
-            y + r, r, r, x + r, y,
-        )
+        '  <line x1="%.2f" y1="%.2f" x2="%.2f" y2="%.2f" '
+        'stroke="%s" stroke-width="%.2f" stroke-linecap="round" fill="none"/>'
+        % (x1, y1, x2, y2, stroke, w)
     )
 
 
-def _path(d, fill, rule="nonzero"):
-    return '  <path fill="%s" fill-rule="%s" d="%s"/>' % (fill, rule, d)
-
-
-def _rect(x, y, w, h, fill, r=0):
-    if r:
-        return (
-            '  <rect x="%.2f" y="%.2f" width="%.2f" height="%.2f" '
-            'rx="%.2f" ry="%.2f" fill="%s"/>' % (x, y, w, h, r, r, fill)
-        )
+def _circle(cx, cy, r, stroke, w, fill="none"):
     return (
-        '  <rect x="%.2f" y="%.2f" width="%.2f" height="%.2f" fill="%s"/>'
-        % (x, y, w, h, fill)
+        '  <circle cx="%.2f" cy="%.2f" r="%.2f" fill="%s" stroke="%s" '
+        'stroke-width="%.2f"/>' % (cx, cy, r, fill, stroke, w)
     )
 
 
-def _circle(cx, cy, r, fill):
-    return '  <circle fill="%s" cx="%.2f" cy="%.2f" r="%.2f"/>' % (fill, cx, cy, r)
+def _rect(x, y, w, h, rx, stroke, sw, fill="none"):
+    return (
+        '  <rect x="%.2f" y="%.2f" width="%.2f" height="%.2f" rx="%.2f" ry="%.2f" '
+        'fill="%s" stroke="%s" stroke-width="%.2f"/>'
+        % (x, y, w, h, rx, rx, fill, stroke, sw)
+    )
 
 
-# ---- File Browser: an SD card, three gold contacts ------------------------
+def _path(d, stroke, w, fill="none"):
+    return (
+        '  <path d="%s" fill="%s" stroke="%s" stroke-width="%.2f" '
+        'stroke-linecap="round" stroke-linejoin="round"/>' % (d, fill, stroke, w)
+    )
+
+
+def _arc(cx, cy, r, a0, a1):
+    """Screen-clockwise arc. 0° is east, 90° is south."""
+    if a1 < a0:
+        a1 += 360.0
+
+    def pt(a):
+        rad = math.radians(a)
+        return cx + r * math.cos(rad), cy + r * math.sin(rad)
+
+    x0, y0 = pt(a0)
+    x1, y1 = pt(a1)
+    large = 1 if (a1 - a0) > 180 else 0
+    return "M %.2f %.2f A %.2f %.2f 0 %d 1 %.2f %.2f" % (
+        x0, y0, r, r, large, x1, y1
+    )
+
+
+def _segs(x, y, w, h, color, sw, which):
+    m = sw * 0.55
+    x0, x1 = x + m, x + w - m
+    y0, y1 = y + m, y + h - m
+    ym = (y0 + y1) / 2.0
+    spines = {
+        "a": (x0, y0, x1, y0),
+        "d": (x0, y1, x1, y1),
+        "g": (x0, ym, x1, ym),
+        "f": (x0, y0, x0, ym),
+        "b": (x1, y0, x1, ym),
+        "e": (x0, ym, x0, y1),
+        "c": (x1, ym, x1, y1),
+    }
+    return [_line(*spines[name], color, sw) for name in which]
+
+
+# ---- File Browser: an SD card, three contacts -----------------------------
 # The card is the thing the app walks. A folder would steal the 14 px glyph.
 
 def filebrowser_svg():
-    return _svg([
-        _path(
-            "M32 10 H74 L104 40 V108 A12 12 0 0 1 92 120 H32 A12 12 0 0 1 20 108 "
-            "V22 A12 12 0 0 1 32 10 Z",
-            BODY,
-        ),
-        _rect(34, 22, 12, 26, ACCENT, 4),
-        _rect(52, 22, 12, 26, ACCENT, 4),
-        _rect(70, 22, 12, 26, ACCENT, 4),
-    ])
+    d = (
+        "M 42 26 H 72 L 102 56 V 100 "
+        "A 12 12 0 0 1 90 112 H 42 "
+        "A 12 12 0 0 1 30 100 V 38 "
+        "A 12 12 0 0 1 42 26 Z"
+    )
+    parts = [_path(d, INK, SW)]
+    for x in (46, 58, 70):
+        parts.append(_line(x, 40, x, 56, INK, SW * 0.7))
+    return _svg(parts)
 
 
-# ---- Clock: a seven-segment module showing 12:00 --------------------------
-# Digit-shaped marks are the object, not a label. The housing is a hole so the
-# launcher ground is the LCD.
-
-_SEGS = {
-    "0": "abcdef",
-    "1": "bc",
-    "2": "abged",
-    "3": "abgcd",
-    "4": "fgbc",
-    "5": "afgcd",
-    "6": "afgecd",
-    "7": "abc",
-    "8": "abcdefg",
-    "9": "abfgcd",
-}
-
-
-def _seven_seg(x, y, w, h, t, which):
-    """Filled bars for one digit. `which` is the characters of 7-seg `a`–`g`."""
-    on = set(which)
-    parts = []
-    inner_w = w - 2 * t
-    half = (h - t) / 2.0
-    bars = {
-        "a": (x + t, y, inner_w, t),
-        "d": (x + t, y + h - t, inner_w, t),
-        "g": (x + t, y + half, inner_w, t),
-        "f": (x, y + t * 0.6, t, half - t * 0.4),
-        "b": (x + w - t, y + t * 0.6, t, half - t * 0.4),
-        "e": (x, y + half + t * 0.4, t, half - t * 0.4),
-        "c": (x + w - t, y + half + t * 0.4, t, half - t * 0.4),
-    }
-    for name, (sx, sy, sw, sh) in bars.items():
-        if name in on:
-            parts.append(_rect(sx, sy, sw, sh, ACCENT, min(t, sw, sh) * 0.4))
-    return parts
-
+# ---- Clock: 12:00, centred in the capsule ---------------------------------
+# A 7-seg "1" is only its right stem. A full cell leaves a hole, and the
+# readout drifts into the right curve.
 
 def clock_svg():
-    outer = _rrect_d(10, 36, 108, 56, 16)
-    inner = _rrect_d(22, 48, 84, 32, 6)
-    parts = [_path(outer + " " + inner, BODY, "evenodd")]
-    dw, dh, t = 14.0, 26.0, 3.6
-    y = 51.0
-    parts.extend(_seven_seg(26.0, y, dw, dh, t, _SEGS["1"]))
-    parts.extend(_seven_seg(44.0, y, dw, dh, t, _SEGS["2"]))
-    parts.append(_circle(64.0, 58.0, 2.2, ACCENT))
-    parts.append(_circle(64.0, 70.0, 2.2, ACCENT))
-    parts.extend(_seven_seg(70.0, y, dw, dh, t, _SEGS["0"]))
-    parts.extend(_seven_seg(88.0, y, dw, dh, t, _SEGS["0"]))
+    hx, hy, hw, hh = 14.0, 40.0, 100.0, 48.0
+    cx, cy = hx + hw / 2.0, hy + hh / 2.0
+    parts = [_rect(hx, hy, hw, hh, 16, INK, SW)]
+    swd = max(4.4, SW * 0.58)
+    dh, dw = 26.0, 13.0
+    w1, gap, cgap, colon = 4.2, 3.4, 5.0, 4.4
+    items = (
+        ("1", w1), ("gap", gap),
+        ("2", dw), ("gap", cgap),
+        (":", colon), ("gap", cgap),
+        ("0", dw), ("gap", gap),
+        ("0", dw),
+    )
+    x = cx - sum(w for _, w in items) / 2.0
+    y = cy - dh / 2.0
+    pad = swd * 0.55
+    for kind, w in items:
+        if kind == "1":
+            parts.append(_line(x + w / 2.0, y + pad, x + w / 2.0, y + dh - pad, INK, swd))
+        elif kind == ":":
+            parts.append(_circle(x + w / 2.0, cy - 5.2, 2.6, INK, 0, INK))
+            parts.append(_circle(x + w / 2.0, cy + 5.2, 2.6, INK, 0, INK))
+        elif kind in ("2", "0"):
+            which = "abged" if kind == "2" else "abcdef"
+            parts += _segs(x, y, w, dh, INK, swd, which)
+        x += w
     return _svg(parts)
 
 
 # ---- Scanner: a source, waves either side ---------------------------------
-# Symmetric, so it is listening rather than a one-sided Wi-Fi fan.
-
-S_CX, S_CY = 64.0, 64.0
-S_DOT = 12.0
-S_STROKE = 12.0
-S_ARCS = ((32.0, 50.0), (52.0, 42.0))
-
-
-def _arc_path(r, spread, side):
-    a0 = math.radians(side - spread)
-    a1 = math.radians(side + spread)
-    x0, y0 = S_CX + r * math.cos(a0), S_CY + r * math.sin(a0)
-    x1, y1 = S_CX + r * math.cos(a1), S_CY + r * math.sin(a1)
-    return (
-        '  <path fill="none" stroke="%s" stroke-width="%.1f" '
-        'stroke-linecap="round" d="M %.3f %.3f A %.3f %.3f 0 0 1 %.3f %.3f"/>'
-        % (BODY, S_STROKE, x0, y0, r, r, x1, y1)
-    )
-
+# Symmetric, so it is listening rather than a one-sided fan.
 
 def scanner_svg():
     parts = []
-    for r, spread in S_ARCS:
-        parts.append(_arc_path(r, spread, 0.0))
-        parts.append(_arc_path(r, spread, 180.0))
-    parts.append(_circle(S_CX, S_CY, S_DOT, ACCENT))
+    for r in (30, 46):
+        parts.append(_path(_arc(64, 64, r, -38, 38), INK, SW * 0.92))
+        parts.append(_path(_arc(64, 64, r, 142, 218), INK, SW * 0.92))
+    parts.append(_circle(64, 64, 6.5, INK, 0, INK))
     return _svg(parts)
 
 
-# ---- Matrix Rain: green rain inside a gadget screen -----------------------
-# The housing matches the set; the green is the app.
-
-M_NCOLS, M_NROWS = 6, 7
-M_DROPS = ((5, 4), (8, 6), (3, 5), (7, 4), (2, 6), (6, 3))
-M_HOLE = (28.0, 28.0, 72.0, 72.0)
-
+# ---- Matrix Rain: dim green columns inside a screen -----------------------
+# The housing matches the set. The green is the app, pulled down from neon
+# so it sits with the slate.
 
 def matrixrain_svg():
-    hx, hy, hw, hh = M_HOLE
-    outer = _rrect_d(14, 14, 100, 100, 18)
-    inner = _rrect_d(hx, hy, hw, hh, 8)
-    parts = [_path(outer + " " + inner, BODY, "evenodd")]
-    px, py = hw / M_NCOLS, hh / M_NROWS
-    cell = min(px, py) * 0.62
-    for col, (head, trail) in enumerate(M_DROPS):
-        for dist in range(trail):
-            row = head - dist
-            if 0 <= row < M_NROWS:
-                cx = hx + (col + 0.5) * px
-                cy = hy + (row + 0.5) * py
-                colour = GREEN[dist if dist < len(GREEN) else -1]
-                parts.append(
-                    _rect(cx - cell / 2, cy - cell / 2, cell, cell, colour, cell * 0.28)
-                )
+    parts = [_rect(26, 26, 76, 76, 18, INK, SW)]
+    cols = (3, 5, 2, 6, 4, 3)
+    for i, n in enumerate(cols):
+        x = 38 + i * 10.4
+        for k in range(n):
+            y0 = 36 + k * 9.2
+            parts.append(_line(x, y0, x, y0 + 6.0, GREEN, 5.0))
     return _svg(parts)
 
 
-# ---- Beacon: a lighthouse, one beam ---------------------------------------
-# Speaks in one direction. Not a Wi-Fi fan, not the Scanner's two-sided puck.
+# ---- Beacon: a lighthouse, one beam to the right -------------------------
+# Straight rays, clear of the building. Arcs would read as the Scanner.
+# A circle on a mast reads as a person.
 
 def beacon_svg():
+    lantern = "M 48 64 H 80 V 42 A 16 14 0 0 0 48 42 Z"
     return _svg([
-        _path("M 46 56 L 82 56 L 76 112 L 52 112 Z", BODY),
-        _rect(40, 108, 48, 12, BODY, 3),
-        _rect(48, 28, 32, 10, BODY, 3),
-        _rect(52, 38, 24, 20, BODY, 3),
-        _rect(56, 42, 16, 12, ACCENT, 2),
-        _path("M 76 48 L 118 32 L 118 64 Z", ACCENT),
+        _path("M 32 110 L 50 64", INK, SW),
+        _path("M 78 64 L 96 110", INK, SW),
+        _line(26, 110, 102, 110, INK, SW),
+        _path(lantern, INK, SW),
+        _line(88, 46, 114, 34, INK, SW),
+        _line(88, 54, 114, 66, INK, SW),
     ])
 
 
-# ---- BLE Spam: three thick overlapping cards ------------------------------
-# A room full of advertisers. Chunky so it still reads at 64 px.
+# ---- BLE Spam: three advertisers, each a circle and one outward arc ------
+# A stack of cards knots in one colour. Three separate sources still say a
+# room full of them, and stay off the Scanner's single symmetric mark.
 
 def blespam_svg():
-    cards = ((16, 16), (36, 30), (56, 44))
-    cw, ch, r = 56.0, 72.0, 10.0
     parts = []
-    for x, y in cards:
-        parts.append(_rect(x, y, cw, ch, BODY, r))
-        parts.append(_rect(x + cw - 14, y + 10, 10, 20, ACCENT, 3))
+    reach, spread = 30.0, 34.0
+    for i in range(3):
+        aim = -90.0 + i * 120.0
+        rad = math.radians(aim)
+        cx = 64.0 + reach * math.cos(rad)
+        cy = 64.0 + reach * math.sin(rad)
+        parts.append(_circle(cx, cy, 12, INK, SW))
+        parts.append(_path(_arc(cx, cy, 24, aim - spread, aim + spread), INK, SW))
     return _svg(parts)
 
 
-# ---- Battery: a cell three-quarters full ----------------------------------
+# ---- Battery: a tall cell, three bars, a short terminal -------------------
+# The cap is a stub on the right. A round loop reads as a handle.
 
 def battery_svg():
-    outer = _rrect_d(14, 42, 86, 44, 12)
-    inner = _rrect_d(24, 52, 66, 24, 5)
-    fill_w = 66 * 0.75
-    return _svg([
-        _path(outer + " " + inner, BODY, "evenodd"),
-        _rect(100, 54, 14, 20, BODY, 4),
-        _rect(28, 56, fill_w - 8, 16, ACCENT, 4),
-    ])
+    parts = [
+        _rect(14, 32, 82, 64, 16, INK, SW),
+        _path(
+            "M 96 52 L 108 52 A 5 5 0 0 1 113 57 "
+            "L 113 71 A 5 5 0 0 1 108 76 L 96 76",
+            INK, SW,
+        ),
+    ]
+    for x in (32, 48, 64):
+        parts.append(_line(x, 48, x, 80, INK, SW))
+    return _svg(parts)
 
 
 # ---- USB HID: a USB-C plug face -------------------------------------------
@@ -239,28 +226,26 @@ def battery_svg():
 # tongue, not a battery cell.
 
 def hid_svg():
-    outer = _rrect_d(16, 46, 96, 36, 18)
-    inner = _rrect_d(30, 54, 68, 20, 10)
     return _svg([
-        _rect(54, 28, 20, 22, ACCENT, 5),
-        _path(outer + " " + inner, BODY, "evenodd"),
+        _rect(54, 24, 20, 18, 4, INK, SW * 0.68),
+        _rect(16, 46, 96, 36, 18, INK, SW),
+        _rect(36, 56, 56, 16, 8, INK, SW * 0.7),
     ])
 
 
-# ---- Flash Mode: a download arrow dropping into a tray --------------------
-# The app reboots the device into ROM download mode to be flashed. The glyph is
-# the universal "load into the device" mark - an arrow coming down into an open
-# tray - not a lightning bolt, which on a battery-powered thing would read as
-# power. The tray is the body; the arrow is the accent, the thing being sent.
+# ---- Flash Mode: the ROM package ------------------------------------------
+# The app reboots into the download ROM. An arrow into a tray reads as a
+# generic download, and a bolt would read as power. Pins and a die are the
+# part that waits for esptool.
 
 def flashmode_svg():
-    return _svg([
-        _rect(22, 100, 84, 14, BODY, 5),
-        _rect(22, 84, 12, 22, BODY, 4),
-        _rect(94, 84, 12, 22, BODY, 4),
-        _rect(55, 22, 18, 40, ACCENT, 5),
-        _path("M 42 56 L 86 56 L 64 94 Z", ACCENT),
-    ])
+    parts = [_rect(36, 32, 56, 64, 8, INK, SW)]
+    for t in (0.26, 0.50, 0.74):
+        y = 32 + 64 * t
+        parts.append(_line(18, y, 36, y, INK, SW))
+        parts.append(_line(92, y, 110, y, INK, SW))
+    parts.append(_circle(64, 64, 9, INK, SW))
+    return _svg(parts)
 
 
 ICONS = {
