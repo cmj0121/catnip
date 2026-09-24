@@ -4,6 +4,12 @@
 
 **語言：** [English](README.md) · 繁體中文
 
+> [!NOTE]
+> **重刷不用按任何按鈕。** 在裝置上打開 **Flash Mode** app，按兩次 **A**：螢幕變黑，MeowKit
+> 進入 ROM download mode 等待。這時 `make mode` 應顯示 `download`，`make install` 會 flash
+> 並重新啟動。想取消就拔掉再插回 USB-C——等待期間電源鍵沒有作用。
+> 手動的 BOOT + 電源鍵方式仍然可用，見 [docs/INSTALL.md](docs/INSTALL.md)。
+
 Catnip 把 [MeowKit](https://www.kickstarter.com/projects/whitecliff/meowkit-versatile-device-for-makers)
 ——一台給 maker 的 ESP32-S3 掌上機——變成一個 **Lua app 平台**。裝置上的 C++ runtime 直接
 從 SD card 載入 Lua app，每個 app 用 Lua 同時寫 **UI** 與 **邏輯**。任何人把一個資料夾丟進

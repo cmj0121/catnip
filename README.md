@@ -4,6 +4,13 @@
 
 **Languages:** English · [繁體中文](README.zh-TW.md)
 
+> [!NOTE]
+> **Re-flashing needs no buttons.** Open the **Flash Mode** app on the device and
+> press **A** twice: the screen goes dark and the MeowKit waits in ROM download mode.
+> Then `make mode` should say `download`, and `make install` flashes and restarts it.
+> To back out, unplug and replug USB-C — the power button does nothing while it waits.
+> The manual BOOT + power-button route still works; see [docs/INSTALL.md](docs/INSTALL.md).
+
 Catnip turns the [MeowKit](https://www.kickstarter.com/projects/whitecliff/meowkit-versatile-device-for-makers)
 — an ESP32-S3 handheld for makers — into a **Lua app platform**. A C++ runtime on the
 device loads Lua apps straight from the SD card, and each app writes both its **UI** and its
