@@ -11,8 +11,9 @@
  * the same USB cable, so the next esptool run connects with no buttons pressed.
  * It is the one call the Flash Mode app makes; the app shows its warning and
  * takes its confirmation first, because this does not return - the chip comes
- * back up in the bootloader, and only a flash or a plain RESET brings the
- * firmware back.
+ * back up in the bootloader, and only a flash or a USB replug brings the
+ * firmware back (the power button is answered by the firmware, so it does
+ * nothing there).
  *
  * On any build that is not the composite - the poc/probe sketches, and the host
  * tests - it is a stub that does nothing, so this file compiles everywhere and

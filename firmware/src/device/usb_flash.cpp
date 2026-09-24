@@ -8,12 +8,22 @@
 
 #include <Arduino.h>
 
-/* usb_persist_restart() and RESTART_BOOTLOADER live here. It is the same call
- * the Arduino core's own USBCDC makes when the host does the DTR/RTS reset
- * sequence or the 1200 bps touch (cores/esp32/USBCDC.cpp); doing it explicitly
- * from an app does not depend on esptool getting those line toggles through the
- * composite, which is the whole reason this exists as a deliberate action. */
-#include "esp32-hal-tinyusb.h"
+/* Not usb_persist_restart(RESTART_BOOTLOADER), the Arduino core's own route
+ * (the one its USBCDC takes on the DTR/RTS reset sequence or the 1200 bps
+ * touch). Tried on hardware (#95): the device went dark and left the bus for
+ * good - no USB-Serial/JTAG unit ever enumerated, not even during the core's
+ * switch to it, while every cold boot shows that unit within half a second. The
+ * core ends in esp_restart(), which - the working guess, not yet confirmed -
+ * does not reach the USB blocks, so the ROM wakes into whatever state TinyUSB
+ * left behind.
+ *
+ * So do the reset ourselves, one level deeper: a core reset (SW_SYS_RST)
+ * resets the whole digital side - USB-Serial/JTAG, USB-OTG, IO_MUX - the way a
+ * cold boot does, while the RTC domain survives with the three things this
+ * needs: the force-download flag, the PHY selection, and the PWR_HOLD pad
+ * hold. */
+#include "soc/rtc_cntl_reg.h"
+#include "soc/soc.h"
 
 #include "display.h"
 #include "led.h"
@@ -38,9 +48,20 @@ void catnip_usb_flash_mode(void)
      * software restart does (power.cpp). */
     catnip_power_hold_freeze();
 
-    /* Persists the USB device across the restart and comes back up in the ROM
-     * serial bootloader, ready for esptool. Does not return. */
-    usb_persist_restart(RESTART_BOOTLOADER);
+    /* The PHY choice lives in the RTC domain, so the reset leaves it alone:
+     * hand the pads back to the USB-Serial/JTAG unit, which is what the ROM
+     * download talks over (the face the BOOT dance brings up). And let the
+     * reset reach the USB and IO_MUX blocks rather than sparing them. */
+    CLEAR_PERI_REG_MASK(RTC_CNTL_USB_CONF_REG,
+                        RTC_CNTL_SW_HW_USB_PHY_SEL | RTC_CNTL_SW_USB_PHY_SEL |
+                            RTC_CNTL_USB_PAD_ENABLE | RTC_CNTL_USB_RESET_DISABLE |
+                            RTC_CNTL_IO_MUX_RESET_DISABLE);
+
+    /* Boot into the ROM serial bootloader, ready for esptool. Does not return. */
+    REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
+    SET_PERI_REG_MASK(RTC_CNTL_OPTIONS0_REG, RTC_CNTL_SW_SYS_RST);
+    for (;;) {
+    }
 }
 
 #else /* not a TinyUSB build: no bootloader dance to do. */
