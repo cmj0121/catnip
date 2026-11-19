@@ -70,6 +70,49 @@ void catnip_wifi_radio_poll(void);
  * if the controller rejects the frame. */
 bool catnip_wifi_tx(const uint8_t *frame, size_t len);
 
+/* --- softAP + captive hook (wifi_softap.cpp) --------------------------------
+ *
+ * A second way to borrow the same counted radio: instead of promiscuous
+ * capture it raises an open access point and a captive portal's front door - a
+ * DNS that points every name at the device and an HTTP server that hands each
+ * request up to a callback. It shares catnip_wifi_radio_acquire/release, so it
+ * parks the station link and restores it through exactly the same single owner
+ * and single rejoiner the monitor uses, and NEVER calls WiFi.begin() itself.
+ *
+ * AP and promiscuous are the same radio in two incompatible modes, so the two
+ * are mutually exclusive: begin fails if the radio is already borrowed (e.g.
+ * monitor is up), and a caller runs only one at a time.
+ *
+ * This is the HAL mechanism only - an open AP, the captive redirect, and
+ * request->cb. No portal HTML, no credential capture, no persistence; those are
+ * a consumer's job (#106). */
+
+/* A received HTTP request, delivered on the app loop from inside
+ * catnip_wifi_softap_poll() (never from a Wi-Fi task). `method` and `path` are
+ * always non-NULL and valid only for the call; `body` is the request body or
+ * NULL when there is none. */
+typedef void (*catnip_wifi_http_cb)(void *ud, const char *method, const char *path,
+                                    const char *body);
+
+/* Borrow the radio and raise an open softAP named `ssid` on `channel`, with a
+ * captive DNS answering every name with the AP's address and an HTTP server
+ * handing requests to `cb`. Acquires the shared radio first; false (nothing
+ * counted) if the radio is already in use, the AP is already up, or bring-up
+ * fails. */
+bool catnip_wifi_softap_begin(const char *ssid, uint8_t channel, catnip_wifi_http_cb cb,
+                              void *ud); /* needs acquire */
+
+/* Tear the HTTP server, the DNS and the AP down, then release the radio. The
+ * last release restores WIFI_STA and lets the station's rejoiner rejoin - this
+ * never rejoins itself. No-op when the AP is not up. */
+void catnip_wifi_softap_end(void);
+
+/* Service the captive DNS and HTTP server, and so invoke the request cb. Call
+ * every app loop while the AP is up; a no-op otherwise. Like
+ * catnip_wifi_radio_poll(), this is the app-loop half - nothing here runs from
+ * a Wi-Fi task. */
+void catnip_wifi_softap_poll(void);
+
 #ifdef __cplusplus
 }
 #endif
