@@ -144,6 +144,28 @@ typedef struct {
     void (*ble_adv_set_type)(void *ud, int connectable, const uint8_t *scan_rsp,
                              int scan_rsp_len);
     void (*ble_adv_set_addr)(void *ud, const uint8_t *addr);
+    /* service.wifimon.* / service.wifiap.* - the counted monitor radio (#99).
+     *
+     * The same borrow the monitor and the softAP share in wifi_radio.h, counted
+     * exactly once, surfaced to Lua as two snapshot services. wifi_mon_begin
+     * takes the radio and starts promiscuous capture on `channel`; the device
+     * installs a counting RX callback, and wifi_mon_frames answers how many
+     * frames that callback has seen since begin - or -1 when monitor is down,
+     * which is how read() derives `up` without a second hook. wifi_tx injects
+     * one raw frame. wifi_ap_begin raises an open softAP; wifi_ap_clients is the
+     * associated station count, or -1 when the AP is down. Rich per-frame access
+     * to Lua is deliberately deferred to #100 - this is the counters only.
+     * NULL throughout is a build with no monitor radio, where read() reports
+     * "unavailable" and start/tx answer false. */
+    int (*wifi_mon_begin)(void *ud, int channel); /* 1 ok, 0 could not start */
+    void (*wifi_mon_end)(void *ud);
+    void (*wifi_mon_channel)(void *ud, int channel);
+    int (*wifi_mon_frames)(void *ud); /* frames counted since begin, -1 if down */
+    int (*wifi_tx)(void *ud, const uint8_t *frame, int len);       /* 1 sent, 0 not */
+    int (*wifi_ap_begin)(void *ud, const char *ssid, int channel); /* 1 ok, 0 not */
+    void (*wifi_ap_end)(void *ud);
+    int (*wifi_ap_clients)(void *ud); /* associated count, -1 if down */
+
     /* HTTP GET: write body into buf (cap incl. NUL); return length or -1. */
     int (*http_get)(void *ud, const char *url, char *buf, size_t cap);
 

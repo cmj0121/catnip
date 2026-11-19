@@ -56,6 +56,7 @@
 #include "device/ui_input_core.h"
 #include "device/net_time.h"
 #include "device/wifi.h"
+#include "device/wifi_radio.h"
 #include "generated/anim_f01_rgb565.h"
 #include "generated/anim_f02_rgb565.h"
 #include "generated/splash_rgb565.h"
@@ -1069,6 +1070,15 @@ void loop()
      * an NTP request happened to be in flight too. */
     (void)catnip_wifi_poll();
     catnip_ble_poll();
+
+    /* The monitor radio's app-loop half (#99). Both are a no-op unless a Lua app
+     * has raised one: catnip_wifi_radio_poll() drains the promiscuous RX ring to
+     * the counting cb, and catnip_wifi_softap_poll() services the captive DNS and
+     * HTTP server. Without these the ring never empties and the AP never answers.
+     * The borrow the two share is the station link, which catnip_wifi_poll()
+     * above owns the rejoin of - this only pumps, it never brings Wi-Fi up. */
+    catnip_wifi_radio_poll();
+    catnip_wifi_softap_poll();
 
     /* Nothing is running, so nothing is a mouse (#59) or a beacon (#60).
      *

@@ -65,6 +65,9 @@
 #include "usb_flash.h"
 #include "usb_hid.h"
 #include "usb_msc.h"
+#include "wifi_radio.h"
+
+#include <WiFi.h>
 
 namespace {
 
@@ -280,6 +283,96 @@ void hal_imu(void *ud, float out[6])
     }
 }
 
+/* service.wifimon.* / service.wifiap.* - the counted monitor radio (#99). A
+ * wiring diagram like the rest of this file: the refcount, the promiscuous ring
+ * and the softAP live in wifi_radio.cpp / wifi_softap.cpp. This proves the whole
+ * pipe - promiscuous -> ring -> poll -> cb -> counter -> Lua - by installing the
+ * one thing #99's Lua surface needs that the driver cannot invent: a frame
+ * counter. The cb only counts; rich per-frame access is #100.
+ *
+ * `up` is tracked here, not read back from the radio: catnip_wifi_radio_is_up()
+ * is true for the softAP's borrow too, and these two services are reported
+ * apart, so each keeps the one bit that says whether IT raised the thing it
+ * reports -1/down for. */
+int g_wifi_frames;
+bool g_wifi_mon_up;
+bool g_wifi_ap_up;
+
+void hal_wifi_count_cb(void *ud, const uint8_t *buf, size_t len, uint8_t channel,
+                       int8_t rssi)
+{
+    (void)buf;
+    (void)len;
+    (void)channel;
+    (void)rssi;
+    if (ud) (*(int *)ud)++;
+}
+
+int hal_wifi_mon_begin(void *ud, int channel)
+{
+    (void)ud;
+    if (!catnip_wifi_radio_acquire()) return 0;
+    g_wifi_frames = 0;
+    if (!catnip_wifi_monitor_begin(hal_wifi_count_cb, &g_wifi_frames, (uint8_t)channel)) {
+        catnip_wifi_radio_release();
+        return 0;
+    }
+    g_wifi_mon_up = true;
+    return 1;
+}
+
+void hal_wifi_mon_end(void *ud)
+{
+    (void)ud;
+    if (!g_wifi_mon_up) return;
+    catnip_wifi_monitor_end();
+    catnip_wifi_radio_release();
+    g_wifi_mon_up = false;
+}
+
+void hal_wifi_mon_channel(void *ud, int channel)
+{
+    (void)ud;
+    catnip_wifi_monitor_set_channel((uint8_t)channel);
+}
+
+int hal_wifi_mon_frames(void *ud)
+{
+    (void)ud;
+    return g_wifi_mon_up ? g_wifi_frames : -1;
+}
+
+int hal_wifi_tx(void *ud, const uint8_t *frame, int len)
+{
+    (void)ud;
+    return catnip_wifi_tx(frame, len > 0 ? (size_t)len : 0) ? 1 : 0;
+}
+
+int hal_wifi_ap_begin(void *ud, const char *ssid, int channel)
+{
+    (void)ud;
+    /* No request cb: #99's Lua surface is snapshot-only (clients count), so the
+     * softAP's HTTP hook is left NULL - which wifi_softap.cpp guards. The portal
+     * is #106. */
+    if (!catnip_wifi_softap_begin(ssid, (uint8_t)channel, nullptr, nullptr)) return 0;
+    g_wifi_ap_up = true;
+    return 1;
+}
+
+void hal_wifi_ap_end(void *ud)
+{
+    (void)ud;
+    if (!g_wifi_ap_up) return;
+    catnip_wifi_softap_end();
+    g_wifi_ap_up = false;
+}
+
+int hal_wifi_ap_clients(void *ud)
+{
+    (void)ud;
+    return g_wifi_ap_up ? (int)WiFi.softAPgetStationNum() : -1;
+}
+
 /* service.usb.* - the composite USB keyboard (#61). A wiring diagram like the
  * rest of this file: the arm gate and the reports live in usb_hid.cpp. */
 void hal_usb_hid_enable(void *ud, int on)
@@ -372,6 +465,18 @@ const catnip_hal *catnip_meowkit_hal_begin(void)
     g_hal.ble_adv_state = hal_ble_adv_state;
     g_hal.ble_adv_set_type = hal_ble_adv_set_type;
     g_hal.ble_adv_set_addr = hal_ble_adv_set_addr;
+    /* The counted monitor radio (#99): promiscuous capture with a frame counter,
+     * raw TX, and an open softAP. All borrow the one counted wifi_radio owner,
+     * which parks the station link; the station's own rejoiner - never this -
+     * brings Wi-Fi back. */
+    g_hal.wifi_mon_begin = hal_wifi_mon_begin;
+    g_hal.wifi_mon_end = hal_wifi_mon_end;
+    g_hal.wifi_mon_channel = hal_wifi_mon_channel;
+    g_hal.wifi_mon_frames = hal_wifi_mon_frames;
+    g_hal.wifi_tx = hal_wifi_tx;
+    g_hal.wifi_ap_begin = hal_wifi_ap_begin;
+    g_hal.wifi_ap_end = hal_wifi_ap_end;
+    g_hal.wifi_ap_clients = hal_wifi_ap_clients;
     /* The composite USB keyboard (#61). Present but inert until the HID app
      * arms it; usb_hid.cpp keeps the gate. */
     g_hal.usb_hid_enable = hal_usb_hid_enable;
