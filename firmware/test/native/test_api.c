@@ -21,6 +21,10 @@ typedef struct {
     /* device.mouse.* (#59) */
     int mouse_began, mouse_ended, moves;
     int mdx, mdy, mbuttons, mwheel;
+    /* service.wifimon.* / service.wifiap.* (#99) */
+    int mon_began, mon_ended, mon_up, mon_channel, tx_len;
+    int ap_began, ap_ended, ap_up, ap_channel;
+    char ap_ssid[33];
 } mock;
 
 /* What the mock mouse reports being: 0 off, 1 advertising, 2 connected. Held
@@ -171,6 +175,58 @@ static const char *m_wifi_ssid(void *ud)
     (void)ud;
     return "catnet";
 }
+
+/* The counted monitor radio (#99). The stub records the write-side calls and
+ * answers the two counters the Lua snapshot reads: frames (-1 when the monitor
+ * is down, a fixed non-zero when up, proving the count flows through to Lua)
+ * and the AP's client count (-1 when the AP is down). */
+static int m_wifi_mon_begin(void *ud, int channel)
+{
+    mock *m = ud;
+    m->mon_began++;
+    m->mon_up = 1;
+    m->mon_channel = channel;
+    return 1;
+}
+static void m_wifi_mon_end(void *ud)
+{
+    mock *m = ud;
+    m->mon_ended++;
+    m->mon_up = 0;
+}
+static void m_wifi_mon_channel(void *ud, int channel)
+{
+    ((mock *)ud)->mon_channel = channel;
+}
+static int m_wifi_mon_frames(void *ud)
+{
+    return ((mock *)ud)->mon_up ? 7 : -1;
+}
+static int m_wifi_tx(void *ud, const uint8_t *frame, int len)
+{
+    (void)frame;
+    ((mock *)ud)->tx_len = len;
+    return 1;
+}
+static int m_wifi_ap_begin(void *ud, const char *ssid, int channel)
+{
+    mock *m = ud;
+    m->ap_began++;
+    m->ap_up = 1;
+    m->ap_channel = channel;
+    snprintf(m->ap_ssid, sizeof(m->ap_ssid), "%s", ssid);
+    return 1;
+}
+static void m_wifi_ap_end(void *ud)
+{
+    mock *m = ud;
+    m->ap_ended++;
+    m->ap_up = 0;
+}
+static int m_wifi_ap_clients(void *ud)
+{
+    return ((mock *)ud)->ap_up ? 3 : -1;
+}
 static int m_http_get(void *ud, const char *url, char *buf, size_t cap)
 {
     (void)ud;
@@ -218,6 +274,29 @@ static const char *SCRIPT =
     "  assert(d[2].name == '', 'and empty when it does not, not invented')\n"
     "  assert(d[2].rssi == -70, 'ble rssi')\n"
     "  assert(service.ble.rescan() == true, 'ble rescan reaches the radio')\n"
+    /* The counted monitor radio (#99), snapshot-only like service.ble: start
+     * reaches the HAL, read() hands back the { up, channel, frames } table, the
+     * channel is tracked across start/channel, tx carries a raw frame, and stop
+     * brings it down - which read() reports as up=false, derived from the -1
+     * frame count. */
+    "  assert(service.wifimon.start(6) == true, 'wifimon start')\n"
+    "  local wm = service.wifimon.read()\n"
+    "  assert(wm.up == true and wm.channel == 6 and wm.frames == 7, 'wifimon snapshot')\n"
+    "  service.wifimon.channel(11)\n"
+    "  assert(service.wifimon.read().channel == 11, 'wifimon channel tracked')\n"
+    /* A raw frame with an embedded NUL and bytes after it: tx takes a Lua string
+     * by length, not a C string, so an 802.11 frame full of NULs reaches the HAL
+     * whole. This locks that - the test fails if tx ever truncates at the NUL. */
+    "  local raw = 'ra\\0me'\n"
+    "  assert(#raw == 5, 'raw frame carries an embedded NUL, length 5')\n"
+    "  assert(service.wifimon.tx(raw) == true, 'wifimon tx')\n"
+    "  service.wifimon.stop()\n"
+    "  assert(service.wifimon.read().up == false, 'wifimon down after stop')\n"
+    "  assert(service.wifiap.start('catnip-ap', 1) == true, 'wifiap start')\n"
+    "  local wa = service.wifiap.read()\n"
+    "  assert(wa.up == true and wa.clients == 3, 'wifiap snapshot')\n"
+    "  service.wifiap.stop()\n"
+    "  assert(service.wifiap.read().up == false, 'wifiap down after stop')\n"
     "  assert(service.wifi.ssid() == 'catnet', 'wifi ssid')\n"
     "  assert(service.http.get('http://x/ping') == 'pong', 'http ok')\n"
     "  assert(service.http.get('http://x/none') == nil, 'http fail is nil')\n"
@@ -265,6 +344,14 @@ int main(void)
     hal.ble_mouse_end = m_mouse_end;
     hal.ble_mouse_state = m_mouse_state;
     hal.ble_mouse_move = m_mouse_move;
+    hal.wifi_mon_begin = m_wifi_mon_begin;
+    hal.wifi_mon_end = m_wifi_mon_end;
+    hal.wifi_mon_channel = m_wifi_mon_channel;
+    hal.wifi_mon_frames = m_wifi_mon_frames;
+    hal.wifi_tx = m_wifi_tx;
+    hal.wifi_ap_begin = m_wifi_ap_begin;
+    hal.wifi_ap_end = m_wifi_ap_end;
+    hal.wifi_ap_clients = m_wifi_ap_clients;
     hal.fs_base = base;
 
     catnip_rt *rt = catnip_rt_new_tracked();
@@ -294,6 +381,17 @@ int main(void)
               (lua_getglobal(L, "__t"), lua_tointeger(L, -1) == 1789035519L),
           "and the epoch of the last sync when there was one");
     lua_pop(L, 1);
+
+    /* The write-side of the monitor radio reached the HAL (#99): begin/stop
+     * each once, the channel followed start then the later channel() call, tx
+     * carried the frame's length, and the AP got its ssid. */
+    CHECK(mk.mon_began == 1 && mk.mon_ended == 1, "wifimon start/stop reached the HAL");
+    CHECK(mk.mon_channel == 11, "wifimon channel() reached the HAL");
+    CHECK(mk.tx_len == 5,
+          "wifimon tx carried the full length past the embedded NUL to the HAL");
+    CHECK(mk.ap_began == 1 && mk.ap_ended == 1 && mk.ap_channel == 1,
+          "wifiap start/stop reached the HAL");
+    CHECK(strcmp(mk.ap_ssid, "catnip-ap") == 0, "wifiap ssid reached the HAL");
 
     CHECK(mk.vibrate_ms == 150, "vibrate reached the HAL");
     CHECK(mk.r == 1 && mk.g == 2 && mk.b == 3, "led reached the HAL");
@@ -391,6 +489,25 @@ int main(void)
     lua_getglobal(L2, "NOMOUSE");
     CHECK(rc3 == 0 && lua_toboolean(L2, -1),
           "a device with no mouse hooks says so, and move/stop are safe no-ops");
+    lua_pop(L2, 1);
+
+    /* The same HAL has no monitor-radio hooks (#99). read() must say so with
+     * status="unavailable" rather than a zero an app would read as a quiet
+     * radio, start/tx answer false, and channel/stop are safe no-ops. */
+    int rc4 =
+        catnip_rt_dostring(rt2,
+                           "NOWIFI = (service.wifimon.read().status == 'unavailable')\n"
+                           "  and (service.wifiap.read().status == 'unavailable')\n"
+                           "  and (service.wifimon.start(1) == false)\n"
+                           "  and (service.wifimon.tx('x') == false)\n"
+                           "  and (service.wifiap.start('x', 1) == false)\n"
+                           "service.wifimon.channel(6)\n"
+                           "service.wifimon.stop()\n"
+                           "service.wifiap.stop()\n",
+                           "=nowifi");
+    lua_getglobal(L2, "NOWIFI");
+    CHECK(rc4 == 0 && lua_toboolean(L2, -1),
+          "a device with no monitor radio reports 'unavailable' and start/tx are false");
     lua_pop(L2, 1);
     catnip_rt_free(rt2);
 
