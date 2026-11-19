@@ -412,6 +412,115 @@ static int l_http_get(lua_State *L)
     return 1;
 }
 
+/* ---- service.wifimon.* / service.wifiap.* - the counted monitor radio (#99) ----
+ *
+ * Snapshot-only, the shape service.ble answers by: start/stop/channel/tx reach
+ * the HAL, and read() hands back a small table an app polls. The HAL counts
+ * frames but does not record which channel they arrived on, so the channel is
+ * tracked here - start()/channel() set it, read() reports it. `up` is derived
+ * from the count (-1 means the monitor is down), not a second hook. Rich
+ * per-frame access to Lua is deliberately deferred to #100. */
+static int g_wifimon_channel = 1;
+
+static int l_wifimon_start(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+    int ch = (int)luaL_checkinteger(L, 1);
+    int ok = (h && h->wifi_mon_begin) ? h->wifi_mon_begin(h->ud, ch) : 0;
+    if (ok) g_wifimon_channel = ch;
+    lua_pushboolean(L, ok);
+    return 1;
+}
+
+static int l_wifimon_channel(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+    int ch = (int)luaL_checkinteger(L, 1);
+    g_wifimon_channel = ch;
+    if (h && h->wifi_mon_channel) h->wifi_mon_channel(h->ud, ch);
+    return 0;
+}
+
+static int l_wifimon_stop(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+    if (h && h->wifi_mon_end) h->wifi_mon_end(h->ud);
+    return 0;
+}
+
+/* service.wifimon.read() -> { up, channel, frames }, or { status="unavailable" }
+ * on a build with no monitor radio - the same "there is nothing here to ask"
+ * answer service.* gives wherever a hook is NULL, so an app greys the surface
+ * rather than reads a zero as a quiet radio. */
+static int l_wifimon_read(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+    if (!h || !h->wifi_mon_frames) {
+        lua_createtable(L, 0, 1);
+        lua_pushstring(L, "unavailable");
+        lua_setfield(L, -2, "status");
+        return 1;
+    }
+    int frames = h->wifi_mon_frames(h->ud);
+    lua_createtable(L, 0, 3);
+    lua_pushboolean(L, frames != -1);
+    lua_setfield(L, -2, "up");
+    lua_pushinteger(L, g_wifimon_channel);
+    lua_setfield(L, -2, "channel");
+    lua_pushinteger(L, frames < 0 ? 0 : frames);
+    lua_setfield(L, -2, "frames");
+    return 1;
+}
+
+/* service.wifimon.tx(bytes) -> ok. The raw 802.11 frame is a Lua string, which
+ * is a length and bytes and so carries the NULs an injected frame is full of
+ * without truncating at the first one. */
+static int l_wifimon_tx(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+    size_t len = 0;
+    const char *frame = luaL_checklstring(L, 1, &len);
+    lua_pushboolean(
+        L, (h && h->wifi_tx) ? h->wifi_tx(h->ud, (const uint8_t *)frame, (int)len) : 0);
+    return 1;
+}
+
+static int l_wifiap_start(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+    const char *ssid = luaL_checkstring(L, 1);
+    int ch = (int)luaL_checkinteger(L, 2);
+    lua_pushboolean(L, (h && h->wifi_ap_begin) ? h->wifi_ap_begin(h->ud, ssid, ch) : 0);
+    return 1;
+}
+
+static int l_wifiap_stop(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+    if (h && h->wifi_ap_end) h->wifi_ap_end(h->ud);
+    return 0;
+}
+
+/* service.wifiap.read() -> { up, clients }, or { status="unavailable" } with no
+ * radio. `up` is derived from the client count (-1 means the AP is down). */
+static int l_wifiap_read(lua_State *L)
+{
+    const catnip_hal *h = hal_of(L);
+    if (!h || !h->wifi_ap_clients) {
+        lua_createtable(L, 0, 1);
+        lua_pushstring(L, "unavailable");
+        lua_setfield(L, -2, "status");
+        return 1;
+    }
+    int clients = h->wifi_ap_clients(h->ud);
+    lua_createtable(L, 0, 2);
+    lua_pushboolean(L, clients != -1);
+    lua_setfield(L, -2, "up");
+    lua_pushinteger(L, clients < 0 ? 0 : clients);
+    lua_setfield(L, -2, "clients");
+    return 1;
+}
+
 /* ---- service.usb.* - the composite USB HID surface (#61) ---- */
 
 /* Arm or disarm HID typing. HID is inert until this is called with true, and
@@ -833,6 +942,14 @@ int catnip_api_open(catnip_rt *rt, const catnip_hal *hal)
                                              {"ble_rescan", l_ble_rescan},
                                              {"ntp_last", l_ntp_last},
                                              {"http_get", l_http_get},
+                                             {"wifimon_start", l_wifimon_start},
+                                             {"wifimon_channel", l_wifimon_channel},
+                                             {"wifimon_stop", l_wifimon_stop},
+                                             {"wifimon_read", l_wifimon_read},
+                                             {"wifimon_tx", l_wifimon_tx},
+                                             {"wifiap_start", l_wifiap_start},
+                                             {"wifiap_stop", l_wifiap_stop},
+                                             {"wifiap_read", l_wifiap_read},
                                              {"usb_hid_enable", l_usb_hid_enable},
                                              {"usb_hid_enabled", l_usb_hid_enabled},
                                              {"usb_hid_tap", l_usb_hid_tap},
@@ -858,6 +975,12 @@ int catnip_api_open(catnip_rt *rt, const catnip_hal *hal)
         "service.wifi = { status = service.wifi_status, ssid = service.wifi_ssid,\n"
         "                 scan = service.wifi_scan, rescan = service.wifi_rescan }\n"
         "service.ble = { scan = service.ble_scan, rescan = service.ble_rescan }\n"
+        "service.wifimon = { start = service.wifimon_start,\n"
+        "                    channel = service.wifimon_channel,\n"
+        "                    stop = service.wifimon_stop, read = service.wifimon_read,\n"
+        "                    tx = service.wifimon_tx }\n"
+        "service.wifiap = { start = service.wifiap_start, stop = service.wifiap_stop,\n"
+        "                   read = service.wifiap_read }\n"
         "service.ntp = { last = service.ntp_last }\n"
         "service.http = { get = service.http_get }\n"
         "service.usb = { hid_enable = service.usb_hid_enable,\n"
@@ -871,6 +994,9 @@ int catnip_api_open(catnip_rt *rt, const catnip_hal *hal)
         "service.wifi_status, service.wifi_ssid, service.wifi_scan = nil, nil, nil\n"
         "service.wifi_rescan = nil\n"
         "service.ble_scan, service.ble_rescan = nil, nil\n"
+        "service.wifimon_start, service.wifimon_channel = nil, nil\n"
+        "service.wifimon_stop, service.wifimon_read, service.wifimon_tx = nil, nil, nil\n"
+        "service.wifiap_start, service.wifiap_stop, service.wifiap_read = nil, nil, nil\n"
         "service.ntp_last, service.http_get = nil, nil\n"
         "service.usb_hid_enable, service.usb_hid_enabled = nil, nil\n"
         "service.usb_hid_tap, service.usb_ducky_parse = nil, nil\n"
